@@ -87,3 +87,29 @@ def test_report_includes_minimized_when_available(workspace):
     Triage(workspace).minimize(crash)
     report = ReportGenerator(workspace).create(crash.id)
     assert report.evidence["minimized_sha256"]
+
+
+def test_report_completes_evidence_from_raw_crash(workspace):
+    # A report on a raw (un-reproduced, un-minimized) crash auto-completes its
+    # evidence: minimized artifact present and reproducibility confirmed.
+    crash = _crash(workspace)
+    assert crash.minimized_sha256 is None and crash.reproduced is None
+    gen = ReportGenerator(workspace)
+    report = gen.create(crash.id)
+    assert report.evidence["minimized_sha256"]          # was auto-minimized
+    updated = gen.crashes.get(crash.id)
+    assert updated.reproduced is True                   # was auto-reproduced
+    assert updated.minimized_sha256
+    # Evidence completeness now meets goal 17's >= 0.95 bar (all core fields set).
+    core = ("input_sha256", "minimized_sha256", "crash_signature", "analysis_id")
+    assert all(report.evidence.get(f) for f in core)
+    assert gen.validate(report)["valid"] is True
+
+
+def test_report_create_is_idempotent(workspace):
+    # Generating twice does not change the minimized evidence.
+    crash = _crash(workspace)
+    gen = ReportGenerator(workspace)
+    r1 = gen.create(crash.id)
+    r2 = gen.create(crash.id)
+    assert r1.evidence["minimized_sha256"] == r2.evidence["minimized_sha256"]

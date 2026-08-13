@@ -288,3 +288,40 @@ define `crash_detection_rate` as detection *reliability* (=1.0), so goal 05's
 ### GitHub Tracking (session 3)
 
 - Issues created: 1 (#3) · PRs created: 1 · PRs merged: 1
+
+---
+
+## Session 4 (2026-08-13) — report quality (goal 17)
+
+Starting commit `e51f41f`. Directive: run goals not yet exercised.
+
+### Experiment — is `report create` producing complete evidence?
+
+New environment `ios_research_reporting` runs the real report pipeline
+(craft crash → optionally reproduce/minimize → `ReportGenerator.create` →
+`validate`) and scores evidence completeness and traceability. Control (both
+knobs off) mirrors the current `report create`.
+
+| config | report_quality_score | evidence_completeness |
+|--------|---------------------|-----------------------|
+| control (current `report create`) | 0.900 | **0.800** ✗ (< 0.95 hard constraint) |
+| minimize before report | **1.000** | **1.000** ✓ |
+
+**Finding (constraint violation, not a marginal gain):** the current pipeline
+never reproduces or minimizes the crash, so reports omit the minimized-input
+artifact/hash and score `evidence_completeness = 0.80`, **below goal 17's hard
+`>= 0.95`**. Minimizing first fixes it to 1.00 for ~+1.6 ms.
+
+**Decision: `IMPLEMENT_NOW`** → Issue #5 → PR.
+
+### Promotion
+
+`ReportGenerator.create` now idempotently reproduces and minimizes the crash
+before building the report (mirroring `_ensure_analysis`). After the fix the
+framework default (`report create` on a raw crash) measures
+`evidence_completeness = 1.00`, `report_quality_score = 1.00`, and validates
+clean. 138 tests passing (2 new).
+
+### GitHub Tracking (session 4)
+
+- Issues created: 1 (#5) · PRs created: 1 · PRs merged: 1

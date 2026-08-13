@@ -19,6 +19,7 @@ from .clock import now_iso
 from .crashes import CrashStore, CrashRecord
 from .experiment import ExperimentStore
 from .ids import make_id
+from .triage import Triage
 from .workspace import Workspace
 
 # Text that must never appear in a report (weaponization).
@@ -53,6 +54,7 @@ class ReportGenerator:
         self.crashes = CrashStore(workspace)
         self.analyzer = Analyzer(workspace)
         self.experiments = ExperimentStore(workspace)
+        self.triage = Triage(workspace)
 
     def _rel(self, report_id: str) -> str:
         return f"reports/{report_id}/report.json"
@@ -60,6 +62,11 @@ class ReportGenerator:
     # lifecycle -----------------------------------------------------------
     def create(self, crash_id: str) -> Report:
         crash = self.crashes.get(crash_id)
+        # Complete the evidence before reporting: reproduce and minimize the
+        # crash (idempotently) so the report carries a minimized-input artifact
+        # and a substantiated reproducibility claim.
+        crash = self._ensure_reproduced(crash)
+        crash = self._ensure_minimized(crash)
         analysis = self._ensure_analysis(crash)
         experiment = self._maybe_experiment(crash.experiment_id)
 
@@ -99,6 +106,18 @@ class ReportGenerator:
         return out
 
     # helpers -------------------------------------------------------------
+    def _ensure_reproduced(self, crash: CrashRecord) -> CrashRecord:
+        if crash.reproduced is None:
+            self.triage.reproduce(crash)
+            return self.crashes.get(crash.id)
+        return crash
+
+    def _ensure_minimized(self, crash: CrashRecord) -> CrashRecord:
+        if crash.minimized_sha256 is None:
+            self.triage.minimize(crash)
+            return self.crashes.get(crash.id)
+        return crash
+
     def _ensure_analysis(self, crash: CrashRecord) -> Analysis:
         if crash.analysis_id:
             return self.analyzer.get(crash.analysis_id)
