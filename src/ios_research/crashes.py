@@ -114,6 +114,22 @@ class CrashStore:
             last_seen=now,
         )
         self.save(crash)
-        # Store a copy of the raw input beside the record for convenience.
+        # Store a copy of the raw input beside the record for convenience, plus
+        # the normalized diagnostics under diagnostics/ for triage/analysis.
         self.ws.write_bytes(f"crashes/{crash_id}/original-input.bin", data)
+        self.ws.write_json(f"crashes/{crash_id}/diagnostics/diagnostics.json",
+                           crash.diagnostics)
         return crash
+
+    def minimized_bytes(self, crash: CrashRecord) -> bytes | None:
+        rel = f"crashes/{crash.id}/minimized-input.bin"
+        if not self.ws.path(rel).exists():
+            return None
+        return self.ws.read_bytes(rel)
+
+    def write_minimized(self, crash: CrashRecord, data: bytes) -> str:
+        from .hashing import sha256_bytes
+        self.ws.write_bytes(f"crashes/{crash.id}/minimized-input.bin", data)
+        crash.minimized_sha256 = sha256_bytes(data)
+        self.save(crash)
+        return crash.minimized_sha256
