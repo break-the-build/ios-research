@@ -25,3 +25,6 @@ dist/
 # ios-research local workspace
 .ios-research/
 workspace/
+
+# experiment-loop local knowledge base / scratch
+.experiment-loop/

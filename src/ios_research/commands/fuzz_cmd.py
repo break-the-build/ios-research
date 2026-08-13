@@ -100,7 +100,8 @@ def cmd_start(ctx, args) -> Result:
     engine = FuzzEngine(ws)
     session = engine.create(experiment_id=experiment.id, target=target_id,
                             corpus_id=corpus.id, seed=seed, workers=workers,
-                            max_cases=max_cases, duration_s=args.duration)
+                            max_cases=max_cases, duration_s=args.duration,
+                            strategy_weights=cfg.get("fuzz.strategy_weights"))
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

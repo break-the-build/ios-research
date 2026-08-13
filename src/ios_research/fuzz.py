@@ -46,6 +46,7 @@ class FuzzSession:
     duration_s: float | None
     status: str = RUNNING
     base_shas: list[str] = field(default_factory=list)
+    strategy_weights: dict[str, int] = field(default_factory=dict)
     cursor: int = 0
     outcomes: dict[str, int] = field(default_factory=dict)
     crashes: int = 0
@@ -104,7 +105,8 @@ class FuzzEngine:
     # lifecycle -----------------------------------------------------------
     def create(self, *, experiment_id: str, target: str, corpus_id: str,
                seed: int, workers: int, max_cases: int,
-               duration_s: float | None) -> FuzzSession:
+               duration_s: float | None,
+               strategy_weights: dict[str, int] | None = None) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -118,6 +120,7 @@ class FuzzEngine:
             corpus_id=corpus_id, seed=seed, workers=workers,
             max_cases=max_cases, duration_s=duration_s,
             base_shas=base_shas,
+            strategy_weights=dict(strategy_weights or {}),
             status=RUNNING, started_at=now, updated_at=now,
             outcomes={o: 0 for o in Outcome.ALL},
         )
@@ -153,8 +156,9 @@ class FuzzEngine:
 
             i = session.cursor
             base = bases[i % len(bases)]
-            mutated, strategy = mutation.mutate(base, session.seed, i,
-                                                struct_fn=struct_fn)
+            mutated, strategy = mutation.mutate(
+                base, session.seed, i, struct_fn=struct_fn,
+                weights=session.strategy_weights or None)
             result = target.execute(mutated)
             session.outcomes[result.outcome] = \
                 session.outcomes.get(result.outcome, 0) + 1

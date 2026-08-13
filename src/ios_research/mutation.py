@@ -122,17 +122,38 @@ _DISPATCH = {
 }
 
 
+def weighted_strategies(weights: dict[str, int] | None,
+                        strategies: tuple[str, ...] = STRATEGIES) -> tuple[str, ...]:
+    """Return a strategy pool whose repetition encodes selection weights.
+
+    ``mutate`` draws uniformly from the returned pool, so repeating a strategy
+    ``w`` times gives it selection weight ``w``. Missing weights default to 1.
+    A pool that would be empty (all weights 0) falls back to uniform selection.
+    """
+    if not weights:
+        return strategies
+    pool: list[str] = []
+    for strat in strategies:
+        pool.extend([strat] * max(0, int(weights.get(strat, 1))))
+    return tuple(pool) or strategies
+
+
 def mutate(data: bytes, seed: int, iteration: int,
            strategies: tuple[str, ...] = STRATEGIES,
-           struct_fn=None) -> tuple[bytes, str]:
+           struct_fn=None, weights: dict[str, int] | None = None) -> tuple[bytes, str]:
     """Deterministically mutate ``data`` for ``(seed, iteration)``.
 
     Returns ``(mutated_bytes, strategy_name)``. When the chosen strategy is
     ``structure_aware`` and a target-provided ``struct_fn`` is supplied, the
     format-aware mutator is used instead of the generic mock-record one.
+
+    ``weights`` optionally biases strategy selection (see
+    :func:`weighted_strategies`); ``None`` preserves uniform selection so the
+    default behavior is unchanged.
     """
     rng = rng_for(seed, iteration)
-    strategy = strategies[rng.randrange(len(strategies))]
+    pool = weighted_strategies(weights, strategies)
+    strategy = pool[rng.randrange(len(pool))]
     if strategy == "structure_aware" and struct_fn is not None:
         mutated = struct_fn(data, rng)
         if mutated is not None:

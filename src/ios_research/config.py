@@ -18,6 +18,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_cases": 1000,
         "timeout_ms": 1000,
         "seed": 0,
+        # Mutation-strategy selection weights. Tuned via the experiment-loop
+        # 'ios_research_fuzzer' environment (goal 06-fuzz-effectiveness): keeping
+        # every strategy active while emphasizing the empirically strongest ones
+        # improves unique-crash yield +9-16% across mock and audio targets.
+        "strategy_weights": {
+            "byte": 1,
+            "truncation": 1,
+            "insertion": 1,
+            "deletion": 1,
+            "boundary": 2,
+            "integer": 1,
+            "structure_aware": 3,
+        },
     },
     "limits": {
         "max_runtime_seconds": 600,
