@@ -21,7 +21,7 @@ from .output import Result, render
 # Groups are added phase by phase; later phases extend this list.
 from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
-    corpus_cmd, fuzz_cmd, audio_cmd, crash_cmd, analyze_cmd, diff_cmd, agent_cmd,
+    corpus_cmd, fuzz_cmd, audio_cmd, crash_cmd, analyze_cmd, diff_cmd, agent_cmd, report_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -36,6 +36,7 @@ _REGISTRARS: list[Callable] = [
     crash_cmd.register,
     analyze_cmd.register,
     diff_cmd.register,
+    report_cmd.register,
     agent_cmd.register,
 ]
 

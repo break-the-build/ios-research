@@ -14,7 +14,7 @@ Statuses: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` · `COMPLETE`
 | 05 | exploitability-analysis | COMPLETE | 2026-08-13 | 2026-08-13 | 85 pass | _pending_ | analyze <id> / analyze --batch / analysis show/list; conservative evidence-gated exploitability indicators (CRASH_ONLY..CODE_EXECUTION); memory-safety class; open questions; never fabricates code-exec. |
 | 06 | differential-testing | COMPLETE | 2026-08-13 | 2026-08-13 | 91 pass | _pending_ | mock:parser-v2 (fixes + regression); diff create/run/compare/report; transition classification (NORMAL->CRASH etc.); regression detection; reproducible diff experiments. |
 | 07 | llm-agent | COMPLETE | 2026-08-13 | 2026-08-13 | 97 pass | _pending_ | agent status/inspect/schema/run/experiment/analyze; machine-readable docs/cli-schema.json; AGENTS.md; deterministic bounded pipeline; --json on every command. |
-| 08 | vulnerability-reporting | NOT_STARTED | | | | | report create/show/validate/export |
+| 08 | vulnerability-reporting | COMPLETE | 2026-08-13 | 2026-08-13 | 105 pass | _pending_ | report create/show/validate/export; 18 required sections; evidence traces to artifacts/hashes/experiment; validation catches missing evidence, overclaims, forbidden content; Markdown + JSON; Apple disclosure template. |
 | 09 | research-orchestration | NOT_STARTED | | | | | end-to-end orchestrator |
 | 10 | audit-hardening | NOT_STARTED | | | | | audit + final docs |
 
