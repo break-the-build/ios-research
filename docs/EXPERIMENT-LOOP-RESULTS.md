@@ -159,3 +159,64 @@ already satisfies these properties by construction).
 - **Pull requests created:** #2 — implements #1 (see PR for before/after evidence).
 - **Recommendations deferred:** environments for goals 05/07/08/09 (future-work).
 - **Recommendations rejected:** aggressive `byte/insertion/integer = 0` config (overfit).
+
+---
+
+## Session 2 (2026-08-13) — post-promotion re-evaluation
+
+Starting commit `3dd80e2`. With all seven environments now available, the goal
+portfolio was re-evaluated after the earlier strategy-weights promotion
+(section 46 of the runbook).
+
+### Experiment — can the loop beat the *shipped* default weights?
+
+The fuzzer environment's control was changed from uniform to the **shipped**
+`fuzz.strategy_weights`, with knob headroom raised to 5, so the loop searches for
+a refinement over what ios-research actually ships rather than re-deriving the
+already-promoted change.
+
+- Control (shipped default): **8208** unique_crashes_per_100k_cases.
+- 15 experiments, seed 20260806. Exactly **one** statistically-significant win:
+  **+1.3%** (p=0.0001) — and it disabled `deletion` and `integer`, the same
+  overfit pattern rejected in session 1.
+- Cross-target validation of every refinement candidate vs the shipped default:
+
+  | config | parser | wav | aac | mp3 |
+  |--------|--------|-----|-----|-----|
+  | shipped default | 4.96 | 4.94 | 4.94 | 4.94 |
+  | loop win (del=0,int=0,sa=4) | +1% | +0% | +1% | +0% |
+  | safe bump (sa=4) | +0% | +0% | +0% | +0% |
+  | safe bump (sa=4,bound=3) | −0% | −0% | −0% | −0% |
+
+**Decision: REJECT.** The shipped default sits at the effective ceiling
+(~5 of the ~5–6 reachable unique signatures at a 60-case budget). Every
+refinement is within ±1% (noise) and the only "win" trades robustness for no
+practical gain. Session 1 already captured the real improvement
+(uniform 6917 → shipped 8208, **+19%**).
+
+### Portfolio verdicts
+
+| Goal | Verdict | Rationale |
+|------|---------|-----------|
+| 06 fuzz-effectiveness | REJECT | shipped default at ceiling; refinements ±1% noise |
+| 07 corpus-quality | no new change | corpus is built by fuzzing, already uses the tuned weights |
+| 08 crash-dedup | REJECT (optimal) | default signature f1 = 1.00 |
+| 09 minimizer | REJECT (optimal) | ddmin reduction already optimal |
+| 12 differential | not durable | extra inputs duplicate the few actionable transitions on mock targets |
+| 13 / 14 / 15 efficiency & agent | DEFER | genuine cost↔thoroughness trade-offs; lowering defaults would trade the framework's discovery mission for cost — a product decision, not an unambiguous win |
+
+### Outcome
+
+- Experiments run this session: **15** · Promoted: **0** · Rejected: **1** (weights refinement) · Deferred: 3 (efficiency/agent cost trade-offs)
+- **No durable improvement to promote** — the framework's mock-based components are already at (or extremely near) their behavioral optimum, and the one real lever was promoted in session 1.
+- Kept a tooling improvement: the fuzzer environment's control now starts from
+  the shipped default (headroom to 5), so future sessions immediately test for
+  refinements rather than re-deriving the known result.
+- **Stop condition: diminishing returns / no promising hypotheses.**
+
+### GitHub Tracking (session 2)
+
+- Issues created: 0 · PRs created: 0 · PRs merged: 0
+- No new Issue is warranted: the only positive result is a +1.3% noise-level,
+  robustness-reducing change (explicitly rejected), and the deferred
+  efficiency/agent trade-offs are product decisions rather than measurable defects.

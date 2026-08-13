@@ -17,8 +17,14 @@ from experiment_loop.environments.base import (
 from experiment_loop.models import MAXIMIZE, MINIMIZE, MetricSpec, Observation
 
 from ios_research import targets
+from ios_research.config import DEFAULT_CONFIG
 from ios_research.targets.base import Outcome
 from .common import STRATEGIES, KNOWN_SIGNATURES, base_input, weights_from_config
+
+# Control = the weights ios-research currently ships, so the loop searches for a
+# refinement over the shipped default rather than re-deriving it from uniform.
+# high=5 gives headroom to explore beyond the current emphasis.
+_SHIPPED_WEIGHTS = DEFAULT_CONFIG["fuzz"]["strategy_weights"]
 
 
 @register
@@ -27,7 +33,8 @@ class IosResearchFuzzerEnvironment(BaseEnvironment):
     cost_per_sample = 0.0
 
     knob_list = tuple(
-        Knob(name=f"weight_{s}", kind=KNOB_INT, default=1, low=0, high=3, step=1,
+        Knob(name=f"weight_{s}", kind=KNOB_INT, default=_SHIPPED_WEIGHTS[s],
+             low=0, high=5, step=1,
              description=f"selection weight for the '{s}' mutation strategy")
         for s in STRATEGIES
     ) + (
