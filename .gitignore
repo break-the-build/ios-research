@@ -10,3 +10,18 @@
 *.log
 artifacts/
 tmp/
+
+# Python / venv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# ios-research local workspace
+.ios-research/
+workspace/
