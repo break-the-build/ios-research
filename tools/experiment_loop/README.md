@@ -29,6 +29,7 @@ which registers every environment below.
 | `ios_research_minimizer` | 09 | `start_n`, `min_chunk` | `median_input_reduction` | flat (ddmin already optimal) |
 | `ios_research` | 13 | 7 strategy weights + `max_cases` | `actionable_findings_per_dollar` | cost/quality trade-off |
 | `ios_research_agent` | 14, 15 | `max_cases`, `weight_structure_aware`, `minimize` | `successful_goal_completion_rate` / `quality_per_dollar` | strong (budget↔quality) |
+| `ios_research_reporting` | 17 | `minimize_before_report`, `reproduce_before_report` | `report_quality_score` | revealed reports failed the ≥0.95 evidence bar; fixed |
 
 Notes:
 
