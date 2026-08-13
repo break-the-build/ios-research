@@ -23,3 +23,16 @@ Statuses: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` · `COMPLETE`
 All phases respect the authorized-research boundary declared in
 `src/ios_research/safety.py` and documented in `SECURITY.md`. No exploit
 generation, persistence, surveillance, or sandbox/TCC bypass is implemented.
+
+## Experiment-Loop Optimization (2026-08-13)
+
+Autonomous optimization via the `experiment-loop` engine (see
+[EXPERIMENT-LOOP-RESULTS.md](EXPERIMENT-LOOP-RESULTS.md)).
+
+| Goal | Experiment | Result | Decision | Tracking |
+|------|-----------|--------|----------|----------|
+| 06-fuzz-effectiveness | mutation-strategy weighting | +9–16% unique crashes across mock+audio targets; repro rate 1.00 | IMPLEMENT_NOW | Issue #1 → PR #2 |
+
+Added `tools/experiment_loop/ios_research_env.py` (the `ios_research_fuzzer`
+environment) so the loop optimizes real framework behavior. Baseline `a0eb008`;
+130 tests passing after promotion.

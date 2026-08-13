@@ -61,7 +61,8 @@ class Agent:
         engine = FuzzEngine(self.ws)
         session = engine.create(experiment_id=exp.id, target=target,
                                 corpus_id=corpus.id, seed=seed, workers=1,
-                                max_cases=max_cases, duration_s=None)
+                                max_cases=max_cases, duration_s=None,
+                                strategy_weights=cfg.get("fuzz.strategy_weights"))
         session = engine.advance(session)
 
         triage = Triage(self.ws)

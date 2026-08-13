@@ -211,10 +211,12 @@ class ResearchOrchestrator:
             params={"driver": "research", "run_id": run.id})
         engine = FuzzEngine(self.ws)
         workers = min(1, run.limits["max_workers"])
+        from .config import Config
         session = engine.create(experiment_id=exp.id, target=run.target,
                                 corpus_id=run.refs["corpus_id"], seed=run.seed,
                                 workers=max(workers, 1), max_cases=run.max_cases,
-                                duration_s=None)
+                                duration_s=None,
+                                strategy_weights=Config().get("fuzz.strategy_weights"))
         session = engine.advance(session)
         run.refs["experiment_id"] = exp.id
         run.refs["fuzz_session_id"] = session.id
