@@ -91,7 +91,14 @@ class CorpusStore:
     def add_bytes(self, corpus: Corpus, data: bytes, *, origin: str,
                   parent: str | None = None, mutation: str | None = None,
                   seed: int | None = None, iteration: int | None = None,
-                  dedupe: bool = True) -> Testcase | None:
+                  dedupe: bool = True, persist: bool = True) -> Testcase | None:
+        """Add one testcase.
+
+        The input bytes are always written (content-addressed). With
+        ``persist=False`` the manifest is *not* rewritten — the caller is then
+        responsible for calling :meth:`save` once after a batch of additions,
+        which avoids rewriting the growing manifest on every input in a hot loop.
+        """
         sha = sha256_bytes(data)
         if dedupe and sha in corpus.shas:
             return None
@@ -103,7 +110,8 @@ class CorpusStore:
             created_at=now_iso(),
         )
         corpus.testcases.append(tc.to_dict())
-        self.save(corpus)
+        if persist:
+            self.save(corpus)
         return tc
 
     def read_bytes(self, corpus: Corpus, sha256: str) -> bytes:

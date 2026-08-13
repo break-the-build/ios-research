@@ -220,3 +220,56 @@ practical gain. Session 1 already captured the real improvement
 - No new Issue is warranted: the only positive result is a +1.3% noise-level,
   robustness-reducing change (explicitly rejected), and the deferred
   efficiency/agent trade-offs are product decisions rather than measurable defects.
+
+---
+
+## Session 3 (2026-08-13) — fuzz throughput (goal 05)
+
+Starting commit `bf9cfa1`. Loop directive: run 5 improvement iterations.
+
+### Experiment — hot-loop persistence is the throughput bottleneck
+
+Benchmarking the **real** `FuzzEngine` (not the pure-compute environment)
+revealed fuzzing runs ~23× slower than the raw mutate+execute rate because
+`advance()` writes to disk on every crash:
+
+- the corpus manifest was rewritten on every new crashing input (O(n²) over a run);
+- each duplicate crash re-read and rewrote `crash.json` (hundreds of times);
+- `mutation.mutate(weights=…)` rebuilt the weighted pool every call (from #1).
+
+**Change (behavior-preserving):** memoize `weighted_strategies` and precompute
+the pool once per `advance`; accumulate crashing inputs and save the corpus
+manifest once; record each unique crash once and flush duplicate counts in a
+single write via `CrashStore.bump_count`.
+
+### Result — measured
+
+| metric (real engine, 1,500 cases, mock:parser) | before | after |
+|---|---|---|
+| `executions_per_second` | 3,220 | **28,379 (8.8×)** |
+
+Equivalence (frozen clock): crash records, per-crash **counts**, `crash_ids`,
+outcomes, and corpus contents are all **IDENTICAL** before vs after — a pure
+performance change. Resumability preserved (chunked run == single run). Full
+suite **136 passing** (6 new throughput/equivalence tests).
+
+**Decision: `IMPLEMENT_NOW`** → Issue #3 → PR (branch
+`improve/3-fuzz-throughput-batched-io`).
+
+### Iterations 2–5
+
+Iteration 1 delivered a large, durable win. Iterations 2–5 found no further
+durable, measurable improvement worth promoting: the compute path is now
+memoized; crash-dedup/minimizer/classification defaults are already optimal
+(sessions 1–2); and the remaining agent/efficiency levers are cost↔thoroughness
+trade-offs (deferred as product decisions). **Stop: diminishing returns.**
+
+### Measurement note (future work)
+
+The `ios_research_fuzzer` environment measures *pure-compute* throughput and so
+does not capture the disk-I/O batching win; a real-engine throughput environment
+would measure `executions_per_second` end-to-end. Tracked as future work.
+
+### GitHub Tracking (session 3)
+
+- Issues created: 1 (#3) · PRs created: 1 · PRs merged: 1
