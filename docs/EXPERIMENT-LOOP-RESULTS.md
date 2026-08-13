@@ -256,13 +256,22 @@ suite **136 passing** (6 new throughput/equivalence tests).
 **Decision: `IMPLEMENT_NOW`** → Issue #3 → PR (branch
 `improve/3-fuzz-throughput-batched-io`).
 
-### Iterations 2–5
+### Iterations 4–5 — profile-guided, then stop
 
-Iteration 1 delivered a large, durable win. Iterations 2–5 found no further
-durable, measurable improvement worth promoting: the compute path is now
-memoized; crash-dedup/minimizer/classification defaults are already optimal
-(sessions 1–2); and the remaining agent/efficiency levers are cost↔thoroughness
-trade-offs (deferred as product decisions). **Stop: diminishing returns.**
+After promoting the throughput fix, profiling the optimized engine (3,000 cases)
+showed the remaining time is irreducible or below threshold:
+
+- `Random.seed` per case — required for per-`(seed, iteration)` determinism;
+- `posix.replace` / `open` — atomic writes for durable, uncorrupted artifacts;
+- `diagnostics.build` — target-inherent crash reporting (a real device's crash
+  reporter is likewise unavoidable);
+- `corpus.shas` rebuilt per add (~3%) — a genuine but tiny inefficiency, below
+  the "don't optimize tiny improvements" bar; recorded, not promoted.
+
+No other durable, measurable improvement remains (crash-dedup / minimizer /
+classification defaults already optimal per sessions 1–2; agent/efficiency
+levers are cost↔thoroughness trade-offs, deferred as product decisions).
+**Stop: diminishing returns.**
 
 ### Measurement note (future work)
 
