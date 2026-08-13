@@ -16,7 +16,7 @@ Statuses: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` · `COMPLETE`
 | 07 | llm-agent | COMPLETE | 2026-08-13 | 2026-08-13 | 97 pass | _pending_ | agent status/inspect/schema/run/experiment/analyze; machine-readable docs/cli-schema.json; AGENTS.md; deterministic bounded pipeline; --json on every command. |
 | 08 | vulnerability-reporting | COMPLETE | 2026-08-13 | 2026-08-13 | 105 pass | _pending_ | report create/show/validate/export; 18 required sections; evidence traces to artifacts/hashes/experiment; validation catches missing evidence, overclaims, forbidden content; Markdown + JSON; Apple disclosure template. |
 | 09 | research-orchestration | COMPLETE | 2026-08-13 | 2026-08-13 | 113 pass | _pending_ | research create/run/status/pause/resume/summarize; 12-stage resumable pipeline; resource limits (runtime/workers/storage/testcases); --yes confirmation gate; full summary + next steps. |
-| 10 | audit-hardening | NOT_STARTED | | | | | audit + final docs |
+| 10 | audit-hardening | COMPLETE | 2026-08-13 | 2026-08-13 | 122 pass | _pending_ | Full audit; fixed 3 issues (resume divergence, minimized-artifact evidence, subparser conflict); integration + regression + e2e tests; 88% branch coverage; FINAL_ARCHITECTURE/SECURITY_AUDIT/CLI_REFERENCE/TEST_REPORT. |
 
 ## Safety boundary
 

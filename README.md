@@ -1,35 +1,75 @@
 # ios-research
 
-Planning and specification material for **ios-research**, an authorized iOS security research framework designed for use by human researchers and LLM agents (such as Claude Code).
+A deterministic, CLI-driven framework for **authorized** iOS security research,
+designed for both human researchers and LLM agents (such as Claude Code).
 
-This repository currently contains the **design prompts** and **optimization goal specifications** that define the framework — not an implementation.
+It runs the full research pipeline — corpus management, fuzzing, crash discovery,
+triage, minimization, root-cause and exploitability analysis, differential
+testing, and responsible-disclosure reporting — against controlled **mock
+targets** that run anywhere (no iOS hardware required).
 
-## What's here
+> **Authorized research only.** This framework performs fuzzing, crash analysis,
+> and reporting against mock or explicitly authorized targets. It contains no
+> exploit-generation, persistence, surveillance, or sandbox/TCC-bypass
+> capabilities. See [SECURITY.md](SECURITY.md).
 
-- **`docs/`** — Prompt documents describing the architecture and each module of the framework: CLI runtime, corpus fuzzing, crash triage, exploitability analysis, differential testing, vulnerability reporting, LLM/agent operation, research orchestration, and audit hardening.
-- **`goals/`** — Machine-readable JSON goal specifications (metrics, constraints, safety rules, and budgets) used to drive and evaluate research experiments.
+## Install
 
-## Scope and design
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+ios-research --help
+```
 
-The framework is specified as a single, cohesive CLI (`ios-research <command>`) built around modular research targets, supporting:
+## Quick start
 
-- Reproducible, resumable research experiments
-- Corpus management, fuzzing, and crash detection
-- Crash triage, testcase minimization, and root-cause analysis
-- Differential testing and vulnerability reporting
-- Human-readable and stable JSON output
-- Mock targets for CI, macOS-first development
+```bash
+ios-research init                                   # create a workspace
+ios-research fuzz start --target mock:parser --max-cases 500
+ios-research crash list
+ios-research crash minimize <crash-id>
+ios-research analyze <crash-id>
+ios-research report create <crash-id>
+```
 
-## Safety boundaries
+Or run the whole pipeline end to end:
 
-This project is intended for **authorized security research only**. The design explicitly excludes:
+```bash
+ios-research research create --target mock:parser --max-cases 500
+ios-research research run --yes
+ios-research research summarize
+```
 
-- Covert surveillance
-- Camera/microphone permission bypass
-- Persistence mechanisms
-- Credential theft
+Every command supports `--json` for a stable, machine-readable envelope.
 
-Use it only against systems and targets you are authorized to test.
+## Targets
+
+| Target | Description |
+|--------|-------------|
+| `mock:parser` / `mock:parser-v2` | Deterministic record parser; v2 adds fixes + one regression for differential testing |
+| `audio:{wav,mp3,aac,alac}` | Mock audio-format parsers sharing a defect model |
+
+New authorized research-device targets plug in behind the same interface — see
+[docs/RESEARCH-DEVICE.md](docs/RESEARCH-DEVICE.md).
+
+## For LLM agents
+
+The full CLI is described in a machine-readable schema
+([docs/cli-schema.json](docs/cli-schema.json), or `ios-research agent inspect`).
+See [AGENTS.md](AGENTS.md) for the operating contract and recommended workflow.
+
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) / [FINAL_ARCHITECTURE.md](FINAL_ARCHITECTURE.md)
+- [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) — full command reference
+- [SECURITY.md](SECURITY.md) / [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
+- [TEST_REPORT.md](TEST_REPORT.md) — 122 tests, 88% branch coverage
+- [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/PHASE-STATUS.md](docs/PHASE-STATUS.md)
+
+## Development
+
+The design prompts (`docs/PROMPT-*.md`) and optimization goals (`goals/*.json`)
+describe the framework and how each phase was built.
 
 ## License
 

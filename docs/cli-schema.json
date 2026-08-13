@@ -813,6 +813,238 @@
         "positionals": []
       }
     },
+    "report": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "export": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "validate": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "research": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "name",
+                "flags": [
+                  "--name"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "max_cases",
+                "flags": [
+                  "--max-cases"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "max_runtime",
+                "flags": [
+                  "--max-runtime"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "max_testcases",
+                "flags": [
+                  "--max-testcases"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "pause": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "research_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "resume": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "max_stages",
+                "flags": [
+                  "--max-stages"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "research_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "max_stages",
+                "flags": [
+                  "--max-stages"
+                ],
+                "help": "run only N stages (resumable)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "research_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "status": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "research_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "summarize": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "research_id",
+                "required": false
+              }
+            ]
+          }
+        }
+      }
+    },
     "target": {
       "arguments": {
         "options": [],

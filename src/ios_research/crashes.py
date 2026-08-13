@@ -128,8 +128,9 @@ class CrashStore:
         return self.ws.read_bytes(rel)
 
     def write_minimized(self, crash: CrashRecord, data: bytes) -> str:
-        from .hashing import sha256_bytes
         self.ws.write_bytes(f"crashes/{crash.id}/minimized-input.bin", data)
-        crash.minimized_sha256 = sha256_bytes(data)
+        # Also store content-addressed so report evidence references resolve.
+        artifact = self.artifacts.put(data, kind="minimized-input")
+        crash.minimized_sha256 = artifact.sha256
         self.save(crash)
         return crash.minimized_sha256
