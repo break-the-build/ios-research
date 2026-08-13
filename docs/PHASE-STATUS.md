@@ -7,7 +7,7 @@ Statuses: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` · `COMPLETE`
 | Phase | Prompt | Status | Started | Completed | Tests | Commit | Notes |
 |-------|--------|--------|---------|-----------|-------|--------|-------|
 | 00 | architecture | COMPLETE | 2026-08-13 | 2026-08-13 | 20 pass | _pending_ | Foundation: errors/exit-codes, hashing, ids, clock, output envelope, structured logging w/ redaction, safety boundary, workspace, config, target interface + mock parser, device/experiment models, CLI framework, docs. |
-| 01 | cli-runtime | NOT_STARTED | | | | | init/doctor/config/device/target/experiment |
+| 01 | cli-runtime | COMPLETE | 2026-08-13 | 2026-08-13 | 32 pass | _pending_ | init/config/device/target/experiment commands; artifact store; global flags; mock devices/targets. |
 | 02 | corpus-fuzzing | NOT_STARTED | | | | | corpus + fuzz engine + mutations |
 | 03 | audio-module | NOT_STARTED | | | | | audio format targets (mock) |
 | 04 | crash-triage | NOT_STARTED | | | | | classify/minimize/reproduce/compare |

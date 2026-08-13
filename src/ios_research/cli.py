@@ -19,10 +19,16 @@ from .output import Result, render
 
 # Command group registrars. Each is ``register(subparsers, parent)``.
 # Groups are added phase by phase; later phases extend this list.
-from .commands import core
+from .commands import (
+    core, config_cmd, device_cmd, target_cmd, experiment_cmd,
+)
 
 _REGISTRARS: list[Callable] = [
     core.register,
+    config_cmd.register,
+    device_cmd.register,
+    target_cmd.register,
+    experiment_cmd.register,
 ]
 
 
