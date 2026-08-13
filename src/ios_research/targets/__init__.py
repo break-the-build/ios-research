@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .base import ExecResult, Outcome, Target, Diagnostics
-from .mock import MockParserTarget
+from .mock import MockParserTarget, MockParserV2Target
 
 # registry maps a target id (e.g. "mock:parser") to a factory callable.
 _REGISTRY: dict[str, Callable[[], Target]] = {}
@@ -47,6 +47,7 @@ def is_registered(target_id: str) -> bool:
 
 # --- built-in mock targets -------------------------------------------------
 register("mock:parser", lambda: MockParserTarget())
+register("mock:parser-v2", lambda: MockParserV2Target())
 
 from .audio import AUDIO_TARGETS  # noqa: E402
 for _tid, _cls in AUDIO_TARGETS.items():

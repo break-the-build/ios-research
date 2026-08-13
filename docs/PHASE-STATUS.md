@@ -12,7 +12,7 @@ Statuses: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` · `COMPLETE`
 | 03 | audio-module | COMPLETE | 2026-08-13 | 2026-08-13 | 71 pass | _pending_ | WAV/MP3/AAC/ALAC mock targets w/ shared defect model; format-aware structure mutation; target audio list/inspect; fuzz --target audio:<fmt>; RESEARCH-DEVICE.md. |
 | 04 | crash-triage | COMPLETE | 2026-08-13 | 2026-08-13 | 79 pass | _pending_ | crash list/show/reproduce/minimize/classify/compare; ddmin delta-debugging preserving signature; regression corpus; diagnostics persisted per crash. |
 | 05 | exploitability-analysis | COMPLETE | 2026-08-13 | 2026-08-13 | 85 pass | _pending_ | analyze <id> / analyze --batch / analysis show/list; conservative evidence-gated exploitability indicators (CRASH_ONLY..CODE_EXECUTION); memory-safety class; open questions; never fabricates code-exec. |
-| 06 | differential-testing | NOT_STARTED | | | | | diff create/run/compare/report |
+| 06 | differential-testing | COMPLETE | 2026-08-13 | 2026-08-13 | 91 pass | _pending_ | mock:parser-v2 (fixes + regression); diff create/run/compare/report; transition classification (NORMAL->CRASH etc.); regression detection; reproducible diff experiments. |
 | 07 | llm-agent | NOT_STARTED | | | | | agent commands + cli-schema.json |
 | 08 | vulnerability-reporting | NOT_STARTED | | | | | report create/show/validate/export |
 | 09 | research-orchestration | NOT_STARTED | | | | | end-to-end orchestrator |

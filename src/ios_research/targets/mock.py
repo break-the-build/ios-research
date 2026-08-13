@@ -107,3 +107,39 @@ class MockParserTarget(Target):
 
         return ExecResult(outcome=Outcome.ACCEPTED,
                           detail="record parsed", duration_ms=1)
+
+
+class MockParserV2Target(MockParserTarget):
+    """A second 'version' of the mock parser for differential testing.
+
+    Relative to v1 it *fixes* two defects (null-dispatch on record type 0xFF and
+    the reserved-type assertion) and *introduces* one regression (a new
+    out-of-bounds write when ``version == 2``). This produces both fixes and
+    regressions when diffed against v1 over the same corpus.
+    """
+
+    target_id = "mock:parser-v2"
+    description = "Deterministic mock parser, version 2 (CI-safe)"
+
+    def _run(self, data: bytes) -> ExecResult:
+        if len(data) < 8 or data[:4] != MAGIC:
+            return ExecResult(outcome=Outcome.REJECTED,
+                              detail="bad magic or short header", duration_ms=1)
+        version = data[4]
+        rtype = data[5]
+        payload = data[8:]
+
+        # Regression introduced in v2: version 2 with payload -> OOB write.
+        if version == 2 and payload:
+            return self._crash(
+                data, "OUT_OF_BOUNDS_WRITE",
+                ["parse_record", "write_field", "store_bytes"],
+                "v2 regression: unchecked write for version 2 records")
+
+        # Fixed in v2: record type 0xFF and reserved type 0x7E are now handled.
+        if rtype in (0xFF, 0x7E):
+            return ExecResult(outcome=Outcome.ACCEPTED,
+                              detail="record parsed (v2 handles reserved types)",
+                              duration_ms=1)
+
+        return super()._run(data)
