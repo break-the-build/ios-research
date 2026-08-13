@@ -22,6 +22,7 @@ SUBDIRS = (
     "devices",
     "targets",
     "corpus",
+    "fuzz",
     "crashes",
     "artifacts",
     "reports",

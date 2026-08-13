@@ -8,7 +8,7 @@ Statuses: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` · `COMPLETE`
 |-------|--------|--------|---------|-----------|-------|--------|-------|
 | 00 | architecture | COMPLETE | 2026-08-13 | 2026-08-13 | 20 pass | _pending_ | Foundation: errors/exit-codes, hashing, ids, clock, output envelope, structured logging w/ redaction, safety boundary, workspace, config, target interface + mock parser, device/experiment models, CLI framework, docs. |
 | 01 | cli-runtime | COMPLETE | 2026-08-13 | 2026-08-13 | 32 pass | _pending_ | init/config/device/target/experiment commands; artifact store; global flags; mock devices/targets. |
-| 02 | corpus-fuzzing | NOT_STARTED | | | | | corpus + fuzz engine + mutations |
+| 02 | corpus-fuzzing | COMPLETE | 2026-08-13 | 2026-08-13 | 48 pass | _pending_ | 7 deterministic mutation strategies; corpus create/import/list/inspect/dedupe/minimize; crash store w/ signature dedup; resumable, reproducible fuzz engine (start/stop/pause/resume/status/stats). |
 | 03 | audio-module | NOT_STARTED | | | | | audio format targets (mock) |
 | 04 | crash-triage | NOT_STARTED | | | | | classify/minimize/reproduce/compare |
 | 05 | exploitability-analysis | NOT_STARTED | | | | | root-cause + exploitability indicators |
