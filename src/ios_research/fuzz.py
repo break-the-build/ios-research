@@ -139,6 +139,7 @@ class FuzzEngine:
         bases = self._bases(session, corpus)
         target = targets.create(session.target)
         fmt = target.formats[0] if target.formats else target.kind
+        struct_fn = target.structure_mutate
         unique = set(session.crash_ids)
         executed_this = 0
 
@@ -152,7 +153,8 @@ class FuzzEngine:
 
             i = session.cursor
             base = bases[i % len(bases)]
-            mutated, strategy = mutation.mutate(base, session.seed, i)
+            mutated, strategy = mutation.mutate(base, session.seed, i,
+                                                struct_fn=struct_fn)
             result = target.execute(mutated)
             session.outcomes[result.outcome] = \
                 session.outcomes.get(result.outcome, 0) + 1

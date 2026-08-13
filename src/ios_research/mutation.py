@@ -123,11 +123,18 @@ _DISPATCH = {
 
 
 def mutate(data: bytes, seed: int, iteration: int,
-           strategies: tuple[str, ...] = STRATEGIES) -> tuple[bytes, str]:
+           strategies: tuple[str, ...] = STRATEGIES,
+           struct_fn=None) -> tuple[bytes, str]:
     """Deterministically mutate ``data`` for ``(seed, iteration)``.
 
-    Returns ``(mutated_bytes, strategy_name)``.
+    Returns ``(mutated_bytes, strategy_name)``. When the chosen strategy is
+    ``structure_aware`` and a target-provided ``struct_fn`` is supplied, the
+    format-aware mutator is used instead of the generic mock-record one.
     """
     rng = rng_for(seed, iteration)
     strategy = strategies[rng.randrange(len(strategies))]
+    if strategy == "structure_aware" and struct_fn is not None:
+        mutated = struct_fn(data, rng)
+        if mutated is not None:
+            return mutated, strategy
     return _DISPATCH[strategy](data, rng), strategy

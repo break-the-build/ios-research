@@ -33,6 +33,13 @@ class MockParserTarget(Target):
     formats = ("mock-record",)
     mock = True
 
+    def seeds(self) -> list[bytes]:
+        return [MAGIC + bytes([1, 1]) + (2).to_bytes(2, "big") + b"ok"]
+
+    def structure_mutate(self, data: bytes, rng):
+        from . import _structure  # lazy import to avoid cycle
+        return _structure.mock_record(data, rng)
+
     def _crash(self, data: bytes, classification: str,
                symbols: list[str], detail: str) -> ExecResult:
         diag = diagnostics.build(data, classification, _MODULE, symbols)

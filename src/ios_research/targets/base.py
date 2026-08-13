@@ -80,6 +80,15 @@ class Target:
             "mock": self.mock,
         }
 
+    # optional format hooks ----------------------------------------------
+    def seeds(self) -> list[bytes]:
+        """Return valid base inputs used to seed a default corpus."""
+        return []
+
+    def structure_mutate(self, data: bytes, rng) -> "bytes | None":
+        """Format-aware mutation. Return None to fall back to generic mutation."""
+        return None
+
     # lifecycle -----------------------------------------------------------
     def prepare(self) -> None:  # pragma: no cover - trivial default
         pass

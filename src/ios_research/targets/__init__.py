@@ -48,6 +48,10 @@ def is_registered(target_id: str) -> bool:
 # --- built-in mock targets -------------------------------------------------
 register("mock:parser", lambda: MockParserTarget())
 
+from .audio import AUDIO_TARGETS  # noqa: E402
+for _tid, _cls in AUDIO_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
 __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",

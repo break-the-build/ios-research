@@ -77,11 +77,14 @@ def cmd_start(ctx, args) -> Result:
     if args.corpus:
         corpus = corpus_store.get(args.corpus)
     else:
-        existing = [c for c in corpus_store.list() if c.name == "default"]
-        corpus = existing[0] if existing else corpus_store.create("default",
-                                                                  target=target_id)
+        corpus_name = f"default-{target_id}"
+        existing = [c for c in corpus_store.list() if c.name == corpus_name]
+        corpus = existing[0] if existing else corpus_store.create(
+            corpus_name, target=target_id)
         if not corpus.testcases:
-            corpus_store.add_bytes(corpus, DEFAULT_BASE, origin="seed")
+            seeds = targets.create(target_id).seeds() or [DEFAULT_BASE]
+            for seed_bytes in seeds:
+                corpus_store.add_bytes(corpus, seed_bytes, origin="seed")
 
     # Resolve or create experiment.
     exp_store = ExperimentStore(ws)

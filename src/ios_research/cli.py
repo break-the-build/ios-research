@@ -21,13 +21,14 @@ from .output import Result, render
 # Groups are added phase by phase; later phases extend this list.
 from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
-    corpus_cmd, fuzz_cmd,
+    corpus_cmd, fuzz_cmd, audio_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
     core.register,
     config_cmd.register,
     device_cmd.register,
+    audio_cmd.register,   # must precede target_cmd (installs 'target audio')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,

@@ -14,8 +14,13 @@ _EXTRA_SUBCOMMANDS = []
 
 
 def add_subcommand(installer) -> None:
-    """Register an installer ``installer(sub, parent)`` for a target subcommand."""
-    _EXTRA_SUBCOMMANDS.append(installer)
+    """Register an installer ``installer(sub, parent)`` for a target subcommand.
+
+    Idempotent: the same installer is only registered once even if the CLI
+    parser is rebuilt (e.g. across tests).
+    """
+    if installer not in _EXTRA_SUBCOMMANDS:
+        _EXTRA_SUBCOMMANDS.append(installer)
 
 
 def register(subparsers, parent) -> None:
