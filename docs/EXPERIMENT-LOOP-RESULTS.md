@@ -119,19 +119,33 @@ current target, with no strategy disabled and no reproducibility loss.
 3. Keeping every strategy active (weight ≥ 1) preserves coverage while still
    capturing most of the effectiveness gain — a safer default than pruning.
 
-## Remaining opportunities / recommended next experiments
+## Environments implemented
 
-The other goals are valuable but need their environments implemented first
-(each is a `run(config, samples, seed)` binding like the fuzzer one):
+Five `run(config, samples, seed)` environments now bind ios-research to the
+loop (`tools/experiment_loop/ios_env/`, loaded via
+`tools/experiment_loop/ios_research_env.py`). Each exposes its goal's metrics:
 
-- `ios_research_minimizer` (09) — tune ddmin chunking for smaller minimized
-  inputs at equal signature preservation.
-- `ios_research_fuzzer` throughput (05) — `executions_per_second` is already
-  measured; optimize batch/inner-loop overhead.
-- `ios_research_corpus` (07) — corpus-distillation policy.
-- `ios_research_crash_analysis` (08) — dedup sensitivity.
+| Environment | Goals | Primary metric | Finding |
+|-------------|-------|----------------|---------|
+| `ios_research_fuzzer` | 05, 06 | `unique_crashes_per_100k_cases`, `executions_per_second` | effectiveness +9–16% (promoted); throughput already near-optimal |
+| `ios_research_corpus` | 07 | `coverage_per_input` | ~+7% behaviors/case from strategy weighting |
+| `ios_research_crash_analysis` | 08, 11 | `deduplication_f1` | configurable signature: f1 0.63 (1 frame) → 1.00 (≥2 frames); **default already optimal** |
+| `ios_research_differential` | 12 | `actionable_differences_per_1000_cases` | up to +200–350% actionable diffs from corpus weighting |
+| `ios_research_minimizer` | 09 | `median_input_reduction` | **flat** — ddmin already reduces optimally; reproduction 1.00 |
 
-These are tracked as future work (see GitHub Issues).
+Useful negative results: crash-dedup and minimization defaults are already at
+their optimum, so the loop correctly reports no headroom on the primary metric.
+
+## Remaining opportunities (not implemented)
+
+Goals whose properties are exact-by-construction or lack a runtime knob search —
+`ios_research_test_suite` (01/02), `ios_research_cli` (03/04),
+`ios_research_reproduction` (10), `ios_research_reporting` (17),
+`ios_research_security` (19), `ios_research_documentation` (20), and the
+reliability/reproducibility `ios_research` variants (16/18) — are intentionally
+omitted; there is no honest knob→metric gradient to optimize. `ios_research`
+research-efficiency (13) and `ios_research_agent` (14/15) have real cost/quality
+gradients and are good candidates for a future session.
 
 ## GitHub Tracking
 
