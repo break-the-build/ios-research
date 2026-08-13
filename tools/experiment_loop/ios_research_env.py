@@ -10,6 +10,7 @@ ios-research environment:
 Registered environments (bound to real ios-research code):
 
     ios_research_fuzzer         goals 05 (throughput), 06 (effectiveness)
+    ios_research_fuzzer_engine  goal  05 (throughput, real engine incl. disk I/O)
     ios_research_minimizer      goal  09 (testcase-minimization)
     ios_research_corpus         goal  07 (corpus-quality)
     ios_research_crash_analysis goals 08 (deduplication), 11 (root-cause)

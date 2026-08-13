@@ -95,7 +95,9 @@ class IosResearchFuzzerEnvironment(BaseEnvironment):
                 min(100.0, unique / KNOWN_SIGNATURES * 100.0))
             vals["executions_per_second"].append(budget / wall)
             vals["unique_inputs_per_second"].append(len(inputs) / wall)
-            vals["crash_detection_rate"].append(crashes / budget)
+            # Detection *reliability* (every crash detected/reproduces), not crash
+            # frequency — matches goal 05's crash_detection_rate >= 0.99 guardrail.
+            vals["crash_detection_rate"].append(repro_rate)
             vals["cpu_percent"].append(min(100.0, cpu / wall * 100.0))
             vals["memory_mb"].append(peak / (1024 * 1024))
 

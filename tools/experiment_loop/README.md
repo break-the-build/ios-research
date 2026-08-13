@@ -21,7 +21,8 @@ which registers every environment below.
 
 | Environment | Goals | Knobs | Primary metric | Gradient |
 |-------------|-------|-------|----------------|----------|
-| `ios_research_fuzzer` | 05, 06 | 7 strategy weights + `case_budget` | `unique_crashes_per_100k_cases` / `executions_per_second` | strong (effectiveness) |
+| `ios_research_fuzzer` | 05, 06 | 7 strategy weights + `case_budget` | `unique_crashes_per_100k_cases` / `executions_per_second` | strong (effectiveness); pure-compute throughput |
+| `ios_research_fuzzer_engine` | 05 (`05-fuzz-throughput-engine.json`) | 7 strategy weights + `max_cases` | `executions_per_second` | **real-engine** throughput incl. persistence I/O |
 | `ios_research_corpus` | 07 | 7 strategy weights | `coverage_per_input` | moderate |
 | `ios_research_crash_analysis` | 08, 11 | `sig_frames`, `use_exception`, `use_access` | `deduplication_f1` | strong (0.63 → 1.00) |
 | `ios_research_differential` | 12 | 7 strategy weights + `corpus_size` | `actionable_differences_per_1000_cases` | strong |
@@ -35,7 +36,11 @@ Notes:
   capability, fully within the authorized-research safety boundary.
 - Measurements mirror the real `FuzzEngine` inner step
   (`mutation.mutate` → `target.execute`), so improvements the loop finds map
-  directly onto framework configuration (e.g. `fuzz.strategy_weights`).
+  directly onto framework configuration (e.g. `fuzz.strategy_weights`). The
+  `ios_research_fuzzer_engine` variant instead runs the **whole** engine
+  (`FuzzEngine.advance` against a throwaway workspace), so its
+  `executions_per_second` includes artifact/corpus/crash persistence — the disk
+  I/O that dominates real fuzzing throughput.
 - `ios_research_crash_analysis` and `ios_research_minimizer` show that the
   current defaults are already at (or near) the optimum for their primary
   metric — the loop correctly reports little/no headroom, which is a useful

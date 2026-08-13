@@ -273,11 +273,17 @@ classification defaults already optimal per sessions 1–2; agent/efficiency
 levers are cost↔thoroughness trade-offs, deferred as product decisions).
 **Stop: diminishing returns.**
 
-### Measurement note (future work)
+### Measurement note (resolved)
 
-The `ios_research_fuzzer` environment measures *pure-compute* throughput and so
-does not capture the disk-I/O batching win; a real-engine throughput environment
-would measure `executions_per_second` end-to-end. Tracked as future work.
+The `ios_research_fuzzer` environment measures *pure-compute* throughput. A
+real-engine throughput environment, `ios_research_fuzzer_engine`, was added
+(goal `05-fuzz-throughput-engine.json`): it runs the whole `FuzzEngine.advance`
+so `executions_per_second` includes artifact/corpus/crash persistence — the disk
+I/O that dominates real fuzzing throughput. It confirms the session-3 batching
+win (crash-heavy weightings no longer collapse throughput) and finds larger run
+budgets amortize per-run overhead. Also fixed: both fuzzer environments now
+define `crash_detection_rate` as detection *reliability* (=1.0), so goal 05's
+`>= 0.99` guardrail is satisfied rather than disqualifying every configuration.
 
 ### GitHub Tracking (session 3)
 

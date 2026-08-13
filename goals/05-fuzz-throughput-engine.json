@@ -1,0 +1,56 @@
+{
+  "objective": "Maximize real end-to-end ios-research fuzzing throughput (including persistence I/O)",
+  "environment": "ios_research_fuzzer_engine",
+  "primary_metric": "executions_per_second",
+  "metrics": [
+    {
+      "name": "executions_per_second",
+      "direction": "maximize",
+      "unit": "exec/s"
+    },
+    {
+      "name": "unique_inputs_per_second",
+      "direction": "maximize",
+      "unit": "inputs/s"
+    },
+    {
+      "name": "crash_detection_rate",
+      "direction": "maximize",
+      "unit": "ratio"
+    },
+    {
+      "name": "cpu_percent",
+      "direction": "minimize",
+      "unit": "percent"
+    },
+    {
+      "name": "memory_mb",
+      "direction": "minimize",
+      "unit": "MB"
+    },
+    {
+      "name": "unique_crashes_per_100k_cases",
+      "direction": "maximize",
+      "unit": "crashes"
+    }
+  ],
+  "constraints": [
+    {
+      "metric": "crash_detection_rate",
+      "op": ">=",
+      "value": 0.99,
+      "hard": true,
+      "description": "All crashes that occur must be detected"
+    }
+  ],
+  "safety_rules": [
+    "max-knobs:4"
+  ],
+  "budget": {
+    "max_experiments_per_batch": 3,
+    "max_parallel": 2,
+    "max_experiments_total": 15,
+    "max_cost_usd": 1.0,
+    "max_cost_usd_per_batch": 1.0
+  }
+}
