@@ -1,0 +1,41 @@
+{
+  "objective": "Improve the security of ios-research itself while preserving research functionality",
+  "environment": "ios_research_security",
+  "primary_metric": "security_test_pass_rate",
+  "metrics": [
+    {"name": "security_test_pass_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "secret_leak_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "unsafe_operation_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "artifact_permission_error_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "framework_functionality_rate", "direction": "maximize", "unit": "ratio"}
+  ],
+  "constraints": [
+    {
+      "metric": "secret_leak_rate",
+      "op": "<=",
+      "value": 0.0,
+      "hard": true,
+      "description": "Secrets must never appear in framework output or artifacts"
+    },
+    {
+      "metric": "unsafe_operation_rate",
+      "op": "<=",
+      "value": 0.0,
+      "hard": true,
+      "description": "Unsafe operations must be prevented"
+    }
+  ],
+  "safety_rules": [
+    "no-destructive-device-operations",
+    "no-camera-microphone-bypass",
+    "no-credential-access",
+    "no-persistence"
+  ],
+  "budget": {
+    "max_experiments_per_batch": 5,
+    "max_parallel": 3,
+    "max_experiments_total": 60,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 20.0
+  }
+}

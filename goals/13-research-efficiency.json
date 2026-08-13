@@ -1,0 +1,28 @@
+{
+  "objective": "Maximize useful security findings per unit of compute, time, and experimentation budget",
+  "environment": "ios_research",
+  "primary_metric": "actionable_findings_per_dollar",
+  "metrics": [
+    {"name": "actionable_findings_per_dollar", "direction": "maximize", "unit": "findings/usd"},
+    {"name": "actionable_findings_per_hour", "direction": "maximize", "unit": "findings/hour"},
+    {"name": "unique_crashes_per_100k_cases", "direction": "maximize", "unit": "crashes"},
+    {"name": "cost_per_unique_crash", "direction": "minimize", "unit": "usd"}
+  ],
+  "constraints": [
+    {
+      "metric": "reproducible_crash_rate",
+      "op": ">=",
+      "value": 0.95,
+      "hard": true,
+      "description": "Findings must be reproducible"
+    }
+  ],
+  "safety_rules": ["max-knobs:4"],
+  "budget": {
+    "max_experiments_per_batch": 8,
+    "max_parallel": 8,
+    "max_experiments_total": 150,
+    "max_cost_usd": 500.0,
+    "max_cost_usd_per_batch": 60.0
+  }
+}

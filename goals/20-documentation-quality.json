@@ -1,0 +1,35 @@
+{
+  "objective": "Improve the completeness and correctness of ios-research documentation",
+  "environment": "ios_research_documentation",
+  "primary_metric": "documentation_completeness",
+  "metrics": [
+    {"name": "documentation_completeness", "direction": "maximize", "unit": "ratio"},
+    {"name": "cli_documentation_coverage", "direction": "maximize", "unit": "ratio"},
+    {"name": "broken_reference_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "documentation_accuracy", "direction": "maximize", "unit": "ratio"}
+  ],
+  "constraints": [
+    {
+      "metric": "broken_reference_rate",
+      "op": "<=",
+      "value": 0.01,
+      "hard": true,
+      "description": "Documentation references must remain valid"
+    },
+    {
+      "metric": "documentation_accuracy",
+      "op": ">=",
+      "value": 0.95,
+      "hard": true,
+      "description": "Documentation must accurately describe implemented behavior"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 5,
+    "max_parallel": 3,
+    "max_experiments_total": 50,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 20.0
+  }
+}

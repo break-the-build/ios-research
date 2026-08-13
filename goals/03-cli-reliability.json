@@ -1,0 +1,28 @@
+{
+  "objective": "Maximize successful deterministic execution of ios-research CLI commands",
+  "environment": "ios_research_cli",
+  "primary_metric": "command_success_rate",
+  "metrics": [
+    {"name": "command_success_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "cli_error_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "json_output_valid_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "nondeterministic_output_rate", "direction": "minimize", "unit": "ratio"}
+  ],
+  "constraints": [
+    {
+      "metric": "json_output_valid_rate",
+      "op": ">=",
+      "value": 0.999,
+      "hard": true,
+      "description": "Machine-readable CLI output must remain valid"
+    }
+  ],
+  "safety_rules": ["no-destructive-device-operations"],
+  "budget": {
+    "max_experiments_per_batch": 8,
+    "max_parallel": 4,
+    "max_experiments_total": 100,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 20.0
+  }
+}

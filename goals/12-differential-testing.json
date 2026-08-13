@@ -1,0 +1,28 @@
+{
+  "objective": "Increase useful differential findings across ios-research target versions and configurations",
+  "environment": "ios_research_differential",
+  "primary_metric": "actionable_differences_per_1000_cases",
+  "metrics": [
+    {"name": "actionable_differences_per_1000_cases", "direction": "maximize", "unit": "differences"},
+    {"name": "false_positive_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "coverage_difference", "direction": "maximize", "unit": "coverage"},
+    {"name": "execution_time_seconds", "direction": "minimize", "unit": "seconds"}
+  ],
+  "constraints": [
+    {
+      "metric": "false_positive_rate",
+      "op": "<=",
+      "value": 0.05,
+      "hard": true,
+      "description": "Differences must be meaningfully distinguishable from noise"
+    }
+  ],
+  "safety_rules": ["max-knobs:4"],
+  "budget": {
+    "max_experiments_per_batch": 8,
+    "max_parallel": 6,
+    "max_experiments_total": 100,
+    "max_cost_usd": 200.0,
+    "max_cost_usd_per_batch": 35.0
+  }
+}

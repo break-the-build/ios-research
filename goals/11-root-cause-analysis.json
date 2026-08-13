@@ -1,0 +1,28 @@
+{
+  "objective": "Improve automated root-cause classification of reproducible ios-research crashes",
+  "environment": "ios_research_crash_analysis",
+  "primary_metric": "classification_accuracy",
+  "metrics": [
+    {"name": "classification_accuracy", "direction": "maximize", "unit": "ratio"},
+    {"name": "classification_f1", "direction": "maximize", "unit": "ratio"},
+    {"name": "false_positive_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "analysis_time_seconds", "direction": "minimize", "unit": "seconds"}
+  ],
+  "constraints": [
+    {
+      "metric": "false_positive_rate",
+      "op": "<=",
+      "value": 0.05,
+      "hard": true,
+      "description": "Analysis must not overstate vulnerability severity"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 6,
+    "max_parallel": 4,
+    "max_experiments_total": 60,
+    "max_cost_usd": 150.0,
+    "max_cost_usd_per_batch": 25.0
+  }
+}

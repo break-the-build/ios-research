@@ -1,0 +1,32 @@
+{
+  "objective": "Improve the effectiveness of LLM agents operating ios-research through the CLI",
+  "environment": "ios_research_agent",
+  "primary_metric": "successful_goal_completion_rate",
+  "metrics": [
+    {"name": "successful_goal_completion_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "tests_passed_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "agent_rework_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "human_intervention_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "task_completion_time_seconds", "direction": "minimize", "unit": "seconds"}
+  ],
+  "constraints": [
+    {
+      "metric": "tests_passed_rate",
+      "op": ">=",
+      "value": 0.99,
+      "hard": true,
+      "description": "Agent changes must pass required verification"
+    }
+  ],
+  "safety_rules": [
+    "max-knobs:3",
+    "no-destructive-device-operations"
+  ],
+  "budget": {
+    "max_experiments_per_batch": 5,
+    "max_parallel": 3,
+    "max_experiments_total": 60,
+    "max_cost_usd": 300.0,
+    "max_cost_usd_per_batch": 40.0
+  }
+}

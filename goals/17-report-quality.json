@@ -1,0 +1,36 @@
+{
+  "objective": "Improve the completeness, accuracy, and evidence traceability of ios-research vulnerability reports",
+  "environment": "ios_research_reporting",
+  "primary_metric": "report_quality_score",
+  "metrics": [
+    {"name": "report_quality_score", "direction": "maximize", "unit": "score"},
+    {"name": "evidence_completeness", "direction": "maximize", "unit": "ratio"},
+    {"name": "claim_traceability", "direction": "maximize", "unit": "ratio"},
+    {"name": "unsupported_claim_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "report_generation_time_seconds", "direction": "minimize", "unit": "seconds"}
+  ],
+  "constraints": [
+    {
+      "metric": "unsupported_claim_rate",
+      "op": "<=",
+      "value": 0.01,
+      "hard": true,
+      "description": "Reports must not make unsupported security claims"
+    },
+    {
+      "metric": "evidence_completeness",
+      "op": ">=",
+      "value": 0.95,
+      "hard": true,
+      "description": "Reports must contain sufficient supporting evidence"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 5,
+    "max_parallel": 3,
+    "max_experiments_total": 50,
+    "max_cost_usd": 150.0,
+    "max_cost_usd_per_batch": 25.0
+  }
+}

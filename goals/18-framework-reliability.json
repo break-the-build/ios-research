@@ -1,0 +1,36 @@
+{
+  "objective": "Maximize end-to-end reliability of the ios-research framework",
+  "environment": "ios_research",
+  "primary_metric": "end_to_end_success_rate",
+  "metrics": [
+    {"name": "end_to_end_success_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "crash_recovery_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "resume_success_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "data_loss_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "unhandled_exception_rate", "direction": "minimize", "unit": "ratio"}
+  ],
+  "constraints": [
+    {
+      "metric": "data_loss_rate",
+      "op": "<=",
+      "value": 0.001,
+      "hard": true,
+      "description": "Research artifacts must not be silently lost"
+    },
+    {
+      "metric": "resume_success_rate",
+      "op": ">=",
+      "value": 0.99,
+      "hard": true,
+      "description": "Interrupted research should resume correctly"
+    }
+  ],
+  "safety_rules": ["no-destructive-device-operations"],
+  "budget": {
+    "max_experiments_per_batch": 6,
+    "max_parallel": 4,
+    "max_experiments_total": 80,
+    "max_cost_usd": 150.0,
+    "max_cost_usd_per_batch": 25.0
+  }
+}

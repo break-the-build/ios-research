@@ -1,0 +1,28 @@
+{
+  "objective": "Maximize deterministic reproduction of discovered ios-research crashes",
+  "environment": "ios_research_reproduction",
+  "primary_metric": "reproduction_rate",
+  "metrics": [
+    {"name": "reproduction_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "cross_run_consistency", "direction": "maximize", "unit": "ratio"},
+    {"name": "reproduction_time_seconds", "direction": "minimize", "unit": "seconds"},
+    {"name": "environment_sensitivity", "direction": "minimize", "unit": "ratio"}
+  ],
+  "constraints": [
+    {
+      "metric": "reproduction_rate",
+      "op": ">=",
+      "value": 0.99,
+      "hard": true,
+      "description": "A crash must reliably reproduce"
+    }
+  ],
+  "safety_rules": ["no-destructive-device-operations"],
+  "budget": {
+    "max_experiments_per_batch": 5,
+    "max_parallel": 3,
+    "max_experiments_total": 50,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 20.0
+  }
+}

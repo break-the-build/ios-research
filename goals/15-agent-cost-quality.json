@@ -1,0 +1,29 @@
+{
+  "objective": "Maximize ios-research development quality per dollar spent on LLM agents",
+  "environment": "ios_research_agent",
+  "primary_metric": "quality_per_dollar",
+  "metrics": [
+    {"name": "quality_per_dollar", "direction": "maximize", "unit": "ratio"},
+    {"name": "successful_goal_completion_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "cost_per_successful_task", "direction": "minimize", "unit": "usd"},
+    {"name": "agent_rework_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "token_usage", "direction": "minimize", "unit": "tokens"}
+  ],
+  "constraints": [
+    {
+      "metric": "successful_goal_completion_rate",
+      "op": ">=",
+      "value": 0.9,
+      "hard": true,
+      "description": "Cost optimization cannot substantially reduce success"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 6,
+    "max_parallel": 3,
+    "max_experiments_total": 60,
+    "max_cost_usd": 500.0,
+    "max_cost_usd_per_batch": 75.0
+  }
+}

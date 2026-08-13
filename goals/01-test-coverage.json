@@ -1,0 +1,35 @@
+{
+  "objective": "Increase meaningful automated test coverage of ios-research without reducing test reliability",
+  "environment": "ios_research_test_suite",
+  "primary_metric": "coverage_percent",
+  "metrics": [
+    {"name": "coverage_percent", "direction": "maximize", "unit": "percent"},
+    {"name": "mutation_score", "direction": "maximize", "unit": "ratio"},
+    {"name": "test_runtime_seconds", "direction": "minimize", "unit": "seconds"},
+    {"name": "test_failure_rate", "direction": "minimize", "unit": "ratio"}
+  ],
+  "constraints": [
+    {
+      "metric": "test_failure_rate",
+      "op": "<=",
+      "value": 0.01,
+      "hard": true,
+      "description": "Tests must remain reliable"
+    },
+    {
+      "metric": "test_runtime_seconds",
+      "op": "<=",
+      "value": 600,
+      "hard": true,
+      "description": "Full test suite must remain practical"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 6,
+    "max_parallel": 4,
+    "max_experiments_total": 60,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 15.0
+  }
+}

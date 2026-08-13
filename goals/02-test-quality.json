@@ -1,0 +1,28 @@
+{
+  "objective": "Increase the ability of ios-research tests to detect real defects rather than merely increasing line coverage",
+  "environment": "ios_research_test_suite",
+  "primary_metric": "mutation_score",
+  "metrics": [
+    {"name": "mutation_score", "direction": "maximize", "unit": "ratio"},
+    {"name": "coverage_percent", "direction": "maximize", "unit": "percent"},
+    {"name": "test_runtime_seconds", "direction": "minimize", "unit": "seconds"},
+    {"name": "flaky_test_rate", "direction": "minimize", "unit": "ratio"}
+  ],
+  "constraints": [
+    {
+      "metric": "flaky_test_rate",
+      "op": "<=",
+      "value": 0.01,
+      "hard": true,
+      "description": "Tests must remain deterministic"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 5,
+    "max_parallel": 3,
+    "max_experiments_total": 50,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 15.0
+  }
+}

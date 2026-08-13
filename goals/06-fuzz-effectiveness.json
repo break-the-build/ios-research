@@ -1,0 +1,28 @@
+{
+  "objective": "Increase the effectiveness of ios-research fuzzing at discovering unique reproducible failures",
+  "environment": "ios_research_fuzzer",
+  "primary_metric": "unique_crashes_per_100k_cases",
+  "metrics": [
+    {"name": "unique_crashes_per_100k_cases", "direction": "maximize", "unit": "crashes"},
+    {"name": "reproducible_crash_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "coverage_growth", "direction": "maximize", "unit": "percent"},
+    {"name": "executions_per_second", "direction": "maximize", "unit": "exec/s"}
+  ],
+  "constraints": [
+    {
+      "metric": "reproducible_crash_rate",
+      "op": ">=",
+      "value": 0.95,
+      "hard": true,
+      "description": "Reported crashes should be reproducible"
+    }
+  ],
+  "safety_rules": ["max-knobs:4"],
+  "budget": {
+    "max_experiments_per_batch": 8,
+    "max_parallel": 8,
+    "max_experiments_total": 120,
+    "max_cost_usd": 250.0,
+    "max_cost_usd_per_batch": 40.0
+  }
+}

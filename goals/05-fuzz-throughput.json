@@ -1,0 +1,29 @@
+{
+  "objective": "Increase useful fuzzing throughput of ios-research",
+  "environment": "ios_research_fuzzer",
+  "primary_metric": "executions_per_second",
+  "metrics": [
+    {"name": "executions_per_second", "direction": "maximize", "unit": "exec/s"},
+    {"name": "unique_inputs_per_second", "direction": "maximize", "unit": "inputs/s"},
+    {"name": "crash_detection_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "cpu_percent", "direction": "minimize", "unit": "percent"},
+    {"name": "memory_mb", "direction": "minimize", "unit": "mb"}
+  ],
+  "constraints": [
+    {
+      "metric": "crash_detection_rate",
+      "op": ">=",
+      "value": 0.99,
+      "hard": true,
+      "description": "Performance changes must not lose crash detection"
+    }
+  ],
+  "safety_rules": ["max-knobs:4"],
+  "budget": {
+    "max_experiments_per_batch": 8,
+    "max_parallel": 8,
+    "max_experiments_total": 100,
+    "max_cost_usd": 150.0,
+    "max_cost_usd_per_batch": 25.0
+  }
+}
