@@ -14,6 +14,8 @@ Registered environments (bound to real ios-research code):
     ios_research_corpus         goal  07 (corpus-quality)
     ios_research_crash_analysis goals 08 (deduplication), 11 (root-cause)
     ios_research_differential   goal  12 (differential-testing)
+    ios_research                goal  13 (research-efficiency)
+    ios_research_agent          goals 14 (effectiveness), 15 (cost-quality)
 
 Each exposes a ``run(config, samples, seed) -> Observation`` and reports the
 metrics its goal declares. Safety: mock targets and in-process code paths only;

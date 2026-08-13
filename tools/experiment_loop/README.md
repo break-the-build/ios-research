@@ -26,6 +26,8 @@ which registers every environment below.
 | `ios_research_crash_analysis` | 08, 11 | `sig_frames`, `use_exception`, `use_access` | `deduplication_f1` | strong (0.63 → 1.00) |
 | `ios_research_differential` | 12 | 7 strategy weights + `corpus_size` | `actionable_differences_per_1000_cases` | strong |
 | `ios_research_minimizer` | 09 | `start_n`, `min_chunk` | `median_input_reduction` | flat (ddmin already optimal) |
+| `ios_research` | 13 | 7 strategy weights + `max_cases` | `actionable_findings_per_dollar` | cost/quality trade-off |
+| `ios_research_agent` | 14, 15 | `max_cases`, `weight_structure_aware`, `minimize` | `successful_goal_completion_rate` / `quality_per_dollar` | strong (budget↔quality) |
 
 Notes:
 
@@ -48,6 +50,16 @@ so the optimizer cannot inflate the reduction ratio by padding more.
 ## Not yet implemented
 
 Goals whose properties are already exact-by-construction or have no runtime knob
-search (test-suite coverage, CLI reliability, reproduction rate, reporting,
-security, documentation, framework reliability) are intentionally omitted — see
-`docs/EXPERIMENT-LOOP-RESULTS.md` for the rationale and future-work notes.
+search — test-suite coverage (01/02), CLI reliability/performance (03/04),
+reproduction rate (10), reporting (17), security (19), documentation (20), and
+the framework reliability / experiment reproducibility variants (16/18) — are
+intentionally omitted; there is no honest knob→metric gradient to optimize. See
+`docs/EXPERIMENT-LOOP-RESULTS.md` for the rationale.
+
+## Goal-file note
+
+`goals/13-research-efficiency.json` originally constrained
+`reproducible_crash_rate` without listing it in its own `metrics`, so
+experiment-loop rejected the goal during validation. That metric was added to
+the goal's metric list (the `ios_research` environment reports it) so the goal
+validates and runs.

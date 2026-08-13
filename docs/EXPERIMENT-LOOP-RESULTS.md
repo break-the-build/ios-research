@@ -121,7 +121,7 @@ current target, with no strategy disabled and no reproducibility loss.
 
 ## Environments implemented
 
-Five `run(config, samples, seed)` environments now bind ios-research to the
+Seven `run(config, samples, seed)` environments now bind ios-research to the
 loop (`tools/experiment_loop/ios_env/`, loaded via
 `tools/experiment_loop/ios_research_env.py`). Each exposes its goal's metrics:
 
@@ -132,9 +132,16 @@ loop (`tools/experiment_loop/ios_env/`, loaded via
 | `ios_research_crash_analysis` | 08, 11 | `deduplication_f1` | configurable signature: f1 0.63 (1 frame) → 1.00 (≥2 frames); **default already optimal** |
 | `ios_research_differential` | 12 | `actionable_differences_per_1000_cases` | up to +200–350% actionable diffs from corpus weighting |
 | `ios_research_minimizer` | 09 | `median_input_reduction` | **flat** — ddmin already reduces optimally; reproduction 1.00 |
+| `ios_research` | 13 | `actionable_findings_per_dollar` | efficiency trade-off — findings/$ ~2× higher at small budgets (diminishing returns) |
+| `ios_research_agent` | 14, 15 | `successful_goal_completion_rate`, `quality_per_dollar` | completion 0.00→1.00 across budget; quality/$ up to +74% by skipping over-spend |
 
 Useful negative results: crash-dedup and minimization defaults are already at
 their optimum, so the loop correctly reports no headroom on the primary metric.
+
+`goals/13-research-efficiency.json` was corrected: it constrained
+`reproducible_crash_rate` without declaring it in `metrics`, so the engine
+rejected it during validation; the metric (reported by the environment) was
+added to the goal's list.
 
 ## Remaining opportunities (not implemented)
 
@@ -143,9 +150,8 @@ Goals whose properties are exact-by-construction or lack a runtime knob search �
 `ios_research_reproduction` (10), `ios_research_reporting` (17),
 `ios_research_security` (19), `ios_research_documentation` (20), and the
 reliability/reproducibility `ios_research` variants (16/18) — are intentionally
-omitted; there is no honest knob→metric gradient to optimize. `ios_research`
-research-efficiency (13) and `ios_research_agent` (14/15) have real cost/quality
-gradients and are good candidates for a future session.
+omitted; there is no honest knob→metric gradient to optimize (the framework
+already satisfies these properties by construction).
 
 ## GitHub Tracking
 

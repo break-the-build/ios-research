@@ -18,6 +18,13 @@ STRATEGIES = mutation.STRATEGIES
 # denominator for effectiveness metrics.
 KNOWN_SIGNATURES = 6
 
+# Classifications that represent memory-safety issues (spatial/temporal/type
+# confusion) — the "actionable" findings for research-efficiency metrics.
+MEMORY_SAFETY_CLASSES = frozenset({
+    "OUT_OF_BOUNDS_READ", "OUT_OF_BOUNDS_WRITE", "USE_AFTER_FREE",
+    "TYPE_CONFUSION",
+})
+
 
 def base_input(target_id: str) -> bytes:
     """A valid seed input accepted by ``target_id``."""
@@ -42,6 +49,7 @@ def fuzz_once(target_id: str, weights: dict[str, int] | None, *, budget: int,
     struct_fn = target.structure_mutate
     base = base_input(target_id)
     signatures: dict[str, bytes] = {}
+    classifications: dict[str, str] = {}
     inputs: set[str] = set()
     crashes = 0
     for i in range(budget):
@@ -53,8 +61,10 @@ def fuzz_once(target_id: str, weights: dict[str, int] | None, *, budget: int,
             crashes += 1
             sig = result.diagnostics.signature
             signatures.setdefault(sig, data)
+            classifications.setdefault(sig, result.diagnostics.classification_hint)
     return {
         "signatures": signatures,          # sig -> first triggering input
+        "classifications": classifications,  # sig -> crash classification
         "unique": len(signatures),
         "unique_inputs": len(inputs),
         "crashes": crashes,

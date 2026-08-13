@@ -25,5 +25,8 @@ from . import minimizer       # ios_research_minimizer       (goal 09)
 from . import corpus          # ios_research_corpus          (goal 07)
 from . import crash_analysis  # ios_research_crash_analysis  (goals 08, 11)
 from . import differential    # ios_research_differential    (goal 12)
+from . import research        # ios_research                 (goal 13)
+from . import agent           # ios_research_agent           (goals 14, 15)
 
-__all__ = ["fuzzer", "minimizer", "corpus", "crash_analysis", "differential"]
+__all__ = ["fuzzer", "minimizer", "corpus", "crash_analysis", "differential",
+           "research", "agent"]
