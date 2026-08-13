@@ -143,8 +143,18 @@ class FuzzEngine:
         target = targets.create(session.target)
         fmt = target.formats[0] if target.formats else target.kind
         struct_fn = target.structure_mutate
+        # Precompute the weighted strategy pool once (invariant for the run).
+        pool = mutation.weighted_strategies(session.strategy_weights or None)
         unique = set(session.crash_ids)
         executed_this = 0
+
+        # Batched persistence: accumulate crash counts and corpus additions in
+        # memory and flush once before returning, instead of writing per case.
+        # This is behavior-preserving at the pause/resume/complete boundaries,
+        # which all flush here.
+        crash_counts: dict[str, int] = {}
+        crash_first: dict[str, tuple] = {}   # crash_id -> (data, result, lineage)
+        corpus_dirty = False
 
         while session.cursor < session.max_cases:
             if max_new is not None and executed_this >= max_new:
@@ -157,37 +167,62 @@ class FuzzEngine:
             i = session.cursor
             base = bases[i % len(bases)]
             mutated, strategy = mutation.mutate(
-                base, session.seed, i, struct_fn=struct_fn,
-                weights=session.strategy_weights or None)
+                base, session.seed, i, struct_fn=struct_fn, strategies=pool)
             result = target.execute(mutated)
             session.outcomes[result.outcome] = \
                 session.outcomes.get(result.outcome, 0) + 1
 
             if result.outcome in (Outcome.CRASH, Outcome.ABNORMAL):
-                lineage = {"parent_sha256": sha256_bytes(base),
-                           "mutation": strategy, "seed": session.seed,
-                           "iteration": i}
-                crash = self.crash_store.record(
-                    experiment_id=session.experiment_id, target=session.target,
-                    fmt=fmt, data=mutated, exec_result=result, lineage=lineage)
+                signature = result.diagnostics.signature \
+                    if result.diagnostics else "sig_none"
+                crash_id = make_id("crash", session.experiment_id, signature)
                 session.crashes += 1
-                if crash.id not in unique:
-                    unique.add(crash.id)
-                    session.crash_ids.append(crash.id)
-                # Preserve the crashing input in the corpus with lineage.
-                self.corpus_store.add_bytes(
-                    corpus, mutated, origin="mutation",
-                    parent=sha256_bytes(base), mutation=strategy,
-                    seed=session.seed, iteration=i)
+                crash_counts[crash_id] = crash_counts.get(crash_id, 0) + 1
+                if crash_id not in crash_first:
+                    crash_first[crash_id] = (mutated, result, {
+                        "parent_sha256": sha256_bytes(base),
+                        "mutation": strategy, "seed": session.seed,
+                        "iteration": i})
+                if crash_id not in unique:
+                    unique.add(crash_id)
+                    session.crash_ids.append(crash_id)
+                # Preserve the crashing input in the corpus with lineage; defer
+                # the manifest write until the end of the batch.
+                if self.corpus_store.add_bytes(
+                        corpus, mutated, origin="mutation",
+                        parent=sha256_bytes(base), mutation=strategy,
+                        seed=session.seed, iteration=i, persist=False) is not None:
+                    corpus_dirty = True
 
             session.cursor += 1
             executed_this += 1
+
+        # Flush batched corpus + crash state.
+        if corpus_dirty:
+            self.corpus_store.save(corpus)
+        self._flush_crashes(session, fmt, crash_counts, crash_first)
 
         if session.cursor >= session.max_cases:
             session.status = COMPLETED
         session.unique_crashes = len(session.crash_ids)
         self.save(session)
         return session
+
+    def _flush_crashes(self, session: FuzzSession, fmt: str,
+                       crash_counts: dict[str, int],
+                       crash_first: dict[str, tuple]) -> None:
+        """Persist accumulated crashes: record each unique crash once, then add
+        its total occurrence count in a single write."""
+        for crash_id, count in crash_counts.items():
+            if self.ws.path(f"crashes/{crash_id}/crash.json").exists():
+                self.crash_store.bump_count(crash_id, count)
+            else:
+                data, result, lineage = crash_first[crash_id]
+                self.crash_store.record(
+                    experiment_id=session.experiment_id, target=session.target,
+                    fmt=fmt, data=data, exec_result=result, lineage=lineage)
+                if count > 1:
+                    self.crash_store.bump_count(crash_id, count - 1)
 
     def resume(self, session: FuzzSession, *, max_new: int | None = None,
                deadline: float | None = None) -> FuzzSession:

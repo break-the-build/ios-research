@@ -61,6 +61,19 @@ class CrashStore:
     def save(self, crash: CrashRecord) -> None:
         self.ws.write_json(self._rel(crash.id), crash.to_dict())
 
+    def bump_count(self, crash_id: str, extra: int) -> None:
+        """Add ``extra`` to a crash's occurrence count in a single write.
+
+        Lets a hot loop accumulate duplicate counts in memory and flush them
+        once, instead of re-reading and rewriting the record per duplicate.
+        """
+        if extra <= 0:
+            return
+        crash = self.get(crash_id)
+        crash.count += extra
+        crash.last_seen = now_iso()
+        self.save(crash)
+
     def list(self) -> list[CrashRecord]:
         base = self.ws.dir("crashes")
         out = []

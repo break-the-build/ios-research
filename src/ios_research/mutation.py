@@ -122,6 +122,9 @@ _DISPATCH = {
 }
 
 
+_POOL_CACHE: dict[tuple, tuple[str, ...]] = {}
+
+
 def weighted_strategies(weights: dict[str, int] | None,
                         strategies: tuple[str, ...] = STRATEGIES) -> tuple[str, ...]:
     """Return a strategy pool whose repetition encodes selection weights.
@@ -129,13 +132,22 @@ def weighted_strategies(weights: dict[str, int] | None,
     ``mutate`` draws uniformly from the returned pool, so repeating a strategy
     ``w`` times gives it selection weight ``w``. Missing weights default to 1.
     A pool that would be empty (all weights 0) falls back to uniform selection.
+
+    The pool depends only on ``(weights, strategies)``, so it is memoized: the
+    same weighting is built once rather than on every ``mutate`` call in the
+    fuzzing hot loop.
     """
     if not weights:
         return strategies
-    pool: list[str] = []
-    for strat in strategies:
-        pool.extend([strat] * max(0, int(weights.get(strat, 1))))
-    return tuple(pool) or strategies
+    key = (strategies, tuple(sorted(weights.items())))
+    pool = _POOL_CACHE.get(key)
+    if pool is None:
+        built: list[str] = []
+        for strat in strategies:
+            built.extend([strat] * max(0, int(weights.get(strat, 1))))
+        pool = tuple(built) or strategies
+        _POOL_CACHE[key] = pool
+    return pool
 
 
 def mutate(data: bytes, seed: int, iteration: int,
