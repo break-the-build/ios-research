@@ -1,0 +1,984 @@
+{
+  "artifact_locations": {
+    "analysis": ".ios-research/analysis/<analysis_id>.json",
+    "artifacts": ".ios-research/artifacts/<sha2>/<sha256>.bin",
+    "config": ".ios-research/config/config.json",
+    "corpus": ".ios-research/corpus/<corpus_id>/",
+    "crashes": ".ios-research/crashes/<crash_id>/",
+    "diffs": ".ios-research/diffs/<diff_id>/",
+    "experiments": ".ios-research/experiments/<experiment_id>.json",
+    "fuzz_sessions": ".ios-research/fuzz/<session_id>.json",
+    "reports": ".ios-research/reports/<report_id>/",
+    "research": ".ios-research/research/<research_id>.json",
+    "workspace_marker": ".ios-research/workspace.json"
+  },
+  "commands": {
+    "agent": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "analyze": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "experiment": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "inspect": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "max_cases",
+                "flags": [
+                  "--max-cases"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "no_minimize",
+                "flags": [
+                  "--no-minimize"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "schema": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "status": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        }
+      }
+    },
+    "analysis": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "analysis_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "analyze": {
+      "arguments": {
+        "options": [
+          {
+            "dest": "batch",
+            "flags": [
+              "--batch"
+            ],
+            "help": "analyze all crashes (default when no id is given)",
+            "required": false
+          }
+        ],
+        "positionals": [
+          {
+            "help": "",
+            "name": "crash_id",
+            "required": false
+          }
+        ]
+      }
+    },
+    "config": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "get": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "dotted key, e.g. fuzz.workers",
+                "name": "key",
+                "required": true
+              }
+            ]
+          }
+        },
+        "hash": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "set": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "key",
+                "required": true
+              },
+              {
+                "help": "JSON or scalar value",
+                "name": "value",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "corpus": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed_default",
+                "flags": [
+                  "--seed-default"
+                ],
+                "help": "add a single valid base testcase",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "name",
+                "required": true
+              }
+            ]
+          }
+        },
+        "dedupe": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "corpus_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "import": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "corpus_id",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "inspect": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "corpus_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "minimize": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "corpus_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "crash": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "classify": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "compare": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id_a",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "crash_id_b",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "minimize": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "reproduce": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "device": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "device_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "diff": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "compare": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "name",
+                "flags": [
+                  "--name"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "target_a",
+                "flags": [
+                  "--target-a"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "target_b",
+                "flags": [
+                  "--target-b"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "report": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    "doctor": {
+      "arguments": {
+        "options": [],
+        "positionals": []
+      }
+    },
+    "experiment": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "device",
+                "flags": [
+                  "--device"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "experiment_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "fuzz": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "pause": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "resume": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "chunk",
+                "flags": [
+                  "--chunk"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "duration",
+                "flags": [
+                  "--duration"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "start": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "experiment",
+                "flags": [
+                  "--experiment"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "max_cases",
+                "flags": [
+                  "--max-cases"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "duration",
+                "flags": [
+                  "--duration"
+                ],
+                "help": "wall-clock budget in seconds",
+                "required": false
+              },
+              {
+                "dest": "workers",
+                "flags": [
+                  "--workers"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "chunk",
+                "flags": [
+                  "--chunk"
+                ],
+                "help": "cases to execute this invocation (for resumable runs)",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "stats": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "status": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "stop": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    "info": {
+      "arguments": {
+        "options": [],
+        "positionals": []
+      }
+    },
+    "init": {
+      "arguments": {
+        "options": [
+          {
+            "dest": "force",
+            "flags": [
+              "--force"
+            ],
+            "help": "re-initialize even if a workspace exists",
+            "required": false
+          }
+        ],
+        "positionals": []
+      }
+    },
+    "target": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "audio": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "audio_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "wav|mp3|aac|alac or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "target_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "version": {
+      "arguments": {
+        "options": [],
+        "positionals": []
+      }
+    }
+  },
+  "crash_classifications": [
+    "NULL_DEREFERENCE",
+    "OUT_OF_BOUNDS_READ",
+    "OUT_OF_BOUNDS_WRITE",
+    "USE_AFTER_FREE",
+    "INTEGER_ERROR",
+    "TYPE_CONFUSION",
+    "ASSERTION",
+    "TIMEOUT",
+    "UNKNOWN"
+  ],
+  "destructive_commands": [
+    "research run"
+  ],
+  "exit_codes": {
+    "ERROR": 1,
+    "INTERRUPTED": 6,
+    "NOT_FOUND": 3,
+    "OK": 0,
+    "SAFETY": 5,
+    "STATE": 7,
+    "USAGE": 2,
+    "VALIDATION": 4
+  },
+  "experiment_lifecycle": [
+    "inspect environment",
+    "select target",
+    "inspect corpus",
+    "create experiment",
+    "fuzz",
+    "detect crashes",
+    "deduplicate",
+    "minimize",
+    "reproduce",
+    "analyze",
+    "differential test",
+    "generate report"
+  ],
+  "exploitability_indicators": [
+    "CRASH_ONLY",
+    "CONTROLLED_MEMORY_ACCESS_INDICATOR",
+    "CONTROLLED_REGISTER_INDICATOR",
+    "ARBITRARY_READ_INDICATOR",
+    "ARBITRARY_WRITE_INDICATOR",
+    "CODE_EXECUTION_INDICATOR"
+  ],
+  "framework": "ios-research",
+  "global_flags": [
+    "--json",
+    "--verbose",
+    "--quiet",
+    "--workspace",
+    "--config",
+    "--yes"
+  ],
+  "json_output_contract": {
+    "envelope": [
+      "ok",
+      "command",
+      "data",
+      "messages",
+      "error",
+      "exit_code"
+    ],
+    "note": "every command supports --json and returns this envelope"
+  },
+  "safety_boundary": {
+    "allowed": [
+      "fuzzing",
+      "crash_discovery",
+      "crash_reproduction",
+      "crash_minimization",
+      "memory_safety_analysis",
+      "differential_testing",
+      "exploitability_indicators",
+      "research_device_instrumentation",
+      "responsible_reporting"
+    ],
+    "authorized_research_only": true,
+    "forbidden": [
+      "covert_surveillance",
+      "camera_activation",
+      "microphone_activation",
+      "permission_bypass",
+      "tcc_bypass",
+      "sandbox_escape",
+      "persistence",
+      "credential_theft",
+      "spyware",
+      "operational_malware",
+      "weaponized_exploit_chain",
+      "exploit_deployment",
+      "shellcode_generation",
+      "rop_chain_generation"
+    ]
+  },
+  "version": "0.1.0"
+}
