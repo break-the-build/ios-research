@@ -97,7 +97,7 @@ def mutate_structure_aware(data: bytes, rng: random.Random) -> bytes:
         out = bytearray(b"MOCK") + out[4:8] + src[8:]
     else:
         out = bytearray(out)
-    choice = rng.randrange(5)
+    choice = rng.randrange(6)
     if choice == 0:  # oversized declared length -> OOB read
         out[6:8] = (0xFFFF).to_bytes(2, "big")
     elif choice == 1:  # null-dispatch record type
@@ -108,6 +108,8 @@ def mutate_structure_aware(data: bytes, rng: random.Random) -> bytes:
         out[4] = 0x00
     elif choice == 4:  # type confusion tag
         out = out[:8] + bytearray(b"\x7fT") + out[8:]
+    elif choice == 5:  # version 2 -> exercises the v2 OOB-write regression
+        out[4] = 0x02   # (harmless on v1: a normally-parsed record)
     return bytes(out)
 
 

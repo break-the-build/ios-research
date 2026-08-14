@@ -695,3 +695,758 @@ and:
     /Users/danny/dev/ios-research
 
 Then establish the baseline before running the first experiment.
+
+---
+
+# GitHub Issue and Pull Request Tracking
+
+All durable improvements must be tracked through GitHub Issues and Pull Requests.
+
+The purpose of this workflow is to maintain a clear relationship between:
+
+```
+Goal
+  ↓
+Experiment
+  ↓
+Evidence
+  ↓
+GitHub Issue
+  ↓
+Implementation
+  ↓
+Pull Request
+  ↓
+Review
+  ↓
+Merge
+  ↓
+Updated baseline
+```
+
+Do not use GitHub Issues or Pull Requests as a substitute for experiment evidence. The experiment-loop remains the system of record for experimental results, while GitHub becomes the system of record for planned and implemented code changes.
+
+---
+
+## 20. GITHUB REPOSITORY DISCOVERY
+
+Before creating Issues or Pull Requests, determine the GitHub repository associated with:
+
+```
+/Users/danny/dev/ios-research
+```
+
+Inspect:
+
+```
+git remote -v
+git branch --show-current
+git status
+```
+
+Determine:
+
+* GitHub owner
+* GitHub repository
+* Default branch
+* Current branch
+* Whether GitHub CLI (`gh`) is available
+* Whether the current GitHub authentication is valid
+* Whether Issues are enabled
+* Whether Pull Requests can be created
+* Existing Issue conventions
+* Existing PR conventions
+* Existing labels
+* Existing milestones/project conventions
+
+Use the repository's existing conventions whenever possible.
+
+Do not invent a new GitHub workflow if the repository already has an established one.
+
+If GitHub CLI is unavailable or authentication is not configured, continue the experiment work but do not pretend that Issues or PRs were created. Report the GitHub tracking blocker clearly.
+
+---
+
+## 21. WHEN TO CREATE A GITHUB ISSUE
+
+Do NOT create a GitHub Issue for every experiment.
+
+Create a GitHub Issue when an experiment, code inspection, or other evidence identifies a concrete improvement that is sufficiently valuable to implement or track as future work.
+
+Examples:
+
+* A successful experiment identifies a measurable performance improvement.
+* A reliability problem is discovered and requires implementation.
+* A test-quality deficiency is identified.
+* A corpus-management improvement is recommended.
+* Crash deduplication can be materially improved.
+* A CLI reliability problem requires a code change.
+* An infrastructure improvement is identified but cannot be implemented during the current experiment budget.
+* A high-value recommendation should be preserved for a future optimization session.
+
+Do not create an Issue for:
+
+* Every hypothesis.
+* Every failed experiment.
+* Cosmetic observations with no meaningful value.
+* Duplicate work already represented by an open Issue.
+* Improvements that cannot currently be measured or justified.
+* Changes explicitly rejected by the experiment evaluation.
+
+Before creating an Issue:
+
+```
+search existing GitHub Issues
+```
+
+If an equivalent open Issue already exists:
+
+```
+update/reference the existing Issue
+```
+
+Do not create duplicate Issues.
+
+---
+
+## 22. ISSUE CONTENT
+
+Every newly created Issue should contain enough information for another engineer or future optimization session to understand why the work exists.
+
+Include:
+
+### Title
+
+Use a concise implementation-oriented title.
+
+Examples:
+
+```
+Improve fuzz corpus selection using coverage feedback
+
+Improve crash deduplication reliability
+
+Add regression tests for crash reproduction
+
+Improve experiment-loop recovery after failed runs
+```
+
+### Description
+
+Include:
+
+```
+## Problem
+
+What problem was observed?
+
+## Proposed Improvement
+
+What should change?
+
+## Evidence
+
+What experiment, benchmark, test, or observation supports the recommendation?
+
+## Expected Impact
+
+What metric or capability should improve?
+
+## Success Criteria
+
+How will the implementation be evaluated?
+
+## Experiment
+
+Reference the relevant experiment-loop experiment.
+
+## Baseline
+
+Include the relevant baseline commit and metrics.
+
+## Risks
+
+Identify regression, compatibility, performance, security, or maintenance risks.
+
+## Implementation Notes
+
+Include useful technical details discovered during experimentation.
+```
+
+The Issue should distinguish clearly between:
+
+```
+observed evidence
+```
+
+and:
+
+```
+proposed implementation
+```
+
+Do not present an unvalidated hypothesis as a measured result.
+
+---
+
+## 23. ISSUE LABELS
+
+Use existing repository labels when available.
+
+Prefer labels such as:
+
+```
+experiment
+optimization
+performance
+reliability
+testing
+fuzzing
+corpus
+crash-analysis
+cli
+documentation
+security
+```
+
+Do not create new labels unless necessary.
+
+If an appropriate label does not exist, use the closest existing label.
+
+---
+
+## 24. LINK EXPERIMENTS TO ISSUES
+
+Every Issue created as a result of an experiment must reference the experiment-loop evidence.
+
+Include:
+
+```
+Experiment ID
+Goal
+Hypothesis
+Control result
+Variant result
+Primary metric
+Secondary metrics
+Success threshold
+Conclusion
+Starting commit
+Experiment commit/branch where applicable
+```
+
+The relationship should be traceable:
+
+```
+Goal
+  ↓
+Experiment ID
+  ↓
+GitHub Issue
+  ↓
+Pull Request
+  ↓
+Merge commit
+```
+
+Never lose the connection between the experimental evidence and the implementation.
+
+---
+
+## 25. IMPLEMENTATION DECISION
+
+After evaluating an experiment, classify the recommendation as one of:
+
+```
+IMPLEMENT_NOW
+CREATE_ISSUE
+REJECT
+DEFER
+```
+
+### IMPLEMENT_NOW
+
+Use when:
+
+* Evidence supports the improvement.
+* The implementation is within scope.
+* The change can be safely implemented.
+* The expected value justifies the implementation cost.
+
+For IMPLEMENT_NOW:
+
+```
+1. Create or identify the GitHub Issue.
+2. Create an implementation branch.
+3. Implement the change.
+4. Run relevant tests.
+5. Create a Pull Request.
+6. Link the PR to the Issue.
+7. Record experiment evidence in the PR.
+8. Evaluate the final implementation.
+9. Merge only when validation succeeds.
+10. Update the experiment baseline.
+```
+
+### CREATE_ISSUE
+
+Use when:
+
+* The recommendation is valuable.
+* Evidence is sufficient to justify tracking it.
+* Implementation should happen later.
+* The current experiment budget should not be spent on implementation.
+
+Create the Issue with the evidence and success criteria.
+
+Do not implement the change during the current session.
+
+### REJECT
+
+Use when:
+
+* The experiment failed.
+* The improvement is not reproducible.
+* The expected value is too low.
+* There is unacceptable regression risk.
+* The change violates safety boundaries.
+* The evidence does not justify implementation.
+
+Do not create an implementation Issue unless the rejected result itself represents useful future research.
+
+### DEFER
+
+Use when:
+
+* The improvement may be valuable.
+* More evidence is required.
+* Dependencies are missing.
+* Measurement quality is insufficient.
+* The implementation cannot safely be completed yet.
+
+If the recommendation is sufficiently valuable, create an Issue documenting exactly what evidence is still required.
+
+---
+
+## 26. BRANCH NAMING
+
+For implementation work, create a dedicated branch.
+
+Preferred format:
+
+```
+experiment/<experiment-id>-<short-description>
+```
+
+or:
+
+```
+improve/<issue-number>-<short-description>
+```
+
+Prefer the repository's existing branch naming convention if one exists.
+
+Never implement an approved improvement directly on the main/default branch unless the repository's established workflow explicitly requires it.
+
+---
+
+## 27. PULL REQUEST CREATION
+
+Every implementation resulting from an approved improvement must be submitted as a Pull Request.
+
+The PR must reference the corresponding GitHub Issue.
+
+Prefer GitHub's closing syntax when the change completely resolves the Issue:
+
+```
+Closes #123
+```
+
+If the PR only partially addresses the Issue:
+
+```
+Relates to #123
+```
+
+Do not claim that an Issue is resolved if the implementation only addresses part of it.
+
+---
+
+## 28. PULL REQUEST CONTENT
+
+Every optimization PR should include:
+
+```
+## Summary
+
+What changed?
+
+## Motivation
+
+Why was the change made?
+
+## Experiment
+
+Which experiment produced the recommendation?
+
+## Evidence
+
+Include measured before/after results.
+
+## Baseline
+
+Include the baseline commit and relevant configuration.
+
+## Results
+
+Include:
+
+- Primary metric
+- Secondary metrics
+- Test results
+- Performance results
+- Reliability results
+- Regression analysis
+
+## Validation
+
+List the tests and benchmarks that were run.
+
+## Risks
+
+Describe known risks or limitations.
+
+## Files Changed
+
+Summarize important implementation changes.
+
+## Follow-up
+
+Identify remaining work or additional experiments.
+```
+
+The PR must clearly distinguish:
+
+```
+measured results
+```
+
+from:
+
+```
+expected future benefits
+```
+
+---
+
+## 29. PR VALIDATION
+
+Before opening a Pull Request:
+
+```
+git status
+```
+
+Verify:
+
+* Only intended files changed.
+* No secrets were added.
+* No credentials were added.
+* No private device data was added.
+* No sensitive crash artifacts were added.
+* Relevant tests pass.
+* Relevant benchmarks pass.
+* Security boundaries remain intact.
+* The implementation is reproducible.
+* The branch is based on the correct baseline.
+
+Do not create a PR containing unrelated changes.
+
+---
+
+## 30. PR REVIEW STATUS
+
+After creating a Pull Request, record:
+
+```
+PR number
+PR URL
+Issue number
+Branch
+Base branch
+Commit SHA
+Test results
+Experiment ID
+```
+
+If automated checks are available, wait for them before declaring the implementation validated.
+
+Do not claim a PR is successful merely because it was created.
+
+A PR is considered successfully implemented only when:
+
+```
+implementation complete
+↓
+tests pass
+↓
+evaluation succeeds
+↓
+PR accepted/merged
+↓
+baseline updated
+```
+
+If the PR cannot be merged during the current session, report it as:
+
+```
+IMPLEMENTED — PR OPEN
+```
+
+not:
+
+```
+PROMOTED
+```
+
+---
+
+## 31. MERGE POLICY
+
+Never merge a Pull Request merely because an experiment was successful.
+
+Before merging verify:
+
+1. The implementation matches the experiment.
+2. The primary metric improvement is reproduced.
+3. Required tests pass.
+4. No important secondary metric regresses.
+5. No security boundary is violated.
+6. The implementation is maintainable.
+7. The PR contains the relevant evidence.
+8. The corresponding Issue is correctly linked.
+
+If repository policy requires human review, do not bypass that requirement.
+
+If human approval is required and unavailable:
+
+```
+leave the PR open
+```
+
+and report:
+
+```
+IMPLEMENTED — AWAITING REVIEW
+```
+
+Do not claim the change has been promoted until it is actually merged.
+
+---
+
+## 32. ISSUE/PR STATUS TRACKING
+
+Maintain the following state model:
+
+```
+EXPERIMENT_PROPOSED
+      ↓
+EXPERIMENT_RUNNING
+      ↓
+EXPERIMENT_EVALUATED
+      ↓
+RECOMMENDATION
+
+├── REJECT
+│
+├── DEFER
+│
+└── IMPLEMENT
+          ↓
+     ISSUE_CREATED
+          ↓
+     IMPLEMENTATION
+          ↓
+     PR_OPEN
+          ↓
+     VALIDATION
+          ↓
+     ├── FAILED → PR_REVISED
+     │
+     └── PASSED
+            ↓
+         PR_MERGED
+            ↓
+      BASELINE_UPDATED
+```
+
+Do not skip states in the final report.
+
+---
+
+## 33. GITHUB DUPLICATE DETECTION
+
+Before creating an Issue:
+
+```
+search existing Issues
+```
+
+Before creating a Pull Request:
+
+```
+search existing PRs
+```
+
+Avoid duplicate work.
+
+If an existing Issue or PR represents the same improvement:
+
+```
+reuse it
+```
+
+and add the new experiment evidence to the existing tracking item when appropriate.
+
+Do not create parallel implementation branches for the same recommendation unless there is a clear experimental reason.
+
+---
+
+## 34. FUTURE-WORK ISSUES
+
+Not every valuable recommendation needs to be implemented immediately.
+
+At the end of the session, recommendations that are valuable but not implemented should become GitHub Issues when they meet the threshold for durable tracking.
+
+Each future-work Issue should include:
+
+```
+Why it matters
+Evidence supporting it
+Expected impact
+Required experiment
+Success criteria
+Dependencies
+Estimated implementation complexity
+Recommended priority
+```
+
+This allows future experiment-loop sessions to resume from GitHub rather than rediscovering the same opportunities.
+
+---
+
+## 35. EXPERIMENT RESULTS DOCUMENTATION
+
+Continue generating:
+
+```
+docs/EXPERIMENT-LOOP-RESULTS.md
+```
+
+Additionally include a GitHub tracking section:
+
+```
+## GitHub Tracking
+
+Issues Created:
+- #123 — description
+
+Issues Updated:
+- #124 — description
+
+Pull Requests Created:
+- #125 — description
+
+Pull Requests Merged:
+- #126 — description
+
+Pull Requests Open:
+- #127 — description
+
+Recommendations Deferred:
+- #128 — description
+
+Recommendations Rejected:
+- description
+```
+
+Every Issue and PR should be traceable back to the relevant experiment.
+
+---
+
+## 36. FINAL AUDIT ADDITIONS
+
+At the end of the session verify:
+
+```
+git status
+```
+
+Verify GitHub tracking:
+
+```
+every implemented improvement has an Issue
+every implementation has a PR
+every PR references the appropriate Issue
+every Issue references the relevant experiment
+every merged PR is reflected in the final baseline
+every deferred high-value recommendation is tracked
+no duplicate Issues were created
+no duplicate PRs were created
+```
+
+Do not claim an improvement is promoted unless its implementation has actually been merged.
+
+---
+
+## 37. FINAL SUMMARY ADDITIONS
+
+The final report must additionally contain:
+
+```
+GITHUB ISSUES CREATED: X
+GITHUB ISSUES UPDATED: X
+PULL REQUESTS CREATED: X
+PULL REQUESTS MERGED: X
+PULL REQUESTS OPEN: X
+
+IMPLEMENTED IMPROVEMENTS:
+- #123 → PR #125
+- #124 → PR #126
+
+DEFERRED IMPROVEMENTS:
+- #127
+
+REJECTED RECOMMENDATIONS:
+- <description>
+```
+
+For every promoted improvement report:
+
+```
+Experiment:
+Issue:
+PR:
+Starting Commit:
+Ending Commit:
+Primary Metric:
+Before:
+After:
+Improvement:
+```
+
+The final summary must make it possible to reconstruct exactly:
+
+```
+why the change was made
+↓
+what evidence justified it
+↓
+what code changed
+↓
+where it was reviewed
+↓
+whether it was merged
+↓
+what the new baseline is
+```
