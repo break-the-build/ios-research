@@ -384,3 +384,20 @@ two mutants **survived**, exposing real test gaps:
 Added two tests (`test_config_deep_merge_preserves_sibling_defaults`,
 `test_config_hash_is_distinct_and_fixed_width`). Both mutants are now **killed**
 (mutation_score 8/8 on the sample). 161 tests passing.
+
+### Goal 02 — broader mutation testing (round 2)
+
+A wider mutation pass (differential/fuzz/report/mock/analysis logic) found two
+more real gaps in differential testing, both surviving the suite:
+
+- **regression direction** (`_RANK[cat_b] > _RANK[cat_a]` → `<`): the existing
+  test only asserted `regressions >= 1`, which still passes when the direction
+  is reversed (fixes miscounted as regressions).
+- **`differs` flag** (`… or …` → `… and …`): no test covered an input that
+  crashes both versions with *different signatures* but the same outcome
+  category.
+
+Added `test_regression_direction_distinguishes_fixes_from_regressions` and
+`test_differs_flag_covers_signature_only_differences` (the latter uses a
+version-2 + use-after-free input: v1 → UAF, v2 → OOB-write). Both mutants are
+now killed.

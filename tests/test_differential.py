@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ios_research.corpus import CorpusStore
 from ios_research.differential import DifferentialEngine
 from ios_research.targets import create
 from ios_research.targets.base import Outcome
@@ -65,3 +66,41 @@ def test_diff_identical_targets_have_no_differences(workspace):
     summary = engine.run(diff)
     assert summary["differing"] == 0
     assert summary["regressions"] == 0
+
+
+def test_regression_direction_distinguishes_fixes_from_regressions(workspace):
+    # Pins the regression *direction*: B-worse-than-A is a regression; a fix
+    # (CRASH -> NORMAL) must never be flagged as one.
+    engine, diff = _make(workspace)
+    engine.run(diff)
+    results = engine.results(diff)
+    rank = {"NORMAL": 0, "REJECT": 0, "TIMEOUT": 2, "CRASH": 3}
+    regressions = [r for r in results if r["is_regression"]]
+    fixes = [r for r in results
+             if r["a"]["category"] == "CRASH" and r["b"]["category"] == "NORMAL"]
+    assert regressions, "v2 introduces a regression that must be detected"
+    assert fixes, "v2 fixes some v1 crashes"
+    for r in regressions:                      # every regression is B worse than A
+        assert rank[r["b"]["category"]] > rank[r["a"]["category"]]
+    for f in fixes:                            # a fix is not a regression
+        assert f["is_regression"] is False
+
+
+def test_differs_flag_covers_signature_only_differences(workspace):
+    # An input that crashes BOTH versions but with different signatures
+    # (v1: use-after-free; v2: version-2 OOB write) must be flagged as differing
+    # even though the outcome *category* (CRASH) is the same.
+    cs = CorpusStore(workspace)
+    corpus = cs.create("sigdiff")
+    same_crash = b"MOCK\x02\x01\x00\x02\xde\xad"   # v1 UAF, v2 OOB-write
+    cs.add_bytes(corpus, same_crash, origin="seed")
+    engine = DifferentialEngine(workspace)
+    diff = engine.create(name="sd", target_a="mock:parser",
+                         target_b="mock:parser-v2", config_hash="cfg_x",
+                         corpus_id=corpus.id)
+    engine.run(diff)
+    r = engine.results(diff)[0]
+    assert r["a"]["category"] == "CRASH" and r["b"]["category"] == "CRASH"
+    assert r["a"]["signature"] != r["b"]["signature"]
+    assert r["differs"] is True                # signature-only difference counts
+    assert r["is_regression"] is False         # same severity, not a regression
