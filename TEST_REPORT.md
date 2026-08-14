@@ -25,6 +25,11 @@ Generated during phase 10 (final audit).
 | `test_research.py` | 12-stage orchestration, resume equivalence, resource limits, confirmation gate |
 | `test_integration_cli.py` | end-to-end CLI artifact chain + final-verification command sweep |
 | `test_regression.py` | replay regression corpus; known inputs still crash with recorded signature |
+| `test_mutation_weights.py` | configurable strategy weighting; byte-identical to uniform when unset |
+| `test_fuzz_throughput.py` | batched-persistence equivalence; memoized pool; crash-count batching |
+| `test_command_handlers.py` | CLI handlers (corpus/audio/agent/research/diff/report/config) via `main` |
+| `test_logging_output.py` | structured logging levels/redaction/file output; `Result` renderer |
+| `test_edge_paths.py` | context/report/fuzz error-handling and control-transition edge paths |
 
 ## Test types
 
@@ -33,6 +38,11 @@ Generated during phase 10 (final audit).
 - **End-to-end** — full artifact chain `experiment → crash → minimized →
   analysis → report`, and a complete `research run`.
 - **Regression** — regression-corpus replay guarding known crash behavior.
+- **Mutation-tested** — critical logic is verified by targeted mutation testing;
+  five real test gaps found and closed (config deep-merge, config-hash width,
+  differential regression direction, differential `differs` flag, report
+  empty-section validation). Safety-critical exploitability/validation logic has
+  no surviving mutants.
 
 ## Determinism & resumability (explicitly tested)
 
