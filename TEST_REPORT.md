@@ -4,8 +4,8 @@ Generated during phase 10 (final audit).
 
 ## Summary
 
-- **Result:** 122 passed, 0 failed
-- **Branch coverage:** 88% (statements + branches) across `ios_research`
+- **Result:** 177 passed, 0 failed
+- **Branch coverage:** 94% (statements + branches) across `ios_research`
 - **Runner:** `pytest` (Python 3.14), deterministic via a frozen clock
 - **Command:** `pytest --cov=ios_research --cov-report=term-missing`
 
