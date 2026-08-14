@@ -363,3 +363,24 @@ research/diff/report/config, previously only engine-tested) and
 and the `Result` renderer). Branch coverage rose from 88% to **92%**; the
 command layer and logging are now exercised end-to-end. Test-only, no behavior
 change.
+
+### Reliability & reproducibility goals (measured, already optimal)
+
+| Goal | Metric | Measured |
+|------|--------|----------|
+| 10 crash-reproducibility | reproduction_rate | **1.000** (all crashes reproduce their signature) |
+| 16 experiment-reproducibility | experiment_reproducibility | **1.000** (5 fresh runs byte-identical) |
+| 18 framework-reliability | end_to_end_success_rate / resume_success_rate / data_loss_rate | **1.000 / 1.000 / 0.000** |
+| 11 root-cause-analysis | classification_accuracy | classification faithfully reflects the triggered defect (a crafted "integer" input that also overran its buffer is correctly reported as OOB — the classifier is right, the sample input was ambiguous) |
+
+### Goal 02 test-quality — mutation testing → **IMPROVED**
+
+Ran targeted mutation testing on critical logic (8 mutants). Score **6/8**;
+two mutants **survived**, exposing real test gaps:
+
+- config **deep-merge** replaced by a shallow assign — not caught.
+- config **hash truncation** (`[:16]` → `[:1]`) — not caught.
+
+Added two tests (`test_config_deep_merge_preserves_sibling_defaults`,
+`test_config_hash_is_distinct_and_fixed_width`). Both mutants are now **killed**
+(mutation_score 8/8 on the sample). 161 tests passing.

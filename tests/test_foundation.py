@@ -54,6 +54,29 @@ def test_config_set_is_immutable():
     assert cfg2.get("fuzz.workers") == 4
 
 
+def test_config_deep_merge_preserves_sibling_defaults():
+    # Overriding one nested key must not drop the other defaults under it
+    # (guards against a shallow replace instead of a deep merge).
+    cfg = Config({"fuzz": {"workers": 5}})
+    assert cfg.get("fuzz.workers") == 5
+    assert cfg.get("fuzz.max_cases") == DEFAULT_CONFIG["fuzz"]["max_cases"]
+    assert cfg.get("fuzz.strategy_weights") is not None
+    # A deeper override still preserves siblings.
+    cfg2 = cfg.set("fuzz.strategy_weights.byte", 3)
+    assert cfg2.get("fuzz.strategy_weights.byte") == 3
+    assert cfg2.get("fuzz.strategy_weights.structure_aware") == \
+        DEFAULT_CONFIG["fuzz"]["strategy_weights"]["structure_aware"]
+
+
+def test_config_hash_is_distinct_and_fixed_width():
+    # The hash suffix must be wide enough to avoid collisions across configs.
+    cfg = Config()
+    suffix = cfg.hash.split("_", 1)[1]
+    assert len(suffix) == 16
+    hashes = {Config().set("fuzz.workers", n).hash for n in range(64)}
+    assert len(hashes) == 64          # all distinct — no truncation collisions
+
+
 # --- safety ---------------------------------------------------------------
 def test_safety_blocks_forbidden_capability():
     with pytest.raises(SafetyError):
