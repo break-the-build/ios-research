@@ -418,3 +418,15 @@ real gap: report validation only flagged `None` sections, not empty
 - Branch coverage: **88% → 94%**; tests **138 → 178**.
 - Safety-critical exploitability/validation/orchestration logic verified by
   mutation testing (no surviving mutants).
+
+### Goal 02 — mutation testing round 4 (targets/corpus/workspace)
+
+Swept target/corpus/workspace/agent logic (12 mutants). Three real gaps found
+and closed: the mock:parser and audio TIMEOUT outcomes were untested, and no
+test verified that NULL_DEREFERENCE produces a null (0x0) faulting address.
+Added tests; all three mutants killed. The workspace `os.replace` mutant is an
+equivalent mutant (atomicity only matters under a crash/concurrent write, which
+tests do not simulate) and is intentionally not chased.
+
+**Cumulative test-quality (this session): 8 mutation-driven gaps closed;
+185 tests; 94% branch coverage; safety-critical logic mutation-clean.**

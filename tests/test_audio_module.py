@@ -54,6 +54,14 @@ def test_audio_zero_channels_is_integer_error(target_id):
     assert res.diagnostics.classification_hint == "INTEGER_ERROR"
 
 
+@pytest.mark.parametrize("target_id", AUDIO_IDS)
+def test_audio_timeout_on_oversized_declared_length(target_id):
+    target = create(target_id)
+    # declared >= 0xF000 takes the timeout path (checked before OOB).
+    data = target.magic + (0xF000).to_bytes(2, "big") + bytes([2, 1]) + b"x"
+    assert target.execute(data).outcome == Outcome.TIMEOUT
+
+
 def test_audio_structure_mutate_is_format_aware():
     target = create("audio:wav")
     rng = mutation.rng_for(1, 1)

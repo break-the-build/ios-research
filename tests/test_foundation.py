@@ -136,6 +136,26 @@ def test_mock_parser_rejects_bad_magic():
     assert res.outcome == Outcome.REJECTED
 
 
+def test_mock_parser_timeout_on_oversized_declared_length():
+    # declared_length >= 0xF000 with a matching payload takes the slow path.
+    payload = b"\x00" * 0xF000
+    data = b"MOCK" + bytes([1, 1]) + (0xF000).to_bytes(2, "big") + payload
+    res = create("mock:parser").execute(data)
+    assert res.outcome == Outcome.TIMEOUT
+
+
+def test_null_dereference_has_null_faulting_address():
+    res = create("mock:parser").execute(b"MOCK\x01\xff\x00\x00")
+    assert res.outcome == Outcome.CRASH
+    assert res.diagnostics.classification_hint == "NULL_DEREFERENCE"
+    assert res.diagnostics.faulting_address == "0x0000000000000000"
+
+
+def test_non_null_crash_has_nonnull_faulting_address():
+    res = create("mock:parser").execute(b"MOCK\x01\x01\xff\xff")   # OOB read
+    assert res.diagnostics.faulting_address != "0x0000000000000000"
+
+
 # --- CLI framework --------------------------------------------------------
 def test_cli_version(capsys):
     code = main(["version"])
