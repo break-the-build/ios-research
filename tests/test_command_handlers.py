@@ -170,6 +170,43 @@ def test_report_export_handler(run, tmp_path):
     assert "content" in inline["data"]
 
 
+def test_fuzz_start_unknown_target(run):
+    run("fuzz", "start", "--target", "bogus:x", expect=ExitCode.USAGE)
+
+
+def test_fuzz_status_no_sessions(run):
+    run("fuzz", "status", expect=ExitCode.NOT_FOUND)
+
+
+def test_research_run_unknown_target(run):
+    run("research", "create", "--target", "bogus:x", expect=ExitCode.USAGE)
+
+
+def test_diff_run_no_experiments(run):
+    run("diff", "run", expect=ExitCode.NOT_FOUND)
+
+
+def test_report_create_unknown_crash(run):
+    run("report", "create", "crash_missing", expect=ExitCode.NOT_FOUND)
+
+
+def test_analyze_unknown_crash(run):
+    run("analyze", "crash_missing", expect=ExitCode.NOT_FOUND)
+
+
 # --- config edge paths ----------------------------------------------------
 def test_config_get_unknown_key(run):
     run("config", "get", "no.such.key", expect=ExitCode.USAGE)
+
+
+def test_config_set_and_hash(run):
+    updated = run("config", "set", "fuzz.workers", "3")
+    assert updated["data"]["value"] == 3
+    hashed = run("config", "hash")
+    assert hashed["data"]["config_hash"].startswith("cfg_")
+
+
+def test_doctor_and_info_and_version(run):
+    assert run("doctor")["data"]["workspace_initialized"] is True
+    assert run("info")["data"]["safety_boundary"]["authorized_research_only"]
+    assert run("version")["data"]["version"]
