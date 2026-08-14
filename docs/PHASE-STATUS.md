@@ -29,10 +29,26 @@ generation, persistence, surveillance, or sandbox/TCC bypass is implemented.
 Autonomous optimization via the `experiment-loop` engine (see
 [EXPERIMENT-LOOP-RESULTS.md](EXPERIMENT-LOOP-RESULTS.md)).
 
-| Goal | Experiment | Result | Decision | Tracking |
-|------|-----------|--------|----------|----------|
-| 06-fuzz-effectiveness | mutation-strategy weighting | +9–16% unique crashes across mock+audio targets; repro rate 1.00 | IMPLEMENT_NOW | Issue #1 → PR #2 |
+Promotions (all merged):
 
-Added `tools/experiment_loop/ios_research_env.py` (the `ios_research_fuzzer`
-environment) so the loop optimizes real framework behavior. Baseline `a0eb008`;
-130 tests passing after promotion.
+| Goal | Experiment | Result | Tracking |
+|------|-----------|--------|----------|
+| 06 fuzz-effectiveness | mutation-strategy weighting | +9–16% unique crashes across mock+audio; repro 1.00 | Issue #1 → PR #2 |
+| 05 fuzz-throughput | batched hot-loop persistence | **8.8×** exec/s (3,220 → 28,379), byte-identical | Issue #3 → PR #4 |
+| 17 report-quality | reproduce+minimize before report | evidence_completeness **0.80 → 1.00** (met hard ≥0.95) | Issue #5 → PR #6 |
+
+Test-quality (goals 01/02, direct commits): branch coverage **88% → 95%**,
+tests **122 → 189**, and **8 mutation-driven gaps** closed (config deep-merge,
+config-hash width, differential regression direction, differential `differs`,
+report empty-section, mock/audio TIMEOUT paths, null-deref address). Safety-
+critical exploitability/validation logic is mutation-clean.
+
+Audited already-optimal (no change): 03 cli-reliability, 08 crash-dedup,
+09 minimizer, 10 crash-reproducibility, 16 experiment-reproducibility,
+18 framework-reliability, 19 security-hardening, 20 documentation. Deferred:
+04 cli-performance (latency dominated by interpreter startup); 13/14/15
+efficiency & agent (cost↔thoroughness trade-offs).
+
+Environments: 9 `run(config, samples, seed)` bindings under
+`tools/experiment_loop/ios_env/` (loaded via `ios_research_env.py`). See
+[EXPERIMENT-LOOP-RESULTS.md](EXPERIMENT-LOOP-RESULTS.md) for full evidence.
