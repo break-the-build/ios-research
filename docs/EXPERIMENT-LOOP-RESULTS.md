@@ -340,3 +340,26 @@ audit rather than a knob search):
 **Verdict: already optimal** — no broken markdown links, every CLI command
 documented in `docs/CLI_REFERENCE.md`, all required docs present. No change
 warranted (a useful negative result).
+
+---
+
+## Session 5 (2026-08-13) — remaining goals sweep
+
+Starting commit `b2ea721`. Directive: keep working through un-run goals.
+
+| Goal | Method | Result | Verdict |
+|------|--------|--------|---------|
+| 03 cli-reliability | 43-command CLI matrix (incl. error paths) with `--json` | `json_output_valid_rate` = 1.000; every command returns a valid envelope | already reliable |
+| 04 cli-performance | latency profiling | p95 ≈ 66 ms, dominated by interpreter/stdlib startup; addressable engine-import saving only ~11 ms across 13 modules | DEFER (below threshold) |
+| 19 security-hardening | redaction + destructive-gating + safety audit | `secret_leak_rate` = 0, `unsafe_operation_rate` = 0; redaction verified in log stream + file; safety boundary enforced | already hardened |
+| 01 test-coverage | add CLI-handler + logging/output tests | branch coverage **88% → 92%**; 159 tests (from 138) | **IMPROVED** |
+| 20 documentation-quality | repo audit (session 4) | 0 broken links, 17/17 CLI commands documented, 10/10 docs present | already optimal |
+
+### Promotion — goal 01
+
+Added `tests/test_command_handlers.py` (CLI handlers for corpus/audio/agent/
+research/diff/report/config, previously only engine-tested) and
+`tests/test_logging_output.py` (structured logging levels/redaction/file output
+and the `Result` renderer). Branch coverage rose from 88% to **92%**; the
+command layer and logging are now exercised end-to-end. Test-only, no behavior
+change.
