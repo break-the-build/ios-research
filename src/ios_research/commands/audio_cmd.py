@@ -6,10 +6,8 @@ extension hook.
 
 from __future__ import annotations
 
-from .. import targets
 from ..errors import NotFoundError
 from ..output import Result
-from ..targets.audio import AUDIO_TARGETS
 from . import target_cmd
 
 
@@ -35,6 +33,7 @@ def register(subparsers, parent) -> None:
 
 
 def _resolve(fmt: str) -> str:
+    from ..targets.audio import AUDIO_TARGETS
     if fmt in AUDIO_TARGETS:
         return fmt
     candidate = f"audio:{fmt}"
@@ -44,6 +43,8 @@ def _resolve(fmt: str) -> str:
 
 
 def cmd_list(ctx, args) -> Result:
+    from .. import targets
+    from ..targets.audio import AUDIO_TARGETS
     items = [targets.create(tid).describe() for tid in sorted(AUDIO_TARGETS)]
     return Result(command="target audio list",
                   data={"targets": items, "count": len(items)},
@@ -52,6 +53,7 @@ def cmd_list(ctx, args) -> Result:
 
 
 def cmd_inspect(ctx, args) -> Result:
+    from .. import targets
     target_id = _resolve(args.format)
     target = targets.create(target_id)
     d = target.describe()

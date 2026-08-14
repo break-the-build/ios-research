@@ -5,11 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..agent import Agent
 from ..errors import UsageError
 from ..output import Result
-from ..schema import build_cli_schema
-from .. import targets
 
 
 def register(subparsers, parent) -> None:
@@ -52,14 +49,17 @@ def register(subparsers, parent) -> None:
 
 
 def cmd_status(ctx, args) -> Result:
+    from ..agent import Agent
     return Result(command="agent status", data=Agent(ctx).status())
 
 
 def cmd_inspect(ctx, args) -> Result:
+    from ..agent import Agent
     return Result(command="agent inspect", data=Agent(ctx).inspect())
 
 
 def cmd_schema(ctx, args) -> Result:
+    from ..schema import build_cli_schema
     schema = build_cli_schema()
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -71,6 +71,7 @@ def cmd_schema(ctx, args) -> Result:
 
 
 def _resolve_target(ctx, target):
+    from .. import targets
     target = target or ctx.config().get("default_target")
     if not targets.is_registered(target):
         raise UsageError(f"unknown target '{target}'")
@@ -78,6 +79,7 @@ def _resolve_target(ctx, target):
 
 
 def cmd_run(ctx, args) -> Result:
+    from ..agent import Agent
     target = _resolve_target(ctx, args.target)
     data = Agent(ctx).run(target=target, seed=args.seed,
                           max_cases=args.max_cases, minimize=not args.no_minimize)
@@ -87,10 +89,12 @@ def cmd_run(ctx, args) -> Result:
 
 
 def cmd_experiment(ctx, args) -> Result:
+    from ..agent import Agent
     target = _resolve_target(ctx, args.target)
     return Result(command="agent experiment",
                   data=Agent(ctx).experiment(target=target, seed=args.seed))
 
 
 def cmd_analyze(ctx, args) -> Result:
+    from ..agent import Agent
     return Result(command="agent analyze", data=Agent(ctx).analyze())

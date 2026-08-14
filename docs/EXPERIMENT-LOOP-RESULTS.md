@@ -430,3 +430,38 @@ tests do not simulate) and is intentionally not chased.
 
 **Cumulative test-quality (this session): 8 mutation-driven gaps closed;
 185 tests; 94% branch coverage; safety-critical logic mutation-clean.**
+
+---
+
+## Session 6 (2026-08-14) — CLI performance (goal 04)
+
+Revisited the previously-deferred goal 04 at the user's request and **implemented**
+it. `cli.py` imports every command module for argparse registration, and each
+module imported its domain engine at module top — so even `ios-research version`
+loaded 47 modules of engines it never used.
+
+**Change:** defer each command module's engine imports into the handler
+functions (standard CLI lazy-import pattern). Registration stays at module top;
+engines import only when their command runs. Two register-time factories
+(`fuzz_cmd._make_control`, `audio_cmd._install`) were fixed so the deferral
+actually holds during `build_parser()`.
+
+**Measured (best-of, low noise):**
+
+| metric | before | after |
+|--------|--------|-------|
+| `import ios_research.cli` | 22.1 ms / 47 modules | **15.5 ms / 27 modules** |
+| `version` command | 59.5 ms | **49.6 ms (−17%)** |
+| `info` command | 59.7 ms | **50.2 ms (−16%)** |
+| `doctor` command | 70.9 ms | **64.1 ms (−10%)** |
+
+Behavior identical (202 tests pass; every command group smoke-tested). Added
+`tests/test_cli_startup.py` guarding that lightweight commands and `build_parser`
+load no heavy engines, while engine-using commands still import them.
+
+**Decision: `IMPLEMENT_NOW`** (was DEFER in session 2; the measured ~7–10 ms
+per-command saving and cleaner startup justify it) → Issue #7 → PR.
+
+### GitHub Tracking (session 6)
+
+- Issues created: 1 (#7) · PRs created: 1 · PRs merged: 1

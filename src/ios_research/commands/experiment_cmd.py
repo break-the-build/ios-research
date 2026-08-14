@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from .. import devices, targets
 from ..errors import UsageError
-from ..experiment import ExperimentStore
 from ..output import Result
 
 
@@ -31,6 +29,8 @@ def register(subparsers, parent) -> None:
 
 
 def cmd_create(ctx, args) -> Result:
+    from .. import devices, targets
+    from ..experiment import ExperimentStore
     ws = ctx.workspace()
     cfg = ctx.config()
     target_id = args.target or cfg.get("default_target")
@@ -51,6 +51,7 @@ def cmd_create(ctx, args) -> Result:
 
 
 def cmd_list(ctx, args) -> Result:
+    from ..experiment import ExperimentStore
     store = ExperimentStore(ctx.workspace())
     exps = [e.to_dict() for e in store.list()]
     return Result(command="experiment list",
@@ -61,6 +62,7 @@ def cmd_list(ctx, args) -> Result:
 
 
 def cmd_show(ctx, args) -> Result:
+    from ..experiment import ExperimentStore
     store = ExperimentStore(ctx.workspace())
     exp = store.get(args.experiment_id)
     return Result(command="experiment show", data={"experiment": exp.to_dict()})

@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import time
 
-from .. import devices, targets
-from ..corpus import CorpusStore
 from ..errors import NotFoundError, UsageError
-from ..experiment import ExperimentStore
-from ..fuzz import FuzzEngine, DEFAULT_BASE
 from ..output import Result
 
 
@@ -58,6 +54,10 @@ def _resolve_session(engine, session_id):
 
 
 def cmd_start(ctx, args) -> Result:
+    from .. import devices, targets
+    from ..corpus import CorpusStore
+    from ..experiment import ExperimentStore
+    from ..fuzz import FuzzEngine, DEFAULT_BASE
     ws = ctx.workspace()
     cfg = ctx.config()
     target_id = args.target or cfg.get("default_target")
@@ -119,6 +119,7 @@ def cmd_start(ctx, args) -> Result:
 
 
 def cmd_status(ctx, args) -> Result:
+    from ..fuzz import FuzzEngine
     engine = FuzzEngine(ctx.workspace())
     session = _resolve_session(engine, getattr(args, "session_id", None))
     return Result(command="fuzz status", data={"stats": session.stats()},
@@ -129,6 +130,7 @@ def cmd_status(ctx, args) -> Result:
 
 def _make_control(action: str):
     def handler(ctx, args) -> Result:
+        from ..fuzz import FuzzEngine
         engine = FuzzEngine(ctx.workspace())
         session = _resolve_session(engine, getattr(args, "session_id", None))
         if action == "pause":

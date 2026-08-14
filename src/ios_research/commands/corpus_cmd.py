@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .. import targets
-from ..corpus import CorpusStore
 from ..output import Result
 
 
@@ -50,6 +48,7 @@ def register(subparsers, parent) -> None:
 
 
 def cmd_create(ctx, args) -> Result:
+    from ..corpus import CorpusStore
     from ..fuzz import DEFAULT_BASE
     store = CorpusStore(ctx.workspace())
     corpus = store.create(args.name, target=args.target)
@@ -61,6 +60,7 @@ def cmd_create(ctx, args) -> Result:
 
 
 def cmd_import(ctx, args) -> Result:
+    from ..corpus import CorpusStore
     store = CorpusStore(ctx.workspace())
     corpus = store.get(args.corpus_id)
     added = store.import_path(corpus, Path(args.path))
@@ -71,6 +71,7 @@ def cmd_import(ctx, args) -> Result:
 
 
 def cmd_list(ctx, args) -> Result:
+    from ..corpus import CorpusStore
     store = CorpusStore(ctx.workspace())
     items = [{"id": c.id, "name": c.name, "size": len(c.testcases),
               "target": c.target} for c in store.list()]
@@ -82,6 +83,7 @@ def cmd_list(ctx, args) -> Result:
 
 
 def cmd_inspect(ctx, args) -> Result:
+    from ..corpus import CorpusStore
     store = CorpusStore(ctx.workspace())
     corpus = store.get(args.corpus_id)
     origins: dict[str, int] = {}
@@ -93,6 +95,7 @@ def cmd_inspect(ctx, args) -> Result:
 
 
 def cmd_dedupe(ctx, args) -> Result:
+    from ..corpus import CorpusStore
     store = CorpusStore(ctx.workspace())
     corpus = store.get(args.corpus_id)
     removed = store.dedupe(corpus)
@@ -103,6 +106,8 @@ def cmd_dedupe(ctx, args) -> Result:
 
 
 def cmd_minimize(ctx, args) -> Result:
+    from .. import targets
+    from ..corpus import CorpusStore
     store = CorpusStore(ctx.workspace())
     corpus = store.get(args.corpus_id)
     target_id = args.target or corpus.target or ctx.config().get("default_target")
