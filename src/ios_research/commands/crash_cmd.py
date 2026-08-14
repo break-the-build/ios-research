@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from ..crashes import CrashStore
 from ..output import Result
-from ..triage import Triage
 
 
 def register(subparsers, parent) -> None:
@@ -44,6 +42,7 @@ def register(subparsers, parent) -> None:
 
 
 def cmd_list(ctx, args) -> Result:
+    from ..crashes import CrashStore
     crashes = CrashStore(ctx.workspace()).list()
     items = [{"id": c.id, "classification": c.classification,
               "signature": c.signature, "count": c.count, "target": c.target,
@@ -56,11 +55,13 @@ def cmd_list(ctx, args) -> Result:
 
 
 def cmd_show(ctx, args) -> Result:
+    from ..crashes import CrashStore
     crash = CrashStore(ctx.workspace()).get(args.crash_id)
     return Result(command="crash show", data={"crash": crash.to_dict()})
 
 
 def cmd_reproduce(ctx, args) -> Result:
+    from ..triage import Triage
     triage = Triage(ctx.workspace())
     crash = triage.crashes.get(args.crash_id)
     outcome = triage.reproduce(crash)
@@ -71,6 +72,7 @@ def cmd_reproduce(ctx, args) -> Result:
 
 
 def cmd_minimize(ctx, args) -> Result:
+    from ..triage import Triage
     triage = Triage(ctx.workspace())
     crash = triage.crashes.get(args.crash_id)
     result = triage.minimize(crash)
@@ -81,12 +83,14 @@ def cmd_minimize(ctx, args) -> Result:
 
 
 def cmd_classify(ctx, args) -> Result:
+    from ..triage import Triage
     triage = Triage(ctx.workspace())
     crash = triage.crashes.get(args.crash_id)
     return Result(command="crash classify", data=triage.classify(crash))
 
 
 def cmd_compare(ctx, args) -> Result:
+    from ..triage import Triage
     triage = Triage(ctx.workspace())
     a = triage.crashes.get(args.crash_id_a)
     b = triage.crashes.get(args.crash_id_b)

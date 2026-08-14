@@ -6,7 +6,6 @@ respective module (see phase 03).
 
 from __future__ import annotations
 
-from .. import targets
 from ..output import Result
 
 # Extra subparser installers contributed by other modules (e.g. audio).
@@ -42,6 +41,7 @@ def register(subparsers, parent) -> None:
 
 
 def cmd_list(ctx, args) -> Result:
+    from .. import targets
     items = targets.list_targets()
     return Result(command="target list", data={"targets": items, "count": len(items)},
                   human=lambda d: "\n".join(
@@ -50,5 +50,6 @@ def cmd_list(ctx, args) -> Result:
 
 
 def cmd_show(ctx, args) -> Result:
+    from .. import targets
     target = targets.create(args.target_id)
     return Result(command="target show", data={"target": target.describe()})

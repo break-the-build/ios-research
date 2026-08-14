@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..output import Result
-from ..report import ReportGenerator
 
 
 def register(subparsers, parent) -> None:
@@ -42,6 +41,7 @@ def register(subparsers, parent) -> None:
 
 
 def cmd_create(ctx, args) -> Result:
+    from ..report import ReportGenerator
     gen = ReportGenerator(ctx.workspace())
     report = gen.create(args.crash_id)
     validation = gen.validate(report)
@@ -53,11 +53,13 @@ def cmd_create(ctx, args) -> Result:
 
 
 def cmd_show(ctx, args) -> Result:
+    from ..report import ReportGenerator
     report = ReportGenerator(ctx.workspace()).get(args.report_id)
     return Result(command="report show", data={"report": report.to_dict()})
 
 
 def cmd_validate(ctx, args) -> Result:
+    from ..report import ReportGenerator
     gen = ReportGenerator(ctx.workspace())
     report = gen.get(args.report_id)
     validation = gen.validate(report)
@@ -68,6 +70,7 @@ def cmd_validate(ctx, args) -> Result:
 
 
 def cmd_export(ctx, args) -> Result:
+    from ..report import ReportGenerator
     gen = ReportGenerator(ctx.workspace())
     report = gen.get(args.report_id)
     content = gen.export(report, args.format)
@@ -82,6 +85,7 @@ def cmd_export(ctx, args) -> Result:
 
 
 def cmd_list(ctx, args) -> Result:
+    from ..report import ReportGenerator
     reports = ReportGenerator(ctx.workspace()).list()
     items = [{"id": r.id, "crash_id": r.crash_id} for r in reports]
     return Result(command="report list", data={"reports": items, "count": len(items)},

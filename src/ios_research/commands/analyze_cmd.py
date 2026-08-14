@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from ..analysis import Analyzer
-from ..crashes import CrashStore
 from ..errors import UsageError
 from ..output import Result
 
@@ -28,6 +26,8 @@ def register(subparsers, parent) -> None:
 
 
 def cmd_analyze(ctx, args) -> Result:
+    from ..analysis import Analyzer
+    from ..crashes import CrashStore
     analyzer = Analyzer(ctx.workspace())
     if args.crash_id and not args.batch:
         crash = CrashStore(ctx.workspace()).get(args.crash_id)
@@ -50,11 +50,13 @@ def cmd_analyze(ctx, args) -> Result:
 
 
 def cmd_show(ctx, args) -> Result:
+    from ..analysis import Analyzer
     analysis = Analyzer(ctx.workspace()).get(args.analysis_id)
     return Result(command="analysis show", data={"analysis": analysis.to_dict()})
 
 
 def cmd_list(ctx, args) -> Result:
+    from ..analysis import Analyzer
     analyses = Analyzer(ctx.workspace()).list()
     items = [{"id": a.id, "crash_id": a.crash_id,
               "indicator": a.exploitability_classification,

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from ..errors import InterruptedError_, NotFoundError, UsageError
 from ..output import Result
-from ..research import ResearchOrchestrator
-from .. import targets
 
 
 def register(subparsers, parent) -> None:
@@ -51,6 +49,8 @@ def _resolve(orch, research_id):
 
 
 def cmd_create(ctx, args) -> Result:
+    from ..research import ResearchOrchestrator
+    from .. import targets
     orch = ResearchOrchestrator(ctx.workspace())
     target = args.target or ctx.config().get("default_target")
     if not targets.is_registered(target):
@@ -67,6 +67,7 @@ def cmd_create(ctx, args) -> Result:
 
 
 def cmd_run(ctx, args) -> Result:
+    from ..research import ResearchOrchestrator
     # Destructive/resource-consuming: require explicit confirmation.
     if not ctx.confirm("run full research pipeline"):
         raise InterruptedError_(
@@ -82,6 +83,7 @@ def cmd_run(ctx, args) -> Result:
 
 
 def cmd_resume(ctx, args) -> Result:
+    from ..research import ResearchOrchestrator
     if not ctx.confirm("resume research pipeline"):
         raise InterruptedError_(
             "research resume requires confirmation; re-run with --yes")
@@ -95,6 +97,7 @@ def cmd_resume(ctx, args) -> Result:
 
 
 def cmd_pause(ctx, args) -> Result:
+    from ..research import ResearchOrchestrator
     orch = ResearchOrchestrator(ctx.workspace())
     run = orch.pause(_resolve(orch, args.research_id))
     return Result(command="research pause",
@@ -102,6 +105,7 @@ def cmd_pause(ctx, args) -> Result:
 
 
 def cmd_status(ctx, args) -> Result:
+    from ..research import ResearchOrchestrator
     orch = ResearchOrchestrator(ctx.workspace())
     if getattr(args, "research_id", None) is None and not orch.list():
         return Result(command="research status",
@@ -114,6 +118,7 @@ def cmd_status(ctx, args) -> Result:
 
 
 def cmd_summarize(ctx, args) -> Result:
+    from ..research import ResearchOrchestrator
     orch = ResearchOrchestrator(ctx.workspace())
     run = _resolve(orch, args.research_id)
     return Result(command="research summarize",

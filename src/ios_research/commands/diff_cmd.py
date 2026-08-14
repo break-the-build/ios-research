@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from ..differential import DifferentialEngine
 from ..errors import NotFoundError
 from ..output import Result
 
@@ -51,6 +50,7 @@ def _resolve(engine, diff_id):
 
 
 def cmd_create(ctx, args) -> Result:
+    from ..differential import DifferentialEngine
     engine = DifferentialEngine(ctx.workspace())
     diff = engine.create(name=args.name, target_a=args.target_a,
                          target_b=args.target_b, config_hash=ctx.config().hash,
@@ -60,6 +60,7 @@ def cmd_create(ctx, args) -> Result:
 
 
 def cmd_run(ctx, args) -> Result:
+    from ..differential import DifferentialEngine
     engine = DifferentialEngine(ctx.workspace())
     diff = _resolve(engine, args.diff_id)
     summary = engine.run(diff)
@@ -70,18 +71,21 @@ def cmd_run(ctx, args) -> Result:
 
 
 def cmd_compare(ctx, args) -> Result:
+    from ..differential import DifferentialEngine
     engine = DifferentialEngine(ctx.workspace())
     diff = _resolve(engine, args.diff_id)
     return Result(command="diff compare", data=engine.compare(diff))
 
 
 def cmd_report(ctx, args) -> Result:
+    from ..differential import DifferentialEngine
     engine = DifferentialEngine(ctx.workspace())
     diff = _resolve(engine, args.diff_id)
     return Result(command="diff report", data=engine.report(diff))
 
 
 def cmd_list(ctx, args) -> Result:
+    from ..differential import DifferentialEngine
     engine = DifferentialEngine(ctx.workspace())
     items = [{"id": d.id, "name": d.name, "a": d.target_a, "b": d.target_b,
               "status": d.status} for d in engine.list()]
