@@ -119,3 +119,35 @@ def test_engine_persists_and_uses_weights(workspace):
     # Persisted and reloadable.
     assert engine.get(session.id).strategy_weights == weights
     assert session.unique_crashes > 0
+
+
+# --- structure-aware coverage of the v2 regression (deep-dive 03) ----------
+def test_structure_aware_covers_v2_version_gate():
+    """The mock structure-aware mutator must be able to emit a version==2
+    record, otherwise it is structurally blind to the v2 OOB_WRITE regression
+    (see research/findings/DEEP-DIVE-03-strategy-discovery-gap.md)."""
+    target = create("mock:parser-v2")
+    versions = set()
+    for i in range(2000):
+        data = mutation.mutate_structure_aware(
+            target.seeds()[0], mutation.rng_for(1234, i))
+        if len(data) >= 5 and data[:4] == b"MOCK":
+            versions.add(data[4])
+    assert 2 in versions, f"structure_aware never emitted version==2 (saw {sorted(versions)})"
+
+
+def test_fuzz_discovers_v2_oob_write_within_budget():
+    """With default weights, fuzzing mock:parser-v2 from its canonical seed must
+    surface the OUT_OF_BOUNDS_WRITE regression within a small budget."""
+    target = create("mock:parser-v2")
+    base = target.seeds()[0]
+    default = Config().get("fuzz.strategy_weights")
+    classes = set()
+    for i in range(400):
+        data, _ = mutation.mutate(base, 20260814, i,
+                                  struct_fn=target.structure_mutate,
+                                  weights=default)
+        r = target.execute(data)
+        if r.outcome == Outcome.CRASH and r.diagnostics:
+            classes.add(r.diagnostics.classification_hint)
+    assert "OUT_OF_BOUNDS_WRITE" in classes, f"regression not found; saw {sorted(classes)}"
