@@ -63,6 +63,21 @@ def test_validation_flags_overclaimed_exploitability(workspace):
     assert any("exploitability" in i for i in result["issues"])
 
 
+def test_validation_flags_empty_section(workspace):
+    # An empty (not None) required section must be flagged as missing.
+    crash = _crash(workspace)
+    gen = ReportGenerator(workspace)
+    report = gen.create(crash.id)
+    report.sections["security_impact"] = ""       # present but empty
+    result = gen.validate(report)
+    assert result["valid"] is False
+    assert any("security_impact" in i for i in result["issues"])
+    # Also empty list/dict sections.
+    report2 = gen.create(crash.id)
+    report2.sections["reproduction_steps"] = []
+    assert gen.validate(report2)["valid"] is False
+
+
 def test_validation_flags_forbidden_content(workspace):
     crash = _crash(workspace)
     gen = ReportGenerator(workspace)

@@ -401,3 +401,20 @@ Added `test_regression_direction_distinguishes_fixes_from_regressions` and
 `test_differs_flag_covers_signature_only_differences` (the latter uses a
 version-2 + use-after-free input: v1 → UAF, v2 → OOB-write). Both mutants are
 now killed.
+
+### Goal 02 — mutation testing on safety-critical modules (round 3)
+
+Mutated exploitability/analysis, report validation, and research orchestration
+(10 mutants). Score 8/10 — the safety-critical logic held (attempts to overclaim
+null-deref as CODE_EXECUTION_INDICATOR, reverse the storage guard, inflate
+confidence, or drop the crash signature from the crash id were all killed). One
+real gap: report validation only flagged `None` sections, not empty
+`""`/`[]`/`{}` ones. Added `test_validation_flags_empty_section`; mutant killed.
+
+### Test-quality summary (this session)
+
+- Mutation-driven fixes: **5** real gaps closed (config deep-merge, config hash
+  width, diff regression direction, diff `differs` flag, report empty-section).
+- Branch coverage: **88% → 94%**; tests **138 → 178**.
+- Safety-critical exploitability/validation/orchestration logic verified by
+  mutation testing (no surviving mutants).
