@@ -115,6 +115,61 @@ def test_diff_and_report_list_handlers(run):
     run("diff", "report", did)
 
 
+# --- fuzz control + crash + analyze + report CLI paths -------------------
+def _first_crash(run):
+    run("fuzz", "start", "--target", "mock:parser", "--max-cases", "200",
+        "--seed", "1")
+    crashes = run("crash", "list")
+    return crashes["data"]["crashes"][0]["id"]
+
+
+def test_fuzz_control_commands(run):
+    started = run("fuzz", "start", "--target", "mock:parser",
+                  "--max-cases", "200", "--seed", "2", "--chunk", "50")
+    sid = started["data"]["session"]["id"]
+    assert started["data"]["session"]["status"] == "paused"
+    run("fuzz", "stats", sid)
+    run("fuzz", "pause", sid)
+    resumed = run("fuzz", "resume", sid)
+    assert resumed["data"]["session"]["status"] == "completed"
+    run("fuzz", "stop", sid)
+
+
+def test_crash_and_analyze_handlers(run):
+    cid = _first_crash(run)
+    run("crash", "show", cid)
+    run("crash", "reproduce", cid)
+    run("crash", "classify", cid)
+    run("crash", "minimize", cid)
+    analyzed = run("analyze", cid)
+    aid = analyzed["data"]["analysis"]["id"]
+    shown = run("analysis", "show", aid)
+    assert shown["data"]["analysis"]["id"] == aid
+
+
+def test_crash_compare_handler(run):
+    run("fuzz", "start", "--target", "mock:parser", "--max-cases", "250",
+        "--seed", "3")
+    crashes = run("crash", "list")["data"]["crashes"]
+    if len(crashes) >= 2:
+        cmp = run("crash", "compare", crashes[0]["id"], crashes[1]["id"])
+        assert "same_signature" in cmp["data"]
+
+
+def test_report_export_handler(run, tmp_path):
+    cid = _first_crash(run)
+    run("report", "create", cid)
+    reports = run("report", "list")["data"]["reports"]
+    rid = reports[0]["id"]
+    run("report", "show", rid)
+    run("report", "validate", rid)
+    exported = run("report", "export", rid, "--format", "json",
+                   "--out", str(tmp_path / "r.json"))
+    assert exported["data"]["format"] == "json"
+    inline = run("report", "export", rid, "--format", "markdown")
+    assert "content" in inline["data"]
+
+
 # --- config edge paths ----------------------------------------------------
 def test_config_get_unknown_key(run):
     run("config", "get", "no.such.key", expect=ExitCode.USAGE)
