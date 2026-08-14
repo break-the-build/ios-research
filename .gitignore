@@ -28,3 +28,7 @@ workspace/
 
 # experiment-loop local knowledge base / scratch
 .experiment-loop/
+
+# local research findings / log (session output, not committed)
+research/findings/
+research/RESEARCH-LOG.md
