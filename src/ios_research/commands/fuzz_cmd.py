@@ -50,6 +50,8 @@ def register(subparsers, parent) -> None:
                          help="path to a token dictionary (constraint-guided mutation, #30)")
     p_start.add_argument("--value-profile", action="store_true", dest="value_profile",
                          help="record value-profile guidance in campaign metadata (#30)")
+    p_start.add_argument("--sanitizer-profile", default=None, dest="sanitizer_profile",
+                         help="named sanitizer build profile recorded as provenance (#31)")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -132,7 +134,9 @@ def cmd_start(ctx, args) -> Result:
                             strategy_weights=cfg.get("fuzz.strategy_weights"),
                             dictionary_path=dictionary,
                             value_profile=bool(getattr(args, "value_profile",
-                                                       False)))
+                                                       False)),
+                            sanitizer_profile=getattr(
+                                args, "sanitizer_profile", None))
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

@@ -65,6 +65,7 @@ class FuzzSession:
     dictionary_source: str = ""
     value_profile: bool = False
     token_uses: int = 0
+    sanitizer_profile: str = ""
     started_at: str = ""
     updated_at: str = ""
 
@@ -98,6 +99,7 @@ class FuzzSession:
                 "value_profile": self.value_profile,
                 "token_uses": self.token_uses,
             },
+            "sanitizer_profile": self.sanitizer_profile,
         }
 
 
@@ -148,7 +150,8 @@ class FuzzEngine:
                strategy_weights: dict[str, int] | None = None,
                dictionary_path: str | None = None,
                dictionary_tokens: list[DictionaryToken] | None = None,
-               value_profile: bool = False) -> FuzzSession:
+               value_profile: bool = False,
+               sanitizer_profile: str | None = None) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -163,6 +166,19 @@ class FuzzEngine:
                 "pass either dictionary_path or dictionary_tokens, not both")
         if dictionary_path:
             tokens = load_dictionary(dictionary_path)  # validated eagerly
+        profile = ""
+        if sanitizer_profile:
+            from .sanitizers import validate_profile
+            import sys
+            check = validate_profile(
+                sanitizer_profile,
+                platform="darwin" if sys.platform == "darwin" else "linux")
+            if not check["supported"]:
+                raise StateError(
+                    f"sanitizer profile '{sanitizer_profile}' is not usable: "
+                    f"{check['reason']}",
+                    details={"profile": sanitizer_profile})
+            profile = sanitizer_profile
         session = FuzzSession(
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
@@ -174,6 +190,7 @@ class FuzzEngine:
             dictionary_source=(dictionary_path
                                or (tokens[0].source if tokens else "")),
             value_profile=bool(value_profile),
+            sanitizer_profile=profile,
         )
         if tokens:
             self.ws.write_json(self._dict_rel(session.id), {
