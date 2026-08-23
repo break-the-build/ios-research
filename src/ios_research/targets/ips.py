@@ -176,7 +176,8 @@ def parse_metadata(text: str) -> dict[str, str]:
     """Extract report metadata for matching: process name, OS build, timestamp.
 
     Returns a dict with ``process``, ``os_name``, ``os_version``, ``os_build``,
-    and ``timestamp`` (best-effort; missing fields are empty strings).
+    ``hardware_model``, and ``timestamp`` (best-effort; missing fields are
+    empty strings).
     """
     parts = _split_json_ips(text)
     if parts is not None:
@@ -191,11 +192,14 @@ def parse_metadata(text: str) -> dict[str, str]:
         proc = str(body.get("procName") or header.get("name")
                    or header.get("app_name") or "")
         ts = str(header.get("timestamp") or body.get("captureTime") or "")
-        meta.update({"process": proc.strip(), "timestamp": ts.strip()})
+        hw = str(body.get("modelCode") or header.get("hardware_model")
+                 or header.get("HardwareModel") or "")
+        meta.update({"process": proc.strip(), "timestamp": ts.strip(),
+                     "hardware_model": hw.strip()})
         return meta
 
     meta = {"process": "", "os_name": "", "os_version": "", "os_build": "",
-            "timestamp": ""}
+            "hardware_model": "", "timestamp": ""}
     for line in text.splitlines():
         if line.startswith("Process:"):
             m = re.match(r"Process:\s*(?P<name>[^\[]+)", line)
@@ -205,6 +209,8 @@ def parse_metadata(text: str) -> dict[str, str]:
             meta.update(_parse_os_version(line.split(":", 1)[1]))
         elif line.startswith("Date/Time:"):
             meta["timestamp"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Hardware Model:"):
+            meta["hardware_model"] = line.split(":", 1)[1].strip()
     return meta
 
 
