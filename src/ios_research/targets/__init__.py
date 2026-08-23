@@ -65,6 +65,12 @@ from .wifi import WIFI_TARGETS  # noqa: E402
 for _tid, _cls in WIFI_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
 
+# Mock NFC/NDEF record parser targets (mock = True). CI-safe by construction:
+# they parse bytes only and never touch tag hardware or an RF field.
+from .nfc import NFC_TARGETS  # noqa: E402
+for _tid, _cls in NFC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
 # Real macOS in-process fuzzing targets (mock = False). Opt-in: they require a
 # built native libFuzzer/ASan harness and are skipped in CI. Registering the
 # factory is cheap and does not require the harness to be present.
