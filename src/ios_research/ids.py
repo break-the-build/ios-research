@@ -22,6 +22,7 @@ _PREFIXES = {
     "research": "res",
     "artifact": "art",
     "matrix": "mtx",
+    "harness": "har",
 }
 
 
