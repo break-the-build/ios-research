@@ -22,7 +22,7 @@ from .output import Result, render
 from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
     corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, wifi_cmd, crash_cmd,
-    analyze_cmd, diff_cmd, agent_cmd, report_cmd, research_cmd,
+    analyze_cmd, diff_cmd, harness_cmd, agent_cmd, report_cmd, research_cmd,
     targetflags_cmd, advisory_cmd, surface_cmd,
 )
 
@@ -40,6 +40,7 @@ _REGISTRARS: list[Callable] = [
     crash_cmd.register,
     analyze_cmd.register,
     diff_cmd.register,
+    harness_cmd.register,
     report_cmd.register,
     research_cmd.register,
     agent_cmd.register,
