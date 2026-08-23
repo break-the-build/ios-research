@@ -51,6 +51,7 @@ Every command supports `--json` for a stable, machine-readable envelope.
 | `bluetooth:{btle-adv,l2cap,gatt}` | Mock Bluetooth frame parsers sharing a defect model (bytes-only; no radio access) |
 | `wifi:{beacon,probe-resp,action}` | Mock 802.11 management-frame parsers sharing a defect model (bytes-only; no radio access) |
 | `nfc:{ndef,isodep,tagcmd}` | Mock NFC/NDEF record parsers sharing a defect model (bytes-only; no tag hardware access) |
+| `messaging:{sms,mime,link-preview}` | Mock communication-message parsers (network zero-click profiles #85); shared defect model (bytes-only; no messaging transport or network access) |
 | `mac:{imageio,audiotoolbox,coregraphics}` | **Real** macOS in-process libFuzzer/ASan targets (`mock = False`); opt-in, require a built harness — see [docs/MAC-FUZZING.md](docs/MAC-FUZZING.md) |
 | `ios-device:{file,imageio,audiotoolbox,coregraphics}` | **Real** black-box on-device targets (`mock = False`); stage an input to a USB-attached, *authorized* iPhone and harvest the resulting `.ips` crash log — **confirmation, not analysis**. Opt-in, require a connected device + `libimobiledevice` — see [docs/ON-DEVICE-TARGET.md](docs/ON-DEVICE-TARGET.md) |
 
