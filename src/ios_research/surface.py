@@ -60,6 +60,10 @@ SURFACE_KINDS = (
 # defensible surface kind and entry-point classification. Legacy families
 # (mock/mac/ios-device) predate the inventory and are intentionally absent.
 KIND_SURFACE_MAP = {
+    # mach:sim (#68) models XNU mach_msg handling: classic local IPC
+    # surface reachable from inside the app sandbox.
+    "mach": {"surface_kind": "mach-service",
+             "entry_points": ["app-sandbox"]},
     "audio": {"surface_kind": "framework-parser",
               "entry_points": ["network-user-interaction"]},
     "bluetooth": {"surface_kind": "framework-parser",
