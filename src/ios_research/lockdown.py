@@ -34,7 +34,7 @@ from .errors import NotFoundError, ValidationError
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
-from .workspace import Workspace
+from .workspace import Workspace, validate_component
 
 LOCKDOWN_SCHEMA_VERSION = 1
 
@@ -98,6 +98,7 @@ class LockdownEngine:
         return f"analysis/{pair_id}.json"
 
     def get(self, pair_id: str) -> LockdownPair:
+        validate_component(pair_id, what="lockdown pair id")
         record = self.ws.read_json(self._rel(pair_id))
         if record.get("kind") != "lockdown-pair":
             raise ValidationError(f"'{pair_id}' is not a lockdown pair")

@@ -16,7 +16,7 @@ from .errors import StateError, ValidationError
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
-from .workspace import Workspace
+from .workspace import Workspace, validate_component
 
 
 def _crash_from_dict(data: dict) -> CrashRecord:
@@ -64,6 +64,7 @@ class CrashStore:
         return f"crashes/{crash_id}/crash.json"
 
     def get(self, crash_id: str, *, experiment_id: str | None = None) -> CrashRecord:
+        validate_component(crash_id, what="crash id")
         rel = self._rel(crash_id)
         if not self.ws.path(rel).exists():
             from .errors import NotFoundError

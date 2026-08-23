@@ -60,6 +60,11 @@ The forbidden list is load-bearing. To keep it that way:
   perform them silently.
 - Logs redact common secret-bearing keys (tokens, passwords, credentials).
 - All shipped targets are **mock** targets safe to run in CI.
+- **Mutator plugins and generated-harness proposals are trusted input.**
+  Loading a grammar plugin (`fuzz start --mutator-plugin`) executes its Python;
+  smoke-running a harness candidate executes it in an isolated child process.
+  Only point the framework at code you wrote or reviewed. Fuzz sessions record
+  the plugin file's SHA-256 alongside its path so runs stay auditable.
 
 ## Reporting
 
