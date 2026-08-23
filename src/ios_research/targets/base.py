@@ -89,6 +89,16 @@ class Target:
         """Format-aware mutation. Return None to fall back to generic mutation."""
         return None
 
+    def coverage_features(self, data: bytes, result: ExecResult):
+        """Return stable coverage feature IDs, or ``None`` when unavailable.
+
+        An authorized target adapter may override this hook to expose measured
+        coverage from its own instrumentation.  The framework treats IDs as
+        opaque; it never derives them from crash diagnostics.  Returning
+        ``None`` preserves the deterministic non-coverage fuzzing path.
+        """
+        return None
+
     # lifecycle -----------------------------------------------------------
     def prepare(self) -> None:  # pragma: no cover - trivial default
         pass

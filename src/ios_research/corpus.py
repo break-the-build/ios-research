@@ -28,6 +28,8 @@ class Testcase:
     mutation: str | None = None    # mutation strategy that produced it
     seed: int | None = None
     iteration: int | None = None
+    coverage_features: list[str] = field(default_factory=list)
+    coverage_new_features: list[str] = field(default_factory=list)
     created_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -91,6 +93,8 @@ class CorpusStore:
     def add_bytes(self, corpus: Corpus, data: bytes, *, origin: str,
                   parent: str | None = None, mutation: str | None = None,
                   seed: int | None = None, iteration: int | None = None,
+                  coverage_features: list[str] | tuple[str, ...] | None = None,
+                  coverage_new_features: list[str] | tuple[str, ...] | None = None,
                   dedupe: bool = True, persist: bool = True) -> Testcase | None:
         """Add one testcase.
 
@@ -107,6 +111,8 @@ class CorpusStore:
             id=make_id("testcase", corpus.id, sha),
             sha256=sha, size=len(data), origin=origin, parent=parent,
             mutation=mutation, seed=seed, iteration=iteration,
+            coverage_features=list(coverage_features or ()),
+            coverage_new_features=list(coverage_new_features or ()),
             created_at=now_iso(),
         )
         corpus.testcases.append(tc.to_dict())
@@ -151,7 +157,39 @@ class CorpusStore:
         Runs each testcase through ``target`` and keeps the first testcase for
         each unique ``(outcome, signature)`` behavior key.
         """
-        kept: list[dict] = []
+        # Coverage-aware greedy set cover comes first.  Feature metadata is
+        # preferred because it is the evidence captured at discovery time;
+        # otherwise an optional target adapter is queried.  This preserves one
+        # representative for every feature before behavior minimization.
+        feature_sets: dict[str, set[str]] = {}
+        all_features: set[str] = set()
+        for tc in corpus.testcases:
+            features = set(tc.get("coverage_features", ()))
+            if not features:
+                data = self.read_bytes(corpus, tc["sha256"])
+                provided = target.coverage_features(data, target.execute(data))
+                if provided is not None:
+                    features = set(provided)
+            feature_sets[tc["sha256"]] = features
+            all_features.update(features)
+
+        kept_shas: set[str] = set()
+        covered: set[str] = set()
+        remaining = list(corpus.testcases)
+        while remaining:
+            def gain(tc: dict) -> tuple[int, int, str]:
+                return (len(feature_sets[tc["sha256"]] - covered),
+                        -tc["size"], tc["sha256"])
+            candidate = max(remaining, key=gain)
+            new = feature_sets[candidate["sha256"]] - covered
+            if not new:
+                break
+            kept_shas.add(candidate["sha256"])
+            covered.update(new)
+            remaining.remove(candidate)
+
+        kept: list[dict] = [tc for tc in corpus.testcases
+                            if tc["sha256"] in kept_shas]
         behaviors: set[str] = set()
         for tc in corpus.testcases:
             data = self.read_bytes(corpus, tc["sha256"])
@@ -161,9 +199,11 @@ class CorpusStore:
             if key in behaviors:
                 continue
             behaviors.add(key)
-            kept.append(tc)
+            if tc["sha256"] not in kept_shas:
+                kept.append(tc)
+                kept_shas.add(tc["sha256"])
         removed = len(corpus.testcases) - len(kept)
         corpus.testcases = kept
         self.save(corpus)
         return {"kept": len(kept), "removed": removed,
-                "behaviors": len(behaviors)}
+                "behaviors": len(behaviors), "coverage_features": len(all_features)}

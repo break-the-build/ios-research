@@ -32,6 +32,7 @@ both by human researchers and by LLM agents.
 | `safety.py` | Allowed/forbidden capabilities + enforcement |
 | `workspace.py` | On-disk workspace layout and atomic JSON I/O |
 | `config.py` | Layered configuration + deterministic config hash |
+| `coverage.py` | Optional stable-feature adapter contract and validation |
 | `devices.py` | Device abstraction + mock devices |
 | `experiment.py` | Experiment model and store |
 | `targets/` | Target interface, registry, deterministic mock parser |
@@ -46,6 +47,14 @@ both by human researchers and by LLM agents.
 `execute()` returns a normalized `ExecResult` with an `Outcome`
 (`accepted`/`rejected`/`timeout`/`crash`/`abnormal`) and, for crashes,
 deterministic `Diagnostics`.
+
+Targets may additionally implement `coverage_features(input, result)` to return
+stable, opaque feature IDs from an authorized instrumentation adapter. The fuzz
+engine retains inputs that add a new feature, selects retained inputs with a
+persisted deterministic fair schedule, and records feature evidence in corpus
+metadata. A target without this optional hook follows the original fixed-base
+schedule; coverage is never inferred from crash diagnostics. Corpus minimization
+preserves at least one input for every recorded coverage feature.
 
 ## Artifact lifecycle (built up across phases)
 
