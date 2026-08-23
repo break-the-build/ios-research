@@ -54,10 +54,20 @@ class BountyReadiness:
         self.reports = ReportGenerator(workspace)
         self.artifacts = ArtifactStore(workspace)
 
+    def _validated_crash_id(self, report: Report) -> str:
+        """Reject crafted ids before they reach any workspace path join."""
+        crash_id = report.crash_id
+        if (not isinstance(crash_id, str) or not crash_id
+                or Path(crash_id).is_absolute()
+                or Path(crash_id).name != crash_id):
+            raise ValidationError(
+                "crash id must be a single path component inside the workspace")
+        return crash_id
+
     def validate(self, report: Report, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         metadata = metadata or {}
         report_validation = self.reports.validate(report)
-        crash = self.reports.crashes.get(report.crash_id)
+        crash = self.reports.crashes.get(self._validated_crash_id(report))
         sections = report.sections
         evidence = report.evidence
         diagnostic_ref = evidence.get("diagnostic_reference", "")
