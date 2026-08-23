@@ -117,3 +117,9 @@ __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",
 ]
+
+# Mock IP-stack input-path parser targets (mock = True). CI-safe by construction:
+# bytes-only parsing; no sockets or network access.
+from .netip import NETIP_TARGETS  # noqa: E402
+for _tid, _cls in NETIP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))

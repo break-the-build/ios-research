@@ -2523,6 +2523,38 @@
             }
           }
         },
+        "netip": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "netip_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "mdns-record|dhcpv6-opt|icmp6-info|edns or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "nfc": {
           "arguments": {
             "options": [],
