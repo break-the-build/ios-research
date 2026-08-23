@@ -263,3 +263,35 @@ def test_cli_list_rules(ctx):
     assert result.data["count"] >= 5
     names = {r["name"] for r in result.data["rules"]}
     assert "keychain_credential_harvest_combo" in names
+
+
+class TestScanFileCap:
+    def test_oversized_sample_rejected_cleanly(self, tmp_path):
+        import os
+        from ios_research.errors import ValidationError
+        big = tmp_path / "big.bin"
+        with open(big, "wb") as fh:
+            fh.seek(1024 * 1024)
+            fh.write(b"\0")
+        rules = detection.parse_rules(_doc([_rule()]))
+        with pytest.raises(ValidationError):
+            detection.scan_file(str(big), rules, max_sample_bytes=4096)
+
+    def test_cap_is_not_hit_by_equal_size_sample(self, tmp_path):
+        sample = tmp_path / "ok.bin"
+        sample.write_bytes(b"needle" + b"x" * 10)
+        rules = detection.parse_rules(_doc([_rule()]))
+        result = detection.scan_file(str(sample), rules, max_sample_bytes=16)
+        assert len(result["matches"]) == 1
+        assert result["size"] == 16
+
+    def test_negative_cap_rejected(self, tmp_path):
+        from ios_research.errors import ValidationError
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"a")
+        rules = detection.parse_rules(_doc([_rule()]))
+        with pytest.raises(ValidationError):
+            detection.scan_file(str(sample), rules, max_sample_bytes=-1)
+
+    def test_default_cap_constant_is_sane(self):
+        assert detection.DEFAULT_MAX_SAMPLE_BYTES == 64 * 1024 * 1024
