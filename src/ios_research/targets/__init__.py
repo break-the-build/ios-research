@@ -84,6 +84,13 @@ from .messaging import MESSAGING_TARGETS  # noqa: E402
 for _tid, _cls in MESSAGING_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
 
+# Mock locked-device surface targets (#86; physical-access profiles). CI-safe
+# by construction: they parse bytes only and never touch a device, accessory,
+# passcode, or stored data.
+from .lockeddevice import LOCKED_DEVICE_TARGETS  # noqa: E402
+for _tid, _cls in LOCKED_DEVICE_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
 # Mock NFC/NDEF record parser targets (mock = True). CI-safe by construction:
 # they parse bytes only and never touch tag hardware or an RF field.
 from .nfc import NFC_TARGETS  # noqa: E402
