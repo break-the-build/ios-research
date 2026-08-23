@@ -11,6 +11,7 @@ deterministic scheduling behaviour.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Protocol
 
 from .targets.base import ExecResult
@@ -55,3 +56,32 @@ def normalize_features(features: Iterable[object] | None) -> tuple[str, ...] | N
             return None
         normalized.add(feature)
     return tuple(sorted(normalized))
+
+
+class SanitizerCoverageFileAdapter:
+    """Read the stable guard map emitted by the bundled native driver.
+
+    ``-fsanitize-coverage=trace-pc-guard`` assigns deterministic guard numbers
+    for a given instrumented harness build.  The driver emits only guard
+    numbers observed while the authorized target entry point is active.  This
+    adapter namespaces those numbers by target ID; it does not collect code,
+    addresses, or any data outside that process.
+    """
+
+    @staticmethod
+    def read(path: str | Path, namespace: str) -> tuple[str, ...] | None:
+        try:
+            lines = Path(path).read_text(encoding="ascii").splitlines()
+        except (OSError, UnicodeError):
+            return None
+        if not lines or lines[0] != "IOSR_SANCOV_V1":
+            return None
+        guards: list[str] = []
+        for line in lines[1:]:
+            value = line.strip()
+            if not value.isdecimal() or int(value) <= 0:
+                return None
+            guards.append(f"sancov:{namespace}:guard:{int(value)}")
+        # A version header with no guards is valid measured coverage (zero
+        # target guards); callers can distinguish it from unsupported.
+        return normalize_features(guards)

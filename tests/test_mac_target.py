@@ -17,6 +17,10 @@ from pathlib import Path
 import pytest
 
 from ios_research.targets import asan, create, is_registered, list_targets
+import ios_research.targets as target_registry
+from ios_research.corpus import CorpusStore
+from ios_research.experiment import ExperimentStore
+from ios_research.fuzz import FuzzEngine
 from ios_research.targets import _mac_seeds
 from ios_research.targets.base import Outcome
 from ios_research.targets.mac import (
@@ -416,6 +420,39 @@ def test_campaign_runner_against_stub(tmp_path, monkeypatch):
     assert summary["cases"] == 10
     assert summary["counts"]["accepted"] == 10
     assert summary["total_crashes"] == 0
+
+
+def test_instrumented_driver_exports_sancov_evidence(workspace, tmp_path):
+    """The native driver adapter retains measured guard evidence in a corpus."""
+    stub = tmp_path / "instrumented_driver"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "IOSR_SANCOV_V1\\n17\\n3\\n" > "$IOS_RESEARCH_SANCOV_FILE"\n'
+        'printf "RUN 0\\nDONE 0 decoded\\n"\n')
+    stub.chmod(0o755)
+    target_id = "test:instrumented-mac"
+    target_registry.register(target_id,
+                             lambda: MacFuzzTarget("imageio", harness=str(stub)))
+    try:
+        exp = ExperimentStore(workspace).create(
+            target=target_id, device="mock:device", os_version="17.0",
+            config_hash="sancov", seed=4)
+        store = CorpusStore(workspace)
+        corpus = store.create("sancov", target=target_id)
+        store.add_bytes(corpus, b"seed", origin="seed")
+        session = FuzzEngine(workspace).create(
+            experiment_id=exp.id, target=target_id, corpus_id=corpus.id,
+            seed=4, workers=1, max_cases=3, duration_s=None)
+        engine = FuzzEngine(workspace)
+        session = engine.advance(session)
+        assert session.stats()["coverage"]["available"] is True
+        assert session.coverage_features == [
+            "sancov:mac:imageio:guard:17", "sancov:mac:imageio:guard:3"]
+        retained = [tc for tc in store.get(corpus.id).testcases
+                    if tc.get("coverage_new_features")]
+        assert retained and retained[0]["coverage_features"] == session.coverage_features
+    finally:
+        target_registry._REGISTRY.pop(target_id, None)
 
 
 def test_campaign_runner_parallel_workers(tmp_path, monkeypatch):

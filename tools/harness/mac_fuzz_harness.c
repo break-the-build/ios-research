@@ -47,6 +47,43 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* SanitizerCoverage-compatible feature map for the standalone driver.  Guard
+ * callbacks are installed by clang's trace-pc-guard instrumentation.  We only
+ * record guards while LLVMFuzzerTestOneInput is executing, then write compact
+ * numeric IDs to an explicitly supplied local file. */
+#ifdef HARNESS_SANCOV
+#define IOSR_MAX_SANCOV_GUARDS 65536u
+static uint8_t g_sancov_seen[IOSR_MAX_SANCOV_GUARDS];
+static uint32_t g_sancov_next_guard = 0;
+static int g_sancov_active = 0;
+
+void __sanitizer_cov_trace_pc_guard_init(uint32_t *start, uint32_t *stop) {
+    if (start == stop || *start) return;
+    for (uint32_t *guard = start; guard < stop; guard++) *guard = ++g_sancov_next_guard;
+}
+
+void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
+    uint32_t id = *guard;
+    if (g_sancov_active && id > 0 && id < IOSR_MAX_SANCOV_GUARDS) {
+        g_sancov_seen[id] = 1;
+    }
+}
+
+static void sancov_reset(void) { memset(g_sancov_seen, 0, sizeof(g_sancov_seen)); }
+
+static void sancov_write_map(void) {
+    const char *path = getenv("IOS_RESEARCH_SANCOV_FILE");
+    if (!path || !*path) return;
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "IOSR_SANCOV_V1\n");
+    for (uint32_t i = 1; i < IOSR_MAX_SANCOV_GUARDS; i++) {
+        if (g_sancov_seen[i]) fprintf(f, "%u\n", i);
+    }
+    fclose(f);
+}
+#endif
+
 /* Minimal CoreFoundation typedefs so we avoid pulling framework headers. */
 typedef const void *CFTypeRef;
 typedef const struct __CFAllocator *CFAllocatorRef;
@@ -263,7 +300,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* CoreFoundation is optional (the self-test target needs no framework). */
     CFDataRef cfdata = p_CFDataCreate ? p_CFDataCreate(NULL, data, (CFIndex)size)
                                       : NULL;
+    #ifdef HARNESS_SANCOV
+    g_sancov_active = 1;
+    #endif
     g_last_decoded = run_target(data, size, cfdata);
+    #ifdef HARNESS_SANCOV
+    g_sancov_active = 0;
+    #endif
     if (cfdata && p_CFRelease) p_CFRelease(cfdata);
     return 0;
 }
@@ -291,7 +334,13 @@ static int run_one_file(const char *path, int index) {
     uint8_t *buf = (uint8_t *)malloc((size_t)n ? (size_t)n : 1);
     size_t rd = buf ? fread(buf, 1, (size_t)n, f) : 0;
     fclose(f);
+    #ifdef HARNESS_SANCOV
+    sancov_reset();
+    #endif
     LLVMFuzzerTestOneInput(buf, rd);  /* may abort here on a sanitizer finding */
+    #ifdef HARNESS_SANCOV
+    sancov_write_map();
+    #endif
     printf("DONE %d %s\n", index, g_last_decoded ? "decoded" : "rejected");
     fflush(stdout);
     free(buf);

@@ -5,6 +5,7 @@ from __future__ import annotations
 from ios_research import targets
 from ios_research.corpus import CorpusStore
 from ios_research.coverage import normalize_features
+from ios_research.coverage import SanitizerCoverageFileAdapter
 from ios_research.experiment import ExperimentStore
 from ios_research.fuzz import DEFAULT_BASE, FuzzEngine
 from ios_research.targets.base import ExecResult, Outcome, Target
@@ -29,6 +30,16 @@ def test_feature_normalization_is_stable_and_rejects_invalid_provider_output():
     assert normalize_features("not-an-iterable-of-features") is None
     assert normalize_features(["has whitespace"]) is None
     assert normalize_features([1]) is None
+
+
+def test_sanitizer_coverage_file_adapter_requires_versioned_map(tmp_path):
+    unsupported = tmp_path / "unsupported.map"
+    unsupported.write_text("12\n13\n")
+    assert SanitizerCoverageFileAdapter.read(unsupported, "mac:imageio") is None
+    mapped = tmp_path / "sancov.map"
+    mapped.write_text("IOSR_SANCOV_V1\n12\n7\n12\n")
+    assert SanitizerCoverageFileAdapter.read(mapped, "mac:imageio") == (
+        "sancov:mac:imageio:guard:12", "sancov:mac:imageio:guard:7")
 
 
 def test_coverage_feedback_retains_novel_inputs_with_metadata(workspace):

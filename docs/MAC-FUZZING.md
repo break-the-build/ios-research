@@ -102,6 +102,18 @@ The standalone driver accepts **one or more** input files and speaks a tiny
 stdout protocol (`RUN <i>` / `DONE <i> decoded|rejected`) so the Python target
 can recover per-input outcome and attribute a crash within a batch.
 
+### Optional SanitizerCoverage feedback
+
+Driver builds also enable clang's `-fsanitize-coverage=trace-pc-guard`.
+For each single-input CLI-engine execution, the driver writes the guards hit
+inside the target call to a local temporary map; `MacFuzzTarget` imports that
+map as stable `sancov:mac:<target>:guard:<n>` feature IDs. The generic fuzz
+engine retains inputs that add a new guard and records the evidence in the
+corpus manifest. This works only for a compatible driver build; a missing or
+empty map falls back safely to the pre-existing deterministic schedule. Guard
+IDs are build-specific performance signals, not source locations or a claim of
+coverage across an iOS device.
+
 ## Run it
 
 ### Campaign runner (recommended)

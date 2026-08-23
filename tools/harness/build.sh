@@ -63,7 +63,7 @@ sanitize_flags() {
   if [ "$MODE" = "libfuzzer" ]; then
     echo "-fsanitize=fuzzer,address,undefined"
   else
-    echo "-fsanitize=address,undefined -DHARNESS_STANDALONE"
+    echo "-fsanitize=address,undefined -fsanitize-coverage=trace-pc-guard -DHARNESS_SANCOV -DHARNESS_STANDALONE"
   fi
 }
 

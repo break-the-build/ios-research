@@ -31,6 +31,7 @@ from pathlib import Path
 
 from .base import ExecResult, Outcome, Target
 from . import asan
+from ..coverage import SanitizerCoverageFileAdapter
 
 # Frameworks exposed as ``mac:<framework>`` targets and the parse entry point the
 # harness wraps. The value is informational (surfaced via ``describe``); the
@@ -67,6 +68,7 @@ _FRAMEWORKS = {
 # A clean run returns 0; a timeout is handled separately.
 _DEFAULT_TIMEOUT_S = 10.0
 _HARNESS_ENV = "IOS_RESEARCH_MAC_HARNESS"
+_SANCOV_ENV = "IOS_RESEARCH_SANCOV_FILE"
 
 
 def _decode_statuses(stdout: str) -> list[str]:
@@ -105,6 +107,7 @@ class MacFuzzTarget(Target):
         self._harness_override = harness
         self.timeout_s = timeout_s
         self._harness_path: Path | None = None
+        self._coverage_by_input: dict[bytes, tuple[str, ...]] = {}
 
     # --- discovery -------------------------------------------------------
     def _candidate_paths(self) -> list[Path]:
@@ -138,6 +141,7 @@ class MacFuzzTarget(Target):
         d["available"] = self.available()
         d["note"] = ("real native harness; authorized/own-machine research only; "
                      "requires a built libFuzzer/ASan binary")
+        d["coverage_adapter"] = "sanitizer-coverage file map (driver builds)"
         return d
 
     # --- format hooks ----------------------------------------------------
@@ -148,6 +152,14 @@ class MacFuzzTarget(Target):
     def structure_mutate(self, data: bytes, rng):
         from . import _mac_seeds
         return _mac_seeds.structure_mutate(self.key, data, rng)
+
+    def coverage_features(self, data: bytes, result: ExecResult):
+        """Return guard features captured by an instrumented driver run.
+
+        A non-instrumented or libFuzzer harness emits no map, so ``None`` keeps
+        the generic engine on its deterministic fallback schedule.
+        """
+        return self._coverage_by_input.get(data)
 
     # --- lifecycle -------------------------------------------------------
     def prepare(self) -> None:
@@ -172,19 +184,31 @@ class MacFuzzTarget(Target):
         start = time.monotonic()
         tmp = tempfile.NamedTemporaryFile(
             prefix="ios-research-mac-", suffix=".input", delete=False)
+        coverage = tempfile.NamedTemporaryFile(
+            prefix="ios-research-sancov-", suffix=".map", delete=False)
+        coverage.close()
         try:
             tmp.write(data)
             tmp.flush()
             tmp.close()
-            return self._run_harness(harness, tmp.name, start)
+            result = self._run_harness(harness, tmp.name, start, coverage.name)
+            features = SanitizerCoverageFileAdapter.read(
+                coverage.name, f"mac:{self.key}")
+            if features is not None:
+                self._coverage_by_input[data] = features
+            return result
         finally:
             try:
                 os.unlink(tmp.name)
             except OSError:
                 pass
+            try:
+                os.unlink(coverage.name)
+            except OSError:
+                pass
 
     def _run_harness(self, harness: Path, input_path: str,
-                     start: float) -> ExecResult:
+                     start: float, coverage_path: str | None = None) -> ExecResult:
         import time
 
         # libFuzzer binaries run a single input to completion when given a file
@@ -194,6 +218,8 @@ class MacFuzzTarget(Target):
         env.setdefault("ASAN_OPTIONS",
                        "abort_on_error=0:exitcode=99:detect_leaks=0")
         env.setdefault("UBSAN_OPTIONS", "print_stacktrace=1:halt_on_error=1")
+        if coverage_path is not None:
+            env[_SANCOV_ENV] = coverage_path
         try:
             proc = subprocess.run(
                 [str(harness), input_path],
