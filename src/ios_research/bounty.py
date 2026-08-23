@@ -56,6 +56,7 @@ class BountyReadiness:
 
     def validate(self, report: Report, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         metadata = metadata or {}
+        self.reports.crashes.ensure_safe_id(report.crash_id)
         report_validation = self.reports.validate(report)
         crash = self.reports.crashes.get(report.crash_id)
         sections = report.sections
