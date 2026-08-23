@@ -17,6 +17,7 @@ from .errors import ValidationError
 from .logging_util import _REDACTED, _REDACT_KEYS
 from .report import Report, ReportGenerator
 from .hashing import sha256_bytes
+from .targetflags import candidates_for, get_flag, load_taxonomy
 
 
 PACK_SCHEMA_VERSION = 1
@@ -54,10 +55,20 @@ class BountyReadiness:
         self.reports = ReportGenerator(workspace)
         self.artifacts = ArtifactStore(workspace)
 
+    def _validated_crash_id(self, report: Report) -> str:
+        """Reject crafted ids before they reach any workspace path join."""
+        crash_id = report.crash_id
+        if (not isinstance(crash_id, str) or not crash_id
+                or Path(crash_id).is_absolute()
+                or Path(crash_id).name != crash_id):
+            raise ValidationError(
+                "crash id must be a single path component inside the workspace")
+        return crash_id
+
     def validate(self, report: Report, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         metadata = metadata or {}
         report_validation = self.reports.validate(report)
-        crash = self.reports.crashes.get(report.crash_id)
+        crash = self.reports.crashes.get(self._validated_crash_id(report))
         sections = report.sections
         evidence = report.evidence
         diagnostic_ref = evidence.get("diagnostic_reference", "")
@@ -88,6 +99,30 @@ class BountyReadiness:
             _check("researcher_contact", isinstance(metadata.get("contact"), str) and bool(metadata["contact"].strip()),
                    "Researcher metadata supplies a contact for follow-up."),
         ]
+
+        # Flag-aware readiness (#58): claimed flags get per-element checklists;
+        # candidate flags from analysis are surfaced as guidance only.
+        taxonomy = load_taxonomy(self.ws)
+        analysis = self._analysis_for(crash)
+        candidates = (candidates_for(crash.to_dict(), analysis, taxonomy)
+                      if analysis else [])
+        claimed = self._claimed_flags(report, metadata, taxonomy)
+        check_by_id = {c["id"]: c["passed"] for c in checks}
+        for claim in claimed:
+            flag = get_flag(taxonomy, claim["flag_id"])
+            if flag is None:
+                checks.append(_check(
+                    f"target_flag:{claim['flag_id']}:known", False,
+                    "Claimed target flag is not in the local taxonomy; update "
+                    f"the taxonomy data before claiming it."))
+                continue
+            for element in flag["evidence_required"]:
+                passed, description = _flag_element_check(
+                    element, crash, report, metadata, check_by_id)
+                checks.append(_check(
+                    f"target_flag:{claim['flag_id']}:{element}", passed,
+                    f"[{claim['flag_id']}] {description}"))
+
         missing = [item["id"] for item in checks if not item["passed"]]
         return {
             "ready": not missing,
@@ -95,15 +130,53 @@ class BountyReadiness:
             "report_id": report.id,
             "checks": checks,
             "missing": missing,
+            "target_flags": {
+                "taxonomy_version": taxonomy["taxonomy_version"],
+                "taxonomy_sha256": taxonomy["sha256"],
+                "claimed": [c["flag_id"] for c in claimed],
+                "candidates": [
+                    {"flag_id": c["flag_id"], "confidence": c["confidence"]}
+                    for c in candidates],
+                "note": ("Candidates are hypotheses from stored evidence; "
+                         "claims are researcher-declared and checked against "
+                         "their required evidence elements only. This is not "
+                         "an eligibility or reward determination."),
+            },
             "limitations": [
                 "Readiness is an evidence-completeness assessment, not a bounty eligibility or severity determination.",
                 "The framework does not access Apple systems, Target Flags, or privileged device capabilities.",
             ],
         }
 
+    @staticmethod
+    def _claimed_flags(report: Report, metadata: dict[str, Any],
+                       taxonomy: dict[str, Any]) -> list[dict[str, str]]:
+        """Researcher-declared flag claims (metadata wins over sections)."""
+        raw = metadata.get("target_flags")
+        if raw is None:
+            raw = report.sections.get("target_flag_claims")
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, list):
+            return []
+        return [{"flag_id": str(item)} for item in raw if str(item).strip()]
+
+    def _analysis_for(self, crash) -> dict[str, Any] | None:
+        try:
+            if crash.analysis_id:
+                stored = self.ws.read_json(f"analysis/{crash.analysis_id}.json")
+            else:
+                stored = self.ws.read_json(f"crashes/{crash.id}/analysis.json")
+            return stored
+        except Exception:
+            return None
+
     def pack(self, report: Report, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return a deterministic, redacted manifest of validated local evidence."""
         metadata = metadata or {}
+        # A crafted report/crash id must never reach evidence-path construction;
+        # fail closed before any store lookup or export step.
+        self._safe_component(report.crash_id, "crash id")
         readiness = self.validate(report, metadata)
         evidence = report.evidence
         attachments = [item for item in report.sections.get("attachments", []) if item]
@@ -122,6 +195,7 @@ class BountyReadiness:
                 "attachments": attachments,
             },
             "artifacts": self._artifact_manifest(report),
+            "target_flag_guidance": readiness["target_flags"],
             "researcher_metadata": metadata,
             "limitations": [
                 "Contains references and hashes for locally retained evidence; it does not package exploits or payloads.",
@@ -154,8 +228,17 @@ class BountyReadiness:
         manifest.write_text(json.dumps(pack, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return manifest
 
+    @staticmethod
+    def _safe_component(value: str, what: str) -> str:
+        """Reject ids that are not a single safe path component."""
+        if not isinstance(value, str) or not value \
+                or Path(value).name != value or value in (".", ".."):
+            raise ValidationError(
+                f"{what} must be a safe workspace-relative component")
+        return value
+
     def _artifact_manifest(self, report: Report) -> list[dict[str, Any]]:
-        crash_id = report.crash_id
+        crash_id = self._safe_component(report.crash_id, "crash id")
         evidence = report.evidence
         expected = {
             f"crashes/{crash_id}/original-input.bin": evidence.get("input_sha256"),
@@ -196,3 +279,45 @@ class BountyReadiness:
 
 def _check(identifier: str, passed: bool, description: str) -> dict[str, Any]:
     return {"id": identifier, "passed": bool(passed), "description": description}
+
+
+def _flag_element_check(element: str, crash, report: Report,
+                        metadata: dict[str, Any],
+                        base_checks: dict[str, bool]) -> tuple[bool, str]:
+    """Map a taxonomy evidence element onto a concrete local check."""
+    if element == "reproducible_crash":
+        return (crash.reproduced is True,
+                "The recorded crash has a successful reproduction result.")
+    if element == "minimized_input":
+        return (base_checks.get("minimized_input", False),
+                "A minimized input artifact is retained locally.")
+    if element == "build_provenance":
+        versions = report.sections.get("affected_versions", {})
+        ok = isinstance(versions, dict) and bool(versions.get("target")) and \
+            versions.get("os_version") not in (None, "", "unknown")
+        return (ok, "Non-placeholder affected component/version provenance "
+                    "is recorded.")
+    if element == "matrix_confirmation":
+        matrix = metadata.get("matrix_evidence")
+        ok = isinstance(matrix, list) and bool(
+            [item for item in matrix if str(item).strip()])
+        return (ok, "A device/OS/build matrix confirmation run (#37) is "
+                    "referenced in researcher metadata ('matrix_evidence').")
+    if element == "primitive_indicator":
+        analysis = None
+        try:
+            analysis = report.sections.get("exploitability_assessment", {})
+        except Exception:  # pragma: no cover - sections are always a dict
+            analysis = {}
+        indicator = analysis.get("indicator", "")
+        ok = indicator in ("CONTROLLED_MEMORY_ACCESS_INDICATOR",
+                           "CODE_EXECUTION_INDICATOR")
+        return (ok, "The stored analysis indicator supports the outcome "
+                    "class claimed by this flag.")
+    if element == "demonstration_refs":
+        refs = metadata.get("demonstration_refs")
+        ok = isinstance(refs, list) and bool(
+            [item for item in refs if str(item).strip()])
+        return (ok, "Researcher-supplied demonstration references "
+                    "('demonstration_refs') are present.")
+    return (False, f"Unknown evidence element: {element}")  # pragma: no cover
