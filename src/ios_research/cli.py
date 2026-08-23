@@ -24,7 +24,7 @@ from .commands import (
     corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, wifi_cmd, crash_cmd,
     analyze_cmd, diff_cmd, report_cmd, research_cmd, matrix_cmd,
     harness_cmd, spoints_cmd, surface_cmd, targetflags_cmd, advisory_cmd,
-    agent_cmd,
+    engine_cmd, agent_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -46,6 +46,7 @@ _REGISTRARS: list[Callable] = [
     report_cmd.register,
     research_cmd.register,
     matrix_cmd.register,
+    engine_cmd.register,
     agent_cmd.register,
     targetflags_cmd.register,
     advisory_cmd.register,
