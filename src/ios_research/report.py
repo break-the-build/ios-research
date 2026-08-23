@@ -134,6 +134,11 @@ class ReportGenerator:
         diag = crash.diagnostics
         os_version = experiment.os_version if experiment else "unknown"
         device = experiment.device if experiment else "unknown"
+        # Beta release-pair provenance flows from the corpus lineage (#56).
+        beta = None
+        if experiment is not None:
+            from .betadiff import beta_provenance_for_experiment
+            beta = beta_provenance_for_experiment(self.ws, experiment)
         return {
             "title": f"{crash.classification} in {crash.target} "
                      f"({crash.fmt}) processing",
@@ -196,6 +201,10 @@ class ReportGenerator:
             "regression_results":
                 "See 'ios-research diff' for cross-version behavior; a "
                 "regression corpus entry is created on minimization.",
+            **({"beta_provenance": {
+                "source": "corpus lineage",
+                **beta}}
+               if beta else {}),
             "timeline": [{"date": crash.first_seen, "event": "crash discovered"},
                          {"date": now_iso(), "event": "report generated"}],
             "attachments": [
