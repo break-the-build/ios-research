@@ -42,10 +42,11 @@ from .base import Diagnostics, ExecResult, Outcome, Target
 from . import ips
 
 # Surfaces exposed as ``ios-device:<surface>`` targets. ``process`` is the crash
-# reporter process name we expect to see fault (``None`` = match any new report,
-# which is the honest default for a generic file surface). Surfaces mirror the
-# ``mac:<framework>`` families so a Mac-discovered crash can be confirmed on the
-# same logical surface on-device.
+# reporter process name we expect to see fault (``None`` = no reliable default).
+# Only the in-repo ImageIO delivery profile has a known process; generic files
+# and delivery-dependent surfaces must be pinned by the authorized operator.
+# Surfaces mirror the ``mac:<framework>`` families so a Mac-discovered crash can
+# be confirmed on the same logical surface on-device.
 _SURFACES = {
     "file": {
         "process": None,
@@ -54,7 +55,7 @@ _SURFACES = {
                         "crash produced on the device"),
     },
     "imageio": {
-        "process": None,
+        "process": "MediaPlaybackd",
         "formats": ("png", "jpeg", "gif", "tiff", "heic", "webp"),
         "description": "image staged via Photos/QuickLook; confirm an ImageIO decode crash",
     },
@@ -74,6 +75,10 @@ _DEFAULT_TIMEOUT_S = 30.0
 _DEFAULT_POLL_S = 1.0
 _PROCESS_ENV = "IOS_RESEARCH_DEVICE_PROCESS"
 _UDID_ENV = "IOS_RESEARCH_DEVICE_UDID"
+
+
+class _InconclusiveAttribution(Exception):
+    """A report cannot be attributed safely to the delivered input."""
 
 
 class DeviceBackend(Protocol):
@@ -284,6 +289,10 @@ class IosDeviceTarget(Target):
         d = super().describe()
         d["surface"] = self.surface
         d["expected_process"] = self.expected_process or "(any)"
+        if self.expected_process is None:
+            d["matching_warning"] = (
+                "no expected process is pinned; multiple new reports are "
+                "inconclusive and will not be recorded as a crash")
         d["available"] = self.available()
         d["signal"] = "confirmation only (no memory instrumentation on device)"
         d["note"] = ("black-box on-device confirmation; authorized devices only; "
@@ -334,7 +343,12 @@ class IosDeviceTarget(Target):
             except OSError:
                 pass
 
-        report = self._poll_for_report(udid, start)
+        try:
+            report = self._poll_for_report(udid, start)
+        except _InconclusiveAttribution as exc:
+            dur = int((time.monotonic() - start) * 1000)
+            return ExecResult(outcome=Outcome.ABNORMAL, detail=str(exc),
+                              duration_ms=max(dur, 1))
         dur = int((time.monotonic() - start) * 1000)
 
         if report is None:
@@ -368,6 +382,14 @@ class IosDeviceTarget(Target):
             new = self._backend.collect_new_reports(
                 udid, self._baseline, self.expected_process)
             if new:
+                if self.expected_process is None and len(new) > 1:
+                    # Generic/unpinned delivery cannot distinguish its own
+                    # report from concurrent device activity.  Fail closed;
+                    # selecting one would fabricate a crash attribution.
+                    raise _InconclusiveAttribution(
+                        "multiple new crash reports without an expected process; "
+                        "attribution is inconclusive (set "
+                        f"{_PROCESS_ENV} to the exact process name)")
                 return max(new, key=self._report_recency)
             if time.monotonic() >= deadline:
                 return None

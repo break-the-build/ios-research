@@ -56,7 +56,7 @@ ios-research target show ios-device:imageio    # available: false, with the bloc
 | Surface | Formats | Confirms |
 |---------|---------|----------|
 | `ios-device:file` | any (`bin`) | any new crash produced on the device |
-| `ios-device:imageio` | png, jpeg, gif, tiff, heic, webp | an ImageIO decode crash |
+| `ios-device:imageio` | png, jpeg, gif, tiff, heic, webp | an ImageIO decode crash (pins `MediaPlaybackd` by default) |
 | `ios-device:audiotoolbox` | wav, mp3, aac, caf, m4a | an AudioToolbox decode crash |
 | `ios-device:coregraphics` | pdf, raw | a CoreGraphics decode crash |
 
@@ -73,7 +73,8 @@ be confirmed on the same logical surface on-device.
    report is never mis-attributed to your input).
 3. **Deliver** — stage the input to the chosen surface (see *Delivery* below).
 4. **Poll** — harvest new crash reports over USB (`idevicecrashreport`) until a
-   timeout, matching by **timestamp + process name** (best-effort by design).
+   timeout, matching by **timestamp + process name**. An unpinned generic
+   surface with multiple candidates stops as inconclusive rather than guessing.
 5. **Normalize** — parse the matched `.ips` (modern JSON *or* legacy text) into
    `Diagnostics`, stamped with the **device id + OS build**.
 
@@ -112,9 +113,12 @@ staged, which is why it is fully unit-tested against a fake backend.
 
 - **Low analytical signal** by construction (no sanitizer/registers describing
   the access).
-- **Best-effort matching** — attributing a crash report to the triggering input
-  relies on timestamp/process heuristics. Pin the expected faulting process with
-  `IOS_RESEARCH_DEVICE_PROCESS` (or `IosDeviceTarget(process=…)`) to reduce
-  false matches on a busy device.
+- **Process pin required on a busy device** — `ios-device:imageio` uses its
+  known `MediaPlaybackd` delivery process by default. Generic `file` and
+  delivery-dependent surfaces cannot safely infer a process: pin the exact
+  expected name with `IOS_RESEARCH_DEVICE_PROCESS` (or
+  `IosDeviceTarget(process=…)`). Without a pin, one new report can be
+  confirmed, but multiple reports are an explicit inconclusive blocker rather
+  than a guessed crash.
 - **One device** — the first connected UDID is used; override with
   `IOS_RESEARCH_DEVICE_UDID`.

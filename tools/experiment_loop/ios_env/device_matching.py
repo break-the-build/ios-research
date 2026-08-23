@@ -116,7 +116,7 @@ class _SimBackend:
                 continue
             if process:
                 meta = ips.parse_metadata(text)
-                if meta.get("process") and process not in meta["process"]:
+                if meta.get("process") != process:
                     continue
             out.append((ident, text))
         return out
@@ -196,7 +196,10 @@ class IosResearchDeviceMatchingEnvironment(BaseEnvironment):
                 caused, background, baseline, new_reports = self._trial(rng)
                 backend = _SimBackend(baseline=baseline, new_reports=new_reports,
                                       use_baseline=use_baseline)
-                target = IosDeviceTarget("imageio", backend=backend,
+                # ``file`` intentionally has no known process default.  This
+                # keeps the experiment's unpinned arm meaningful now that the
+                # ImageIO profile safely pins its known delivery process.
+                target = IosDeviceTarget("file", backend=backend,
                                          timeout_s=0.05, poll_s=0.0,
                                          process=process)
                 t0 = time.perf_counter()
