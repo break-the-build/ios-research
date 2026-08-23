@@ -1583,6 +1583,90 @@
         }
       }
     },
+    "net": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "deliver": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "transport target id (net:<inner-target>)",
+                "required": true
+              },
+              {
+                "dest": "input",
+                "flags": [
+                  "--input"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "schedule",
+                "flags": [
+                  "--schedule"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "replay": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "input",
+                "flags": [
+                  "--input"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "schedule",
+                "flags": [
+                  "--schedule"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "capture",
+                "flags": [
+                  "--capture"
+                ],
+                "help": "JSON file with a saved capture",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
     "report": {
       "arguments": {
         "options": [],
@@ -2167,6 +2251,38 @@
           "arguments": {
             "options": [],
             "positionals": []
+          }
+        },
+        "lockeddevice": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "lockeddevice_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "lockdownd|mfi-auth|notification or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
           }
         },
         "messaging": {
