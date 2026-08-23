@@ -29,6 +29,7 @@ SUBDIRS = (
     "analysis",
     "diffs",
     "research",
+    "matrices",
     "logs",
 )
 
