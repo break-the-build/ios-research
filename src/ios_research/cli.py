@@ -26,7 +26,7 @@ from .commands import (
     crash_cmd, analyze_cmd, diff_cmd, report_cmd, research_cmd, matrix_cmd,
     harness_cmd, spoints_cmd, surface_cmd, targetflags_cmd, advisory_cmd,
     engine_cmd, oracle_cmd, findings_cmd, beta_cmd, agent_cmd, detect_cmd,
-    cve_cmd, net_cmd,
+    cve_cmd, net_cmd, lockdown_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -62,6 +62,7 @@ _REGISTRARS: list[Callable] = [
     surface_cmd.register,
     beta_cmd.register,
     net_cmd.register,
+    lockdown_cmd.register,
 ]
 
 
