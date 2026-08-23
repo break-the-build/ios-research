@@ -19,15 +19,20 @@ def _provision(manager):
 
 
 def test_fail_closed_without_approval_or_credentials(workspace):
-    with pytest.raises(SafetyError, match="not approved"):
-        _manager(workspace, provider_name="cloud-x",
-                 approved_providers=("fake",))
-    with pytest.raises(SafetyError, match="credentials"):
-        _manager(workspace, provider_name="cloud-x",
-                 approved_providers=("fake", "cloud-x"),
-                 credentials=None)
-    with pytest.raises(ValidationError):
-        _manager(workspace, provider_name="warp-drive")
+    # Register a real-but-external provider to exercise the approval gate.
+    PROVIDERS["cloud-x-test"] = FakeProvider
+    try:
+        with pytest.raises(SafetyError, match="not approved"):
+            _manager(workspace, provider_name="cloud-x-test",
+                     approved_providers=("fake",))
+        with pytest.raises(SafetyError, match="credentials"):
+            _manager(workspace, provider_name="cloud-x-test",
+                     approved_providers=("fake", "cloud-x-test"),
+                     credentials=None)
+        with pytest.raises(ValidationError):
+            _manager(workspace, provider_name="warp-drive")
+    finally:
+        PROVIDERS.pop("cloud-x-test", None)
     assert "fake" in PROVIDERS
 
 
@@ -51,8 +56,8 @@ def test_fake_provider_full_lifecycle_with_provenance(workspace):
 
 
 def test_restore_returns_known_state_between_trials(workspace):
-    provider = FakeProvider()
     manager = _manager(workspace)
+    provider = manager.provider          # the manager's own provider
     record = manager.provision(model="M", image="i", build="b",
                                os_version="1")
     raw = record.provider_instance

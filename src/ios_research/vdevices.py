@@ -27,7 +27,7 @@ from typing import Any
 
 from .clock import now_iso
 from .errors import NotFoundError, SafetyError, ValidationError
-from .hashing import sha256_text
+from .hashing import sha256_bytes, sha256_text
 from .ids import make_id
 from .workspace import Workspace
 
@@ -209,14 +209,14 @@ class VirtualDeviceManager:
                 rel = f"artifacts/{record.id}-crash-input.bin"
                 self.ws.write_bytes(rel, input_bytes)
                 kept.append({"path": rel,
-                             "sha256": sha256_text(input_bytes)})
+                             "sha256": sha256_bytes(input_bytes)})
         evidence = {
             "schema_version": VDEVICE_SCHEMA_VERSION,
             "kind": "isolated-trial",
             "instance": record.id,
             "provider": self.provider_name,
             "target": target_id,
-            "input_sha256": sha256_text(input_bytes)[:16],
+            "input_sha256": sha256_bytes(input_bytes),
             "outcome": result.outcome,
             "state_after_restore": self.provider.state(record.provider_instance),
             "retained_artifacts": [k["path"] for k in kept],
