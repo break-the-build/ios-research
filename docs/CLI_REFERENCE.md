@@ -302,6 +302,27 @@ Options:
 
 ### `ios-research report`
 
+### `ios-research report bounty-export`
+
+Positional arguments:
+
+- `report_id` (required)
+
+Options:
+
+- `--metadata` — local JSON researcher metadata/attestations
+- `--out` — output path for the redacted evidence-reference pack
+
+### `ios-research report bounty-validate`
+
+Positional arguments:
+
+- `report_id` (required)
+
+Options:
+
+- `--metadata` — local JSON researcher metadata/attestations
+
 ### `ios-research report create`
 
 Positional arguments:

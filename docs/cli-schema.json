@@ -825,6 +825,56 @@
         ]
       },
       "subcommands": {
+        "bounty-export": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "metadata",
+                "flags": [
+                  "--metadata"
+                ],
+                "help": "optional local JSON metadata/attestations",
+                "required": false
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "output path (default: report evidence directory)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "bounty-validate": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "metadata",
+                "flags": [
+                  "--metadata"
+                ],
+                "help": "optional local JSON metadata/attestations",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              }
+            ]
+          }
+        },
         "create": {
           "arguments": {
             "options": [],
