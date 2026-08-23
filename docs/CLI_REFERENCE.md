@@ -446,6 +446,30 @@ Positional arguments:
 
 - `research_id` (optional)
 
+### `ios-research spoints`
+
+### `ios-research spoints list`
+
+### `ios-research spoints points`
+
+Positional arguments:
+
+- `report_id` (required)
+- `crash_id` (required)
+
+### `ios-research spoints run`
+
+Options:
+
+- `--experiment`
+- `--limit` — limit
+
+### `ios-research spoints show`
+
+Positional arguments:
+
+- `report_id` (required)
+
 ### `ios-research target`
 
 ### `ios-research target audio`
