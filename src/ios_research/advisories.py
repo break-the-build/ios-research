@@ -253,6 +253,7 @@ class NoveltyIndex:
                           str(len(scored)), str(counts[NOVEL]),
                           str(counts[KNOWN_UNFIXED]), str(counts[KNOWN_FIXED]))
         self.ws.write_json(f"analysis/{scan_id}.json",
-                           {"id": scan_id, "kind": "novelty-scan", **result})
+                           {"id": scan_id, "kind": "novelty-scan",
+                            "created_at": now_iso(), **result})
         result["scan_id"] = scan_id
         return result
