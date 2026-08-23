@@ -165,3 +165,9 @@ for _tid, _cls in DOCIMP_TARGETS.items():
 from .signeddoc import SIGNEDDOC_TARGETS  # noqa: E402
 for _tid, _cls in SIGNEDDOC_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock proximity application-protocol targets (mock = True). No real accessory
+# connections, no RF transmission; bytes-only parse modeling.
+from .proxapp import PROXAPP_TARGETS  # noqa: E402
+for _tid, _cls in PROXAPP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
