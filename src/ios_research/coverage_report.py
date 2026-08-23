@@ -39,10 +39,9 @@ class CoverageReporter:
 
         attribution: dict[str, list[str]] = {}
         for tc in corpus.testcases:
-            introduced = tc.get("coverage_new_features") or []
-            if tc.get("coverage_features"):
-                introduced = tc["coverage_features"]
-            for feature in introduced:
+            # Only inputs that *introduced* a feature are attributed;
+            # coverage_features lists every feature an input reaches.
+            for feature in tc.get("coverage_new_features") or []:
                 attribution.setdefault(feature, []).append(tc["sha256"])
 
         savings = self._minimization_savings(corpus.testcases)

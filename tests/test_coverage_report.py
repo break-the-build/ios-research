@@ -49,6 +49,30 @@ def test_report_attributes_features_to_inputs(workspace, gated_target):
     assert report["corpus_quality"]["inputs"] >= 1
 
 
+def test_attribution_lists_only_feature_introducing_inputs(
+        workspace, gated_target):
+    """An input that merely reaches a feature is not its introducer."""
+    from types import SimpleNamespace
+
+    from ios_research.dictionary import DictionaryToken
+    session = _run_session(
+        workspace, gated_target,
+        dictionary=[DictionaryToken(name="gate", value=GATED_MAGIC)])
+    reporter = CoverageReporter(workspace)
+    stub_corpus = SimpleNamespace(testcases=[
+        {"sha256": "a" * 64, "size": 4,
+         "coverage_features": ["gate:entry"],
+         "coverage_new_features": ["gate:entry"]},
+        {"sha256": "b" * 64, "size": 4,
+         "coverage_features": ["gate:entry", "gate:secret"],
+         "coverage_new_features": []},
+    ])
+    reporter.corpus_store = SimpleNamespace(
+        get=lambda corpus_id: stub_corpus)
+    report = reporter.build(session)
+    assert report["attribution"] == {"gate:entry": ["a" * 64]}
+
+
 def test_report_hot_inputs_and_minimization_savings(workspace, gated_target):
     from ios_research.dictionary import DictionaryToken
     session = _run_session(

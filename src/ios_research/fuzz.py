@@ -309,9 +309,6 @@ class FuzzEngine:
                 mutated, strategy = mutation.mutate(
                     base, session.seed, i, struct_fn=struct_fn,
                     strategies=pool, tokens=tokens)
-                if plugin_host is not None and plugin_host.plugins \
-                        and strategy.startswith("grammar"):
-                    session.grammar_uses += 1
             if strategy.startswith("dict_"):
                 session.token_uses += 1
             result = target.execute(mutated)

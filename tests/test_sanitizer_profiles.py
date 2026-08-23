@@ -206,3 +206,41 @@ def test_build_sh_fails_closed_for_unsupported_platform_combo():
          "--sanitizer", "msan", "selftest"], capture_output=True, timeout=30)
     assert r.returncode == 4
     assert b"not supported on" in r.stderr
+
+
+# --- driver-mode flag composition mirrors PROFILES -----------------------------
+
+DRIVER_FLAGS_TEMPLATE = (
+    "MODE=driver; TRACE_CMP=0; SANITIZER_PROFILE={profile};\n"
+    "eval \"$(sed -n '/^profile_flags()/,/^}}/p; "
+    "/^sanitize_flags()/,/^}}/p' '{repo}/tools/harness/build.sh')\";\n"
+    "sanitize_flags\n"
+)
+
+
+def _driver_flags(profile: str) -> str:
+    import subprocess
+    script = DRIVER_FLAGS_TEMPLATE.format(profile=profile, repo=str(REPO))
+    r = subprocess.run(["bash", "-c", script],
+                       capture_output=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.decode()
+
+
+def test_build_sh_baseline_profile_is_coverage_only():
+    flags = _driver_flags("baseline")
+    assert "-fsanitize=" not in flags
+    assert "-fsanitize-coverage=trace-pc-guard" in flags
+
+
+def test_build_sh_default_profile_is_asan_ubsan():
+    assert "-fsanitize=address,undefined" in _driver_flags("asan-ubsan")
+
+
+def test_build_sh_named_profiles_replace_default_sanitizers():
+    for profile, expected in (("tsan", "-fsanitize=thread"),
+                              ("lsan", "-fsanitize=leak"),
+                              ("cfi", "-fsanitize=cfi")):
+        flags = _driver_flags(profile)
+        assert expected in flags
+        assert "-fsanitize=address," not in flags

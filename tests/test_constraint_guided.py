@@ -51,6 +51,12 @@ def test_parse_dictionary_rejects_malformed():
             parse_dictionary(bad)
 
 
+def test_parse_dictionary_allows_multiple_unnamed_tokens():
+    tokens = parse_dictionary('"AAA"\n"BBBB"')
+    assert [t.value for t in tokens] == [b"AAA", b"BBBB"]
+    assert all(t.name == "" for t in tokens)
+
+
 def test_parse_dictionary_enforces_bounds():
     with pytest.raises(ValidationError):
         parse_dictionary('big="%s"' % ("A" * 129))
