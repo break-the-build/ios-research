@@ -39,6 +39,21 @@ def test_init_twice_fails_without_force(tmp_path):
     assert code == ExitCode.VALIDATION
 
 
+def test_global_flags_before_subcommand_are_not_clobbered(tmp_path, capsys):
+    """Regression: subparser defaults reset globals parsed before the verb."""
+    ws_path = tmp_path / ".ios-research"
+    assert main(["--workspace", str(ws_path), "init"]) == ExitCode.OK
+    capsys.readouterr()  # drain the human-readable init output
+    assert (ws_path / "workspace.json").exists()
+
+    code = main(["--workspace", str(ws_path), "--json", "doctor"])
+    captured = capsys.readouterr().out
+    assert code == ExitCode.OK
+    payload = json.loads(captured)
+    assert payload["ok"] is True
+    assert payload["data"]["workspace_initialized"] is True
+
+
 # --- doctor ---------------------------------------------------------------
 def test_doctor_reports_workspace(workspace):
     code, env = run_json(["doctor"], workspace)

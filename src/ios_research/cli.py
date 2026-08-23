@@ -50,18 +50,27 @@ _REGISTRARS: list[Callable] = [
 
 
 def _global_parent() -> argparse.ArgumentParser:
+    # SUPPRESS defaults: every subparser re-inherits this parent, and plain
+    # defaults would clobber values parsed *before* the subcommand (argparse
+    # applies subparser defaults over the existing namespace).
     parent = argparse.ArgumentParser(add_help=False)
     parent.add_argument("--json", action="store_true", dest="as_json",
+                        default=argparse.SUPPRESS,
                         help="emit stable machine-readable JSON")
     parent.add_argument("--verbose", action="store_true",
+                        default=argparse.SUPPRESS,
                         help="verbose logging")
     parent.add_argument("--quiet", action="store_true",
+                        default=argparse.SUPPRESS,
                         help="suppress non-error human output")
-    parent.add_argument("--workspace", dest="workspace_path", default=None,
+    parent.add_argument("--workspace", dest="workspace_path",
+                        default=argparse.SUPPRESS,
                         help="path to the .ios-research workspace")
-    parent.add_argument("--config", dest="config_path", default=None,
+    parent.add_argument("--config", dest="config_path",
+                        default=argparse.SUPPRESS,
                         help="path to a config file override")
     parent.add_argument("--yes", action="store_true", dest="assume_yes",
+                        default=argparse.SUPPRESS,
                         help="assume yes; confirm destructive operations")
     return parent
 
