@@ -202,3 +202,32 @@ def locked_device(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + bytes([record_type & 0xFF,
                                                   flags & 0xFF])
     return magic + header + payload
+def netip(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock IP-stack message.
+
+    Message layout after ``magic``::
+
+        [declared_length u16 BE][rr_type u8][opt_flags u8][payload...]
+
+    Edits steer toward the shared netip defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    rr_type = 1
+    opt_flags = 2
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # zero rr_type -> null rdata pointer dereference
+        rr_type = 0x00
+    elif choice == 2:    # decompression flag -> use-after-free
+        opt_flags |= 0x01
+    elif choice == 3:    # rr-type confusion
+        rr_type = 0xC0
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # assertion path rr_type
+        rr_type = 0x7E
+    header = declared.to_bytes(2, "big") + bytes([rr_type & 0xFF,
+                                                  opt_flags & 0xFF])
+    return magic + header + payload
