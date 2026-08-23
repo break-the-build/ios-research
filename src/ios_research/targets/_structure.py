@@ -167,3 +167,38 @@ def messaging(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + bytes([part_count & 0xFF,
                                                   encoding & 0xFF])
     return magic + header + payload
+
+
+def locked_device(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock locked-device record (#86).
+
+    Record layout after ``magic``::
+
+        [declared_length u16 BE][record_type u8][flags u8][payload...]
+
+    Edits steer the header toward the shared locked-device defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    record_type = 1
+    flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        # kept below the 0xF000 timeout gate so this path stays reachable
+        declared = 0x00FF
+    elif choice == 1:    # compressed flag without zero terminator -> integer
+        flags = 0x80
+        payload = b"\xff" * len(payload) or b"\xff"
+        declared = len(payload)
+    elif choice == 2:    # released-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 3:    # privileged record-type confusion
+        record_type = 0xC0
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # assertion path record type
+        record_type = 0x7E
+    header = declared.to_bytes(2, "big") + bytes([record_type & 0xFF,
+                                                  flags & 0xFF])
+    return magic + header + payload

@@ -22,7 +22,7 @@ from .output import Result, render
 from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
     corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, wifi_cmd, nfc_cmd,
-    messaging_cmd,
+    messaging_cmd, lockeddevice_cmd,
     crash_cmd, analyze_cmd, diff_cmd, report_cmd, research_cmd, matrix_cmd,
     harness_cmd, spoints_cmd, surface_cmd, targetflags_cmd, advisory_cmd,
     engine_cmd, oracle_cmd, findings_cmd, beta_cmd, agent_cmd, detect_cmd,
@@ -38,6 +38,7 @@ _REGISTRARS: list[Callable] = [
     wifi_cmd.register,        # must precede target_cmd (installs 'target wifi')
     nfc_cmd.register,         # must precede target_cmd (installs 'target nfc')
     messaging_cmd.register,   # must precede target_cmd (installs 'target messaging')
+    lockeddevice_cmd.register,  # must precede target_cmd (installs 'target lockeddevice')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,

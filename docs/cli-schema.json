@@ -1667,59 +1667,6 @@
         }
       }
     },
-    "oracle": {
-      "arguments": {
-        "options": [],
-        "positionals": [
-          {
-            "help": "",
-            "name": "subcommand",
-            "required": true
-          }
-        ]
-      },
-      "subcommands": {
-        "list": {
-          "arguments": {
-            "options": [],
-            "positionals": []
-          }
-        },
-        "run": {
-          "arguments": {
-            "options": [
-              {
-                "dest": "corpus",
-                "flags": [
-                  "--corpus"
-                ],
-                "help": "corpus id providing the base inputs",
-                "required": false
-              }
-            ],
-            "positionals": [
-              {
-                "help": "path to the oracle spec JSON",
-                "name": "spec",
-                "required": true
-              }
-            ]
-          }
-        },
-        "show": {
-          "arguments": {
-            "options": [],
-            "positionals": [
-              {
-                "help": "",
-                "name": "run_id",
-                "required": true
-              }
-            ]
-          }
-        }
-      }
-    },
     "report": {
       "arguments": {
         "options": [],
@@ -2304,6 +2251,38 @@
           "arguments": {
             "options": [],
             "positionals": []
+          }
+        },
+        "lockeddevice": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "lockeddevice_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "lockdownd|mfi-auth|notification or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
           }
         },
         "messaging": {
