@@ -62,6 +62,24 @@ _DEFAULT_TIMEOUT_S = 10.0
 _HARNESS_ENV = "IOS_RESEARCH_MAC_HARNESS"
 
 
+def _decode_statuses(stdout: str) -> list[str]:
+    """Parse the standalone driver's ``DONE <i> <status>`` lines, in order."""
+    out: list[str] = []
+    for line in stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == "DONE":
+            out.append(parts[2])
+    return out
+
+
+def _decode_status(stdout: str, index: int) -> str | None:
+    """Return the decode status for input ``index`` (or None if not reported)."""
+    statuses = _decode_statuses(stdout)
+    if 0 <= index < len(statuses):
+        return statuses[index]
+    return None
+
+
 class MacFuzzTarget(Target):
     """Drive one input through a native libFuzzer/ASan harness on macOS."""
 
@@ -83,9 +101,11 @@ class MacFuzzTarget(Target):
 
     # --- discovery -------------------------------------------------------
     def _candidate_paths(self) -> list[Path]:
-        cands: list[Path] = []
+        # An explicit constructor override is authoritative — no fallback, so a
+        # caller can pin (or negatively assert) exactly one binary.
         if self._harness_override:
-            cands.append(Path(self._harness_override))
+            return [Path(self._harness_override)]
+        cands: list[Path] = []
         env = os.environ.get(_HARNESS_ENV)
         if env:
             cands.append(Path(env))
@@ -112,6 +132,15 @@ class MacFuzzTarget(Target):
         d["note"] = ("real native harness; authorized/own-machine research only; "
                      "requires a built libFuzzer/ASan binary")
         return d
+
+    # --- format hooks ----------------------------------------------------
+    def seeds(self) -> list[bytes]:
+        from . import _mac_seeds
+        return _mac_seeds.seeds(self.key)
+
+    def structure_mutate(self, data: bytes, rng):
+        from . import _mac_seeds
+        return _mac_seeds.structure_mutate(self.key, data, rng)
 
     # --- lifecycle -------------------------------------------------------
     def prepare(self) -> None:
@@ -174,10 +203,20 @@ class MacFuzzTarget(Target):
 
         dur = int((time.monotonic() - start) * 1000)
         report = (proc.stderr or b"").decode("utf-8", "replace")
+        stdout = (proc.stdout or b"").decode("utf-8", "replace")
 
         if proc.returncode == 0:
+            # The standalone driver reports per-input decode status on stdout;
+            # distinguish "the decoder produced an object" (ACCEPTED) from "the
+            # decoder rejected the input" (REJECTED). libFuzzer builds emit no
+            # such marker, so fall back to ACCEPTED.
+            status = _decode_status(stdout, 0)
+            if status == "rejected":
+                return ExecResult(outcome=Outcome.REJECTED,
+                                  detail="entry point rejected the input",
+                                  duration_ms=max(dur, 1))
             return ExecResult(outcome=Outcome.ACCEPTED,
-                              detail="input parsed without a sanitizer finding",
+                              detail="input decoded without a sanitizer finding",
                               duration_ms=max(dur, 1))
 
         if asan.is_crash_report(report):
@@ -193,6 +232,81 @@ class MacFuzzTarget(Target):
                   f"harness exited with code {proc.returncode}")
         return ExecResult(outcome=Outcome.ABNORMAL, detail=detail,
                           duration_ms=max(dur, 1))
+
+    # --- batched execution (throughput) ----------------------------------
+    def execute_batch(self, inputs: list[bytes]) -> list[ExecResult]:
+        """Run many inputs, amortizing process-spawn cost over one harness call.
+
+        Only the standalone-driver harness supports batching (it accepts multiple
+        file arguments and reports per-input status). For a single input, a
+        libFuzzer harness, or any crash within the batch, this falls back to the
+        per-input :meth:`execute` path so results stay precise and attributable.
+        """
+        if len(inputs) <= 1:
+            return [self.execute(d) for d in inputs]
+
+        self.prepare()
+        try:
+            harness = self._harness_path
+            if harness is None:
+                return [self._run(d) for d in inputs]  # uniform ABNORMAL results
+            return self._run_batch(harness, inputs)
+        finally:
+            self.cleanup()
+
+    def _run_batch(self, harness: Path, inputs: list[bytes]) -> list[ExecResult]:
+        import tempfile
+        import time
+
+        start = time.monotonic()
+        tmpdir = tempfile.mkdtemp(prefix="ios-research-mac-batch-")
+        paths: list[str] = []
+        try:
+            for i, data in enumerate(inputs):
+                p = os.path.join(tmpdir, f"case_{i:06d}.input")
+                with open(p, "wb") as fh:
+                    fh.write(data)
+                paths.append(p)
+
+            env = dict(os.environ)
+            env.setdefault("ASAN_OPTIONS",
+                           "abort_on_error=0:exitcode=99:detect_leaks=0")
+            env.setdefault("UBSAN_OPTIONS", "print_stacktrace=1:halt_on_error=1")
+            try:
+                proc = subprocess.run(
+                    [str(harness), *paths], capture_output=True, env=env,
+                    timeout=self.timeout_s * len(inputs))
+            except subprocess.TimeoutExpired:
+                return [self.execute(d) for d in inputs]
+
+            report = (proc.stderr or b"").decode("utf-8", "replace")
+            stdout = (proc.stdout or b"").decode("utf-8", "replace")
+
+            # A crash aborts the batch process; re-run individually so the
+            # crashing input (and any after it) get precise, attributable results.
+            if proc.returncode != 0 and asan.is_crash_report(report):
+                return [self.execute(d) for d in inputs]
+
+            statuses = _decode_statuses(stdout)
+            if len(statuses) != len(inputs):
+                # No/partial per-input markers (e.g. libFuzzer build): be safe.
+                return [self.execute(d) for d in inputs]
+
+            per_ms = max(int((time.monotonic() - start) * 1000) // len(inputs), 1)
+            results: list[ExecResult] = []
+            for status in statuses:
+                if status == "rejected":
+                    results.append(ExecResult(outcome=Outcome.REJECTED,
+                                              detail="entry point rejected the input",
+                                              duration_ms=per_ms))
+                else:
+                    results.append(ExecResult(outcome=Outcome.ACCEPTED,
+                                              detail="input decoded without a finding",
+                                              duration_ms=per_ms))
+            return results
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def build_targets() -> dict[str, type]:
