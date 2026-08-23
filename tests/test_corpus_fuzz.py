@@ -92,6 +92,39 @@ def test_crash_store_dedupes_by_signature(workspace):
     assert len(store.list()) == 1
 
 
+def test_crash_store_isolated_by_workspace_and_experiment(tmp_path):
+    """Records from one workspace/experiment are never visible in another."""
+    from ios_research import __version__
+    from ios_research.errors import ValidationError
+    from ios_research.workspace import Workspace
+
+    ws_a = Workspace(tmp_path / "a" / ".ios-research")
+    ws_b = Workspace(tmp_path / "b" / ".ios-research")
+    ws_a.init(framework_version=__version__, created_at="t")
+    ws_b.init(framework_version=__version__, created_at="t")
+    result = create("mock:parser").execute(b"MOCK\x01\xff\x00\x00")
+    store_a = CrashStore(ws_a)
+    crash = store_a.record(experiment_id="exp-a", target="mock:parser",
+                           fmt="mock", data=b"MOCK\x01\xff\x00\x00",
+                           exec_result=result)
+    assert [c.id for c in store_a.list(experiment_id="exp-a")] == [crash.id]
+    assert store_a.list(experiment_id="exp-b") == []
+    assert CrashStore(ws_b).list() == []
+    with pytest.raises(ValidationError, match="not in experiment"):
+        store_a.bump_count(crash.id, 1, experiment_id="exp-b")
+
+
+def test_crash_store_rejects_abnormal_outcomes(workspace):
+    from ios_research.errors import ValidationError
+    from ios_research.targets.base import ExecResult
+
+    with pytest.raises(ValidationError, match="confirmed CRASH"):
+        CrashStore(workspace).record(
+            experiment_id="exp", target="test", fmt="raw", data=b"x",
+            exec_result=ExecResult(outcome=Outcome.ABNORMAL,
+                                   detail="harness exited unexpectedly"))
+
+
 # --- fuzz engine ----------------------------------------------------------
 def _make_session(workspace, seed=1, max_cases=200):
     exp = ExperimentStore(workspace).create(
@@ -114,6 +147,35 @@ def test_fuzz_runs_to_completion_and_finds_crashes(workspace):
     assert session.cursor == 200
     assert session.unique_crashes > 0
     assert sum(session.outcomes.values()) == 200
+
+
+def test_fuzz_reports_abnormal_harness_events_without_crash_records(
+        workspace, monkeypatch):
+    from ios_research.targets.base import ExecResult, Target
+    import ios_research.fuzz as fuzzmod
+
+    class AlwaysAbnormal(Target):
+        target_id = "test:abnormal"
+
+        def _run(self, data):
+            return ExecResult(outcome=Outcome.ABNORMAL, detail="harness failed")
+
+    monkeypatch.setattr(fuzzmod.targets, "create", lambda _target: AlwaysAbnormal())
+    exp = ExperimentStore(workspace).create(
+        target="test:abnormal", device="mock:device", os_version="17.0",
+        config_hash="cfg", seed=1)
+    corpus = CorpusStore(workspace).create("abnormal")
+    CorpusStore(workspace).add_bytes(corpus, b"seed", origin="seed")
+    engine = FuzzEngine(workspace)
+    session = engine.create(experiment_id=exp.id, target="test:abnormal",
+                            corpus_id=corpus.id, seed=1, workers=1,
+                            max_cases=3, duration_s=None)
+    session = engine.advance(session)
+    assert session.abnormal_events == 3
+    assert session.last_abnormal_detail == "harness failed"
+    assert session.crashes == 0
+    assert session.crash_ids == []
+    assert engine.crash_store.list() == []
 
 
 def test_fuzz_is_reproducible_across_runs(tmp_path):

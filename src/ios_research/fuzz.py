@@ -6,8 +6,8 @@ persisted so they can be paused and resumed. Execution is fully deterministic
 for a given ``(seed, corpus)`` — the reference engine runs sequentially and
 records ``workers`` as metadata.
 
-The engine only *identifies* abnormal behavior and crashes. It never generates
-exploit payloads.
+The engine persists confirmed crashes and reports abnormal harness behavior
+separately. It never generates exploit payloads.
 """
 
 from __future__ import annotations
@@ -58,6 +58,8 @@ class FuzzSession:
     coverage_retained_shas: list[str] = field(default_factory=list)
     coverage_selection_counts: dict[str, int] = field(default_factory=dict)
     coverage_adapter_errors: int = 0
+    abnormal_events: int = 0
+    last_abnormal_detail: str = ""
     started_at: str = ""
     updated_at: str = ""
 
@@ -84,6 +86,8 @@ class FuzzSession:
                 "selection_counts": dict(self.coverage_selection_counts),
                 "adapter_errors": self.coverage_adapter_errors,
             },
+            "abnormal_events": self.abnormal_events,
+            "last_abnormal_detail": self.last_abnormal_detail,
         }
 
 
@@ -238,7 +242,14 @@ class FuzzEngine:
                         persist=False) is not None:
                     corpus_dirty = True
 
-            if result.outcome in (Outcome.CRASH, Outcome.ABNORMAL):
+            if result.outcome == Outcome.ABNORMAL:
+                # Harness/tooling failures are operational evidence, not a
+                # confirmed vulnerability. Keep a bounded session summary and
+                # never assign them a synthetic crash signature.
+                session.abnormal_events += 1
+                session.last_abnormal_detail = result.detail[:500]
+
+            if result.outcome == Outcome.CRASH:
                 signature = result.diagnostics.signature \
                     if result.diagnostics else "sig_none"
                 crash_id = make_id("crash", session.experiment_id, signature)
@@ -281,14 +292,17 @@ class FuzzEngine:
         its total occurrence count in a single write."""
         for crash_id, count in crash_counts.items():
             if self.ws.path(f"crashes/{crash_id}/crash.json").exists():
-                self.crash_store.bump_count(crash_id, count)
+                self.crash_store.bump_count(
+                    crash_id, count, experiment_id=session.experiment_id)
             else:
                 data, result, lineage = crash_first[crash_id]
                 self.crash_store.record(
                     experiment_id=session.experiment_id, target=session.target,
                     fmt=fmt, data=data, exec_result=result, lineage=lineage)
                 if count > 1:
-                    self.crash_store.bump_count(crash_id, count - 1)
+                    self.crash_store.bump_count(
+                        crash_id, count - 1,
+                        experiment_id=session.experiment_id)
 
     def resume(self, session: FuzzSession, *, max_new: int | None = None,
                deadline: float | None = None) -> FuzzSession:
