@@ -1,4 +1,5 @@
 {
+  "id": "iosr-report-quality-simulator-v1",
   "objective": "Improve the completeness, accuracy, and evidence traceability of ios-research vulnerability reports",
   "environment": "ios_research_reporting",
   "primary_metric": "report_quality_score",

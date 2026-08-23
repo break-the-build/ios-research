@@ -1,9 +1,10 @@
 {
-  "objective": "Increase useful differential findings across ios-research target versions and configurations",
+  "id": "iosr-differential-simulator-v1",
+  "objective": "Increase candidate differential signals in the deterministic mock-version model",
   "environment": "ios_research_differential",
   "primary_metric": "actionable_differences_per_1000_cases",
   "metrics": [
-    {"name": "actionable_differences_per_1000_cases", "direction": "maximize", "unit": "differences"},
+    {"name": "actionable_differences_per_1000_cases", "direction": "maximize", "unit": "candidate-differences", "description": "Severity-changing mock transitions; each requires an independent oracle before being called actionable."},
     {"name": "false_positive_rate", "direction": "minimize", "unit": "ratio"},
     {"name": "coverage_difference", "direction": "maximize", "unit": "coverage"},
     {"name": "execution_time_seconds", "direction": "minimize", "unit": "seconds"}
@@ -17,7 +18,7 @@
       "description": "Differences must be meaningfully distinguishable from noise"
     }
   ],
-  "safety_rules": ["max-knobs:4"],
+  "safety_rules": ["max-knobs:4", "promotion-requires-independent-oracle", "no-vulnerability-claim-from-mock-transition"],
   "budget": {
     "max_experiments_per_batch": 8,
     "max_parallel": 6,

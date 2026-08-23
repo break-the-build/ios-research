@@ -1,11 +1,12 @@
 {
-  "objective": "Increase the effectiveness of ios-research fuzzing at discovering unique reproducible failures",
+  "id": "iosr-fuzz-effectiveness-simulator-v1",
+  "objective": "Improve unique reproducible failure discovery in the deterministic mock-target fuzzer model",
   "environment": "ios_research_fuzzer",
   "primary_metric": "unique_crashes_per_100k_cases",
   "metrics": [
     {"name": "unique_crashes_per_100k_cases", "direction": "maximize", "unit": "crashes"},
     {"name": "reproducible_crash_rate", "direction": "maximize", "unit": "ratio"},
-    {"name": "coverage_growth", "direction": "maximize", "unit": "percent"},
+    {"name": "coverage_growth", "direction": "maximize", "unit": "behavioral-proxy-percent", "description": "Known mock-signature discovery proxy; not instrumented code coverage."},
     {"name": "executions_per_second", "direction": "maximize", "unit": "exec/s"}
   ],
   "constraints": [
@@ -17,7 +18,7 @@
       "description": "Reported crashes should be reproducible"
     }
   ],
-  "safety_rules": ["max-knobs:4"],
+  "safety_rules": ["max-knobs:4", "promotion-requires-holdout-validation", "no-real-target-performance-claim-from-simulator"],
   "budget": {
     "max_experiments_per_batch": 8,
     "max_parallel": 8,

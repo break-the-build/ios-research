@@ -1,11 +1,12 @@
 {
-  "objective": "Maximize ios-research development quality per dollar spent on LLM agents",
+  "id": "iosr-agent-cost-quality-model-v1",
+  "objective": "Optimize modeled quality per modeled cost for the deterministic agent pipeline",
   "environment": "ios_research_agent",
   "primary_metric": "quality_per_dollar",
   "metrics": [
-    {"name": "quality_per_dollar", "direction": "maximize", "unit": "ratio"},
+    {"name": "quality_per_dollar", "direction": "maximize", "unit": "modeled-quality/modeled-usd"},
     {"name": "successful_goal_completion_rate", "direction": "maximize", "unit": "ratio"},
-    {"name": "cost_per_successful_task", "direction": "minimize", "unit": "usd"},
+    {"name": "cost_per_successful_task", "direction": "minimize", "unit": "modeled-usd"},
     {"name": "agent_rework_rate", "direction": "minimize", "unit": "ratio"},
     {"name": "token_usage", "direction": "minimize", "unit": "tokens"}
   ],
@@ -18,7 +19,7 @@
       "description": "Cost optimization cannot substantially reduce success"
     }
   ],
-  "safety_rules": ["max-knobs:3"],
+  "safety_rules": ["max-knobs:3", "no-real-agent-cost-or-quality-claim-from-model"],
   "budget": {
     "max_experiments_per_batch": 6,
     "max_parallel": 3,

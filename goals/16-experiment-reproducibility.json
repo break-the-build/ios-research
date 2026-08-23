@@ -1,4 +1,5 @@
 {
+  "id": "iosr-experiment-reproducibility-gate-v1",
   "objective": "Maximize reproducibility of ios-research experiments across repeated executions",
   "environment": "ios_research",
   "primary_metric": "experiment_reproducibility",

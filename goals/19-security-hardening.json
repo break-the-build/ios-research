@@ -1,4 +1,5 @@
 {
+  "id": "iosr-security-hardening-gate-v1",
   "objective": "Improve the security of ios-research itself while preserving research functionality",
   "environment": "ios_research_security",
   "primary_metric": "security_test_pass_rate",

@@ -1,5 +1,6 @@
 {
-  "objective": "Improve the effectiveness of LLM agents operating ios-research through the CLI",
+  "id": "iosr-agent-effectiveness-model-v1",
+  "objective": "Optimize the deterministic agent-pipeline model for mock-target research tasks",
   "environment": "ios_research_agent",
   "primary_metric": "successful_goal_completion_rate",
   "metrics": [
@@ -20,7 +21,8 @@
   ],
   "safety_rules": [
     "max-knobs:3",
-    "no-destructive-device-operations"
+    "no-destructive-device-operations",
+    "no-real-agent-performance-claim-from-model"
   ],
   "budget": {
     "max_experiments_per_batch": 5,

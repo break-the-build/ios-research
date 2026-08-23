@@ -1,17 +1,18 @@
 {
-  "objective": "Maximize useful security findings per unit of compute, time, and experimentation budget",
+  "id": "iosr-research-efficiency-model-v1",
+  "objective": "Optimize modeled compute efficiency for reproducible mock-target candidate signals",
   "environment": "ios_research",
   "primary_metric": "actionable_findings_per_dollar",
   "metrics": [
     {
       "name": "actionable_findings_per_dollar",
       "direction": "maximize",
-      "unit": "findings/usd"
+      "unit": "modeled-findings/usd"
     },
     {
       "name": "actionable_findings_per_hour",
       "direction": "maximize",
-      "unit": "findings/hour"
+      "unit": "modeled-findings/hour"
     },
     {
       "name": "unique_crashes_per_100k_cases",
@@ -21,7 +22,7 @@
     {
       "name": "cost_per_unique_crash",
       "direction": "minimize",
-      "unit": "usd"
+      "unit": "modeled-usd"
     },
     {
       "name": "reproducible_crash_rate",
@@ -39,7 +40,8 @@
     }
   ],
   "safety_rules": [
-    "max-knobs:4"
+    "max-knobs:4",
+    "no-real-cost-or-finding-rate-claim-from-model"
   ],
   "budget": {
     "max_experiments_per_batch": 8,

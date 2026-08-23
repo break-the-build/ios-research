@@ -1,4 +1,5 @@
 {
+  "id": "iosr-cli-reliability-gate-v1",
   "objective": "Maximize successful deterministic execution of ios-research CLI commands",
   "environment": "ios_research_cli",
   "primary_metric": "command_success_rate",

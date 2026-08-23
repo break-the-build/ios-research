@@ -1,4 +1,5 @@
 {
+  "id": "iosr-crash-reproducibility-gate-v1",
   "objective": "Maximize deterministic reproduction of discovered ios-research crashes",
   "environment": "ios_research_reproduction",
   "primary_metric": "reproduction_rate",

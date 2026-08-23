@@ -44,7 +44,10 @@ weights, 40 samples, seed 20260806):
 
 ## Goals evaluated
 
-All 20 goals were read and ranked by value/measurability. Most reference
+The historical portfolio contains 22 executable goal files (including separate
+inner-loop and engine-throughput goals, plus framework-reliability and
+on-device-matching goals that shared legacy numeric prefixes). They were read
+and ranked by value/measurability. Most reference
 environments that are not yet implemented (`ios_research_cli`,
 `ios_research_minimizer`, …) — those were **deferred** (see below). The highest
 value/cost goal with a ready, reliable measurement was **06-fuzz-effectiveness**

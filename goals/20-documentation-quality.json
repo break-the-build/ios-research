@@ -1,4 +1,5 @@
 {
+  "id": "iosr-documentation-quality-gate-v1",
   "objective": "Improve the completeness and correctness of ios-research documentation",
   "environment": "ios_research_documentation",
   "primary_metric": "documentation_completeness",

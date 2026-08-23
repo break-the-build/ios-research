@@ -1,4 +1,5 @@
 {
+  "id": "iosr-testcase-minimization-simulator-v1",
   "objective": "Minimize crash-inducing testcases while preserving deterministic reproduction",
   "environment": "ios_research_minimizer",
   "primary_metric": "median_input_reduction",
