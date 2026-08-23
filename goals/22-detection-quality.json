@@ -1,0 +1,33 @@
+{
+  "id": "iosr-detection-quality-simulator-v1",
+  "objective": "Maximize built-in detection-signature F1 on the seeded capability-indicator sample set while keeping false positives near zero and scan throughput high",
+  "environment": "ios_research_detection",
+  "primary_metric": "detection_f1",
+  "metrics": [
+    {"name": "detection_f1", "direction": "maximize", "unit": "score"},
+    {"name": "detection_recall", "direction": "maximize", "unit": "ratio"},
+    {"name": "false_positive_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "rules_loaded", "direction": "maximize", "unit": "count"},
+    {"name": "scans_per_second", "direction": "maximize", "unit": "scans/s"}
+  ],
+  "constraints": [
+    {
+      "metric": "false_positive_rate",
+      "op": "<=",
+      "value": 0.05,
+      "hard": true,
+      "description": "Benign application strings must almost never be flagged"
+    }
+  ],
+  "safety_rules": [
+    "max-knobs:4",
+    "self-consistency-benchmark-only-no-zoo-claim"
+  ],
+  "budget": {
+    "max_experiments_per_batch": 8,
+    "max_parallel": 8,
+    "max_experiments_total": 60,
+    "max_cost_usd": 60.0,
+    "max_cost_usd_per_batch": 15.0
+  }
+}
