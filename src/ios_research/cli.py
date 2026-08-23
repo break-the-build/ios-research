@@ -21,8 +21,8 @@ from .output import Result, render
 # Groups are added phase by phase; later phases extend this list.
 from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
-    corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, wifi_cmd, crash_cmd,
-    analyze_cmd, diff_cmd, report_cmd, research_cmd, matrix_cmd,
+    corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, wifi_cmd, nfc_cmd,
+    crash_cmd, analyze_cmd, diff_cmd, report_cmd, research_cmd, matrix_cmd,
     harness_cmd, spoints_cmd, surface_cmd, targetflags_cmd, advisory_cmd,
     beta_cmd, agent_cmd,
 )
@@ -34,6 +34,7 @@ _REGISTRARS: list[Callable] = [
     audio_cmd.register,       # must precede target_cmd (installs 'target audio')
     bluetooth_cmd.register,   # must precede target_cmd (installs 'target bluetooth')
     wifi_cmd.register,        # must precede target_cmd (installs 'target wifi')
+    nfc_cmd.register,         # must precede target_cmd (installs 'target nfc')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,
@@ -91,7 +92,31 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     for registrar in _REGISTRARS:
         registrar(subparsers, parent)
+    _suppress_subparser_global_defaults(parser)
     return parser
+
+
+# Global-flag dests shared by the root parser and every subparser. Subparsers
+# parse into a fresh namespace whose results are copied unconditionally over
+# the root namespace, so a subparser *default* (e.g. ``as_json=False``) would
+# silently discard a global flag given before the subcommand. Marking these
+# actions ``SUPPRESS`` keeps absent flags from being copied; handlers already
+# read them via :func:`getattr` fallbacks.
+_GLOBAL_DESTS = ("as_json", "verbose", "quiet",
+                 "workspace_path", "config_path", "assume_yes")
+
+
+def _suppress_subparser_global_defaults(parser: argparse.ArgumentParser) -> None:
+    subparsers_action = next(
+        (a for a in parser._actions
+         if isinstance(a, argparse._SubParsersAction)), None)
+    if subparsers_action is None:
+        return
+    for sub in subparsers_action.choices.values():
+        for action in sub._actions:
+            if getattr(action, "dest", None) in _GLOBAL_DESTS:
+                action.default = argparse.SUPPRESS
+        _suppress_subparser_global_defaults(sub)
 
 
 def _context_from_args(args: argparse.Namespace) -> Context:
