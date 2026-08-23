@@ -14,6 +14,8 @@ from .artifacts import ArtifactStore
 from .clock import now_iso
 from .hashing import sha256_bytes
 from .ids import make_id
+from .errors import ValidationError
+from .targets.base import Outcome
 from .workspace import Workspace
 
 
@@ -51,17 +53,22 @@ class CrashStore:
     def _rel(self, crash_id: str) -> str:
         return f"crashes/{crash_id}/crash.json"
 
-    def get(self, crash_id: str) -> CrashRecord:
+    def get(self, crash_id: str, *, experiment_id: str | None = None) -> CrashRecord:
         rel = self._rel(crash_id)
         if not self.ws.path(rel).exists():
             from .errors import NotFoundError
             raise NotFoundError(f"crash '{crash_id}' not found")
-        return CrashRecord(**self.ws.read_json(rel))
+        crash = CrashRecord(**self.ws.read_json(rel))
+        if experiment_id is not None and crash.experiment_id != experiment_id:
+            raise ValidationError(
+                f"crash '{crash_id}' is not in experiment '{experiment_id}'")
+        return crash
 
     def save(self, crash: CrashRecord) -> None:
         self.ws.write_json(self._rel(crash.id), crash.to_dict())
 
-    def bump_count(self, crash_id: str, extra: int) -> None:
+    def bump_count(self, crash_id: str, extra: int,
+                   *, experiment_id: str | None = None) -> None:
         """Add ``extra`` to a crash's occurrence count in a single write.
 
         Lets a hot loop accumulate duplicate counts in memory and flush them
@@ -69,17 +76,20 @@ class CrashStore:
         """
         if extra <= 0:
             return
-        crash = self.get(crash_id)
+        crash = self.get(crash_id, experiment_id=experiment_id)
         crash.count += extra
         crash.last_seen = now_iso()
         self.save(crash)
 
-    def list(self) -> list[CrashRecord]:
+    def list(self, *, experiment_id: str | None = None) -> list[CrashRecord]:
+        """List records in this workspace, optionally for one experiment."""
         base = self.ws.dir("crashes")
         out = []
         for manifest in sorted(base.glob("*/crash.json")):
-            out.append(CrashRecord(**self.ws.read_json(
-                str(manifest.relative_to(self.ws.root)))))
+            crash = CrashRecord(**self.ws.read_json(
+                str(manifest.relative_to(self.ws.root))))
+            if experiment_id is None or crash.experiment_id == experiment_id:
+                out.append(crash)
         return out
 
     def input_bytes(self, crash: CrashRecord) -> bytes:
@@ -93,6 +103,9 @@ class CrashStore:
         signatures increment ``count`` on the existing record rather than
         creating a new one.
         """
+        if exec_result.outcome != Outcome.CRASH:
+            raise ValidationError(
+                "only confirmed CRASH outcomes can be stored as crash records")
         diag = exec_result.diagnostics
         signature = diag.signature if diag else "sig_none"
         classification = diag.classification_hint if diag else "UNKNOWN"
@@ -103,7 +116,7 @@ class CrashStore:
 
         rel = self._rel(crash_id)
         if self.ws.path(rel).exists():
-            existing = self.get(crash_id)
+            existing = self.get(crash_id, experiment_id=experiment_id)
             existing.count += 1
             existing.last_seen = now_iso()
             self.save(existing)

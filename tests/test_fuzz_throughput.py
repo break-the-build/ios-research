@@ -71,7 +71,7 @@ def test_crash_counts_sum_to_total_crashes(workspace):
     eng, cs, corpus, session = _run(workspace, 600)
     counts = {c.id: c.count for c in eng.crash_store.list()}
     # Every crash occurrence is accounted for in the persisted counts.
-    assert sum(counts.values()) == session.outcomes["crash"] + session.outcomes["abnormal"]
+    assert sum(counts.values()) == session.outcomes["crash"]
     # Unique crashes match the persisted distinct records.
     assert set(counts) == set(session.crash_ids)
 
