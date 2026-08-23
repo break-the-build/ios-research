@@ -26,6 +26,7 @@ _PREFIXES = {
     "evidence": "evd",
     "seqrun": "seq",
     "obstrace": "obs",
+    "campaign": "camp",
 }
 
 
