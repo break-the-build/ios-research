@@ -58,6 +58,20 @@ device, fuzz macOS system frameworks directly — see
 crash on real hardware, use the on-device target — see
 [docs/ON-DEVICE-TARGET.md](docs/ON-DEVICE-TARGET.md).
 
+### Apple Security Bounty evidence readiness
+
+Check local report evidence and export a deterministic, redacted reference pack
+for responsible disclosure:
+
+```bash
+ios-research report bounty-validate <report-id> --metadata researcher.json
+ios-research report bounty-export <report-id> --metadata researcher.json
+```
+
+This is an evidence-completeness check, not an eligibility or reward decision.
+It remains local-only: it does not access Apple systems or Target Flags. See
+[docs/APPLE-BOUNTY-READINESS.md](docs/APPLE-BOUNTY-READINESS.md).
+
 ## For LLM agents
 
 The full CLI is described in a machine-readable schema

@@ -37,6 +37,22 @@ def register(subparsers, parent) -> None:
     p_list = sub.add_parser("list", parents=[parent], help="list reports")
     p_list.set_defaults(func=cmd_list)
 
+    p_bounty_validate = sub.add_parser("bounty-validate", parents=[parent],
+                                       help="check local Apple-bounty evidence readiness")
+    p_bounty_validate.add_argument("report_id")
+    p_bounty_validate.add_argument("--metadata", default=None,
+                                  help="optional local JSON metadata/attestations")
+    p_bounty_validate.set_defaults(func=cmd_bounty_validate)
+
+    p_bounty_export = sub.add_parser("bounty-export", parents=[parent],
+                                     help="export a redacted local Apple-bounty evidence pack")
+    p_bounty_export.add_argument("report_id")
+    p_bounty_export.add_argument("--metadata", default=None,
+                                 help="optional local JSON metadata/attestations")
+    p_bounty_export.add_argument("--out", default=None,
+                                 help="output directory (default: report evidence directory)")
+    p_bounty_export.set_defaults(func=cmd_bounty_export)
+
     p.set_defaults(func=cmd_list)
 
 
@@ -91,3 +107,26 @@ def cmd_list(ctx, args) -> Result:
     return Result(command="report list", data={"reports": items, "count": len(items)},
                   human=lambda d: "\n".join(
                       f"{r['id']:20} {r['crash_id']}" for r in d["reports"]) or "(none)")
+
+
+def cmd_bounty_validate(ctx, args) -> Result:
+    from ..bounty import BountyReadiness, load_metadata
+    readiness = BountyReadiness(ctx.workspace())
+    report = readiness.reports.get(args.report_id)
+    result = readiness.validate(report, load_metadata(args.metadata))
+    return Result(command="report bounty-validate", ok=result["ready"], data=result,
+                  messages=["evidence complete" if result["ready"]
+                            else f"missing: {', '.join(result['missing'])}"])
+
+
+def cmd_bounty_export(ctx, args) -> Result:
+    from ..bounty import BountyReadiness, load_metadata
+    readiness = BountyReadiness(ctx.workspace())
+    report = readiness.reports.get(args.report_id)
+    metadata = load_metadata(args.metadata)
+    path = readiness.write_pack(report, metadata, args.out)
+    result = readiness.validate(report, metadata)
+    return Result(command="report bounty-export",
+                  data={"manifest": str(path), "directory": str(path.parent),
+                        "ready": result["ready"],
+                        "safety": "local validated evidence copies only; no data transmitted"})
