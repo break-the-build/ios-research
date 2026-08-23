@@ -35,6 +35,7 @@ from .commands import (
     xpc_cmd,
     docimp_cmd,
     signeddoc_cmd,
+    proxapp_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -55,6 +56,7 @@ _REGISTRARS: list[Callable] = [
     xpc_cmd.register,   # must precede target_cmd (installs 'target xpc')
     docimp_cmd.register,   # must precede target_cmd (installs 'target docimp')
     signeddoc_cmd.register,   # must precede target_cmd (installs 'target signeddoc')
+    proxapp_cmd.register,   # must precede target_cmd (installs 'target proxapp')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,

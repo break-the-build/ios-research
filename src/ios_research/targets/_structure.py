@@ -442,3 +442,33 @@ def signeddoc(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + bytes([asn1_class & 0xFF,
                                                   der_flags & 0xFF])
     return magic + header + payload
+def proxapp(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock proximity record (#111).
+
+    Record layout after ``magic``::
+
+        [declared u16 BE][tlv_type u8][tlv_flags u8][payload...]
+
+    Edits steer the header toward the shared proximity defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    tlv_type = 1
+    tlv_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # copy flag set -> OOB write in TLV copy
+        tlv_flags |= 0x01
+    elif choice == 2:    # TLV type 0 -> null method-handler dereference
+        tlv_type = 0x00
+    elif choice == 3:    # released-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # session-state type confusion
+        tlv_type = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([tlv_type & 0xFF,
+                                                  tlv_flags & 0xFF])
+    return magic + header + payload
