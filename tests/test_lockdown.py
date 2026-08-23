@@ -79,9 +79,9 @@ def test_paired_run_classifies_transitions(workspace):
     by_verdict = {r["input_sha256"]: r["verdict"] for r in summary["results"]}
     assert summary["provenance"]["attested_lockdown_enabled"] is True
     assert summary["counts"][CANDIDATE] >= 0  # deterministic; no assertion on mix
-    # Every observation carries the observation-only flag except consistent ones.
+    # Findings are flagged; consistent and inconclusive observations are not.
     for r in summary["results"]:
-        assert r["observation_only"] == (r["verdict"] != OK)
+        assert r["observation_only"] == (r["verdict"] in (CANDIDATE, HARDENING))
     # Deterministic re-run.
     second = engine.run(engine.get(pair.id))
     assert second["results"] == summary["results"]
@@ -116,3 +116,36 @@ def test_lockdown_cli_roundtrip(workspace):
     code = main([*ws, "lockdown", "run", "--attest-lockdown-enabled",
                  "--json"])
     assert code == 0
+
+
+# --- honesty: timeouts and empty-signature deltas (#129) ------------------------
+
+def test_timeout_on_either_side_is_inconclusive():
+    from ios_research.lockdown import INCONCLUSIVE
+    for std, lm in (("crash", "timeout"), ("accepted", "timeout"),
+                    ("timeout", "accepted"), ("timeout", "timeout")):
+        verdict, reason = _classify(std, lm, "sig_a", "sig_b")
+        assert verdict == INCONCLUSIVE, (std, lm, verdict)
+        assert "inconclusive" in reason
+
+
+def test_inconclusive_excluded_from_summary_counts(workspace):
+    from ios_research.lockdown import INCONCLUSIVE, LockdownEngine
+    from ios_research.corpus import CorpusStore
+    engine = LockdownEngine(workspace)
+    corpus = CorpusStore(workspace).create("lm-corpus-inc")
+    CorpusStore(workspace).add_bytes(corpus, b"MOCK\x01\x01\x00\x02ok",
+                                     origin="seed")
+    pair = engine.create(
+        name="t", target_standard="mock:parser",
+        target_lockdown="mock:parser", build_standard="21A",
+        build_lockdown="21A-lm", attested_lockdown_enabled=True,
+        simulation=True, corpus_id=corpus.id)
+    summary = engine.run(engine.get(pair.id))
+    assert set(summary["counts"]) == {CANDIDATE, HARDENING, OK, INCONCLUSIVE}
+
+
+def test_crash_delta_classified_without_signature_match():
+    # Empty signatures on both sides must not mask a crash-vs-clean delta.
+    verdict, _ = _classify("crash", "accepted", "", "")
+    assert verdict == "hardening-delta"
