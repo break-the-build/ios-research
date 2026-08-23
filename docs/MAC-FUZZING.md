@@ -107,17 +107,29 @@ can recover per-input outcome and attribute a crash within a batch.
 ### Campaign runner (recommended)
 
 ```bash
+# out-of-process driver engine (default driver build):
 python tools/mac_campaign/run.py --target mac:imageio --cases 20000 \
-    --batch 512 --workers 0 \
-    --report /tmp/campaign.json --save-crashes /tmp/crashes
+    --batch 512 --workers 0 --save-crashes /tmp/crashes
+
+# in-process libFuzzer engine (auto-selected for --libfuzzer builds):
+python tools/mac_campaign/run.py --target mac:imageio \
+    --runs 2000000 --max-total-time 60 --workers 6 --save-crashes /tmp/crashes
 ```
 
-The runner seeds a corpus from the target's format-aware seeds, mutates with the
-shared engine, drives inputs in **batches** across **parallel worker processes**,
-and summarizes real crashes. `--batch` sets inputs per harness process (default
-256); `--workers 0` auto-picks a safe worker count (see Throughput). It is a
-real-signal *campaign*, deliberately **not** an experiment-loop environment (see
-below).
+The runner picks an **engine** (`--engine auto|driver|libfuzzer`):
+
+- **`driver`** (out-of-process): seeds from the target's format-aware seeds,
+  mutates with the shared engine, and drives inputs in **batches** across
+  **parallel worker processes**. `--batch` sets inputs per process (default 256);
+  `--workers 0` auto-picks a capped worker count (see Throughput).
+- **`libfuzzer`** (in-process persistent): hands the seeds to libFuzzer, which
+  mutates and executes **in-process** with `-fork` workers, collects crash
+  artifacts, and re-runs each unique one to normalize its ASan report. `--runs`
+  and `--max-total-time` bound it. Auto-selected when the built harness is a
+  libFuzzer binary.
+
+Either way it is a real-signal *campaign*, deliberately **not** an experiment-loop
+environment (see below).
 
 ### Through the CLI pipeline
 
@@ -168,11 +180,20 @@ Combined: **~8800 exec/s** at `--batch 512 --workers 6` — roughly a **550×**
 improvement over the naive path. Parallel scaling **plateaus at ~4–6 workers** and
 regresses beyond that (many concurrent ASan processes contend for memory and the
 scheduler), so `--workers 0` caps the auto default at 6. This is the practical
-ceiling for an out-of-process ASan harness; higher rates need in-process
-persistent-mode libFuzzer.
+ceiling for the **out-of-process driver** engine.
 
-When a crash occurs mid-batch the target re-runs that batch input-by-input so each
+When a crash occurs mid-batch the driver re-runs that batch input-by-input so each
 crash is precisely attributed (so crash-heavy runs trade throughput for accuracy).
+
+### Beyond the ceiling: the libFuzzer engine
+
+To exceed the out-of-process ceiling, build with `--libfuzzer` and run the
+**in-process** engine (`--engine libfuzzer`, auto-selected). libFuzzer executes
+`LLVMFuzzerTestOneInput` in-process with no per-input process/`dlopen` cost —
+typically 10⁴–10⁵ exec/s — and `-fork` gives parallelism and crash-tolerance in
+one. It needs a fuzzer-capable clang (Homebrew LLVM; Apple ships none). The crash
+path is identical: each artifact is re-run once and normalized through
+`targets/asan.py`.
 
 ## Relationship to experiment-loop
 
