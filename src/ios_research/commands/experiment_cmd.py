@@ -16,6 +16,11 @@ def register(subparsers, parent) -> None:
     p_create.add_argument("--target", default=None)
     p_create.add_argument("--device", default=None)
     p_create.add_argument("--seed", type=int, default=None)
+    p_create.add_argument("--delivery", default=None,
+                          choices=["interactive", "one-click", "zero-click",
+                                   "proximity", "physical"],
+                          help="researcher-declared input-delivery channel "
+                               "(reporting provenance, #106)")
     p_create.set_defaults(func=cmd_create)
 
     p_list = sub.add_parser("list", parents=[parent], help="list experiments")
@@ -43,9 +48,12 @@ def cmd_create(ctx, args) -> Result:
     device = devices.get(device_id)
 
     store = ExperimentStore(ws)
+    params: dict = {}
+    if getattr(args, "delivery", None):
+        params["delivery"] = args.delivery
     exp = store.create(target=target_id, device=device_id,
                        os_version=device.os_version, config_hash=cfg.hash,
-                       seed=seed)
+                       seed=seed, params=params or None)
     return Result(command="experiment create", data={"experiment": exp.to_dict()},
                   messages=[f"created experiment {exp.id}"])
 

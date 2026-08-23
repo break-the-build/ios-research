@@ -41,6 +41,11 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--experiment", default=None)
     p_start.add_argument("--seed", type=int, default=None)
     p_start.add_argument("--max-cases", type=int, default=None)
+    p_start.add_argument("--delivery", default=None,
+                         choices=["interactive", "one-click", "zero-click",
+                                  "proximity", "physical"],
+                         help="researcher-declared input-delivery channel "
+                              "(reporting provenance, #106)")
     p_start.add_argument("--duration", type=float, default=None,
                          help="wall-clock budget in seconds")
     p_start.add_argument("--workers", type=int, default=None)
@@ -129,7 +134,9 @@ def cmd_start(ctx, args) -> Result:
         experiment = exp_store.create(
             target=target_id, device=device.id, os_version=device.os_version,
             config_hash=cfg.hash, seed=seed,
-            params={"corpus": corpus.id, "max_cases": max_cases})
+            params={"corpus": corpus.id, "max_cases": max_cases,
+                    **({"delivery": args.delivery}
+                       if getattr(args, "delivery", None) else {})})
 
     engine = FuzzEngine(ws)
     dictionary = getattr(args, "dictionary", None)

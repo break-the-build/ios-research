@@ -140,6 +140,8 @@ class ReportGenerator:
         if experiment is not None:
             from .betadiff import beta_provenance_for_experiment
             beta = beta_provenance_for_experiment(self.ws, experiment)
+        delivery = (experiment.params or {}).get("delivery") \
+            if experiment is not None else None
         return {
             "title": f"{crash.classification} in {crash.target} "
                      f"({crash.fmt}) processing",
@@ -206,6 +208,12 @@ class ReportGenerator:
                 "source": "corpus lineage",
                 **beta}}
                if beta else {}),
+            **({"delivery_provenance": {
+                "source": "experiment declaration",
+                "delivery": delivery,
+                "note": ("Researcher-declared input-delivery channel for the "
+                         "captured session; reporting metadata only.")}}
+               if delivery else {}),
             "timeline": [{"date": crash.first_seen, "event": "crash discovered"},
                          {"date": now_iso(), "event": "report generated"}],
             "attachments": [
