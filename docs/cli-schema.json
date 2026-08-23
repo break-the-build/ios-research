@@ -2549,6 +2549,38 @@
             }
           }
         },
+        "geo": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "geo_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "gpx|fit|geojson|tile-proto or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "ipc": {
           "arguments": {
             "options": [],

@@ -177,3 +177,9 @@ for _tid, _cls in PROXAPP_TARGETS.items():
 from .fsclient import FSCLIENT_TARGETS  # noqa: E402
 for _tid, _cls in FSCLIENT_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock geodata/workout importer targets (mock = True). Synthetic coordinates;
+# parses bytes only; tracks no person or device.
+from .geo import GEO_TARGETS  # noqa: E402
+for _tid, _cls in GEO_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))

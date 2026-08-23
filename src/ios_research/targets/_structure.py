@@ -502,3 +502,33 @@ def fsclient(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + bytes([struct_class & 0xFF,
                                                   cluster_flags & 0xFF])
     return magic + header + payload
+def geo(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock geodata import (#113).
+
+    Import layout after ``magic``::
+
+        [declared_length u16 BE][geom_kind u8][pt_scale u8][payload...]
+
+    Edits steer the header toward the shared geodata defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    geom_kind = 1
+    pt_scale = 8
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # zero point scale -> integer/divide error
+        pt_scale = 0
+    elif choice == 2:    # geometry kind 0 -> null track-record dereference
+        geom_kind = 0x00
+    elif choice == 3:    # released-tile marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # geometry kind type confusion
+        geom_kind = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([geom_kind & 0xFF,
+                                                  pt_scale & 0xFF])
+    return magic + header + payload
