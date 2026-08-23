@@ -45,6 +45,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Minimal CoreFoundation typedefs so we avoid pulling framework headers. */
 typedef const void *CFTypeRef;
@@ -188,8 +189,56 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     return 0;
 }
 
+#elif defined(HARNESS_TARGET_SELFTEST)
+
+/*
+ * Self-test target: a tiny, intentionally-buggy in-process parser (NO framework
+ * dlopen). It exists to VALIDATE the real-crash pipeline end-to-end — a real
+ * ASan report flowing through parse -> dedup -> minimize -> reproduce — because
+ * hardened system frameworks (ImageIO, ...) rarely crash in a short run.
+ *
+ * Safety: this only corrupts its own small heap buffer on a marker in the
+ * input; it touches no framework, file, sensor, or external state. The three
+ * markers below yield three distinct, reproducible ASan classifications; the
+ * bug is keyed on a byte MARKER so ddmin can shrink a crashing input while
+ * preserving the signature (the marker must survive minimization).
+ *
+ * It deliberately does NOT dlopen CoreFoundation, so it runs on any toolchain
+ * (including the Command Line Tools clang) and needs no frameworks at all.
+ */
+static int resolve_target(void) { return 1; }
+
+static int st_contains(const uint8_t *d, size_t n, const char *s) {
+    size_t L = strlen(s);
+    if (n < L) return 0;
+    for (size_t i = 0; i + L <= n; i++) {
+        if (memcmp(d + i, s, L) == 0) return 1;
+    }
+    return 0;
+}
+
+static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
+    (void)cfdata;
+    uint8_t *buf = (uint8_t *)malloc(16);
+    if (!buf) return 0;
+    memset(buf, 0, 16);
+    if (st_contains(data, size, "OOB")) {
+        volatile uint8_t x = buf[16 + (size & 0x3F)];  /* heap OOB read  */
+        (void)x;
+    } else if (st_contains(data, size, "WRT")) {
+        buf[64] = 0x41;                                 /* heap OOB write */
+    } else if (st_contains(data, size, "UAF")) {
+        free(buf);
+        volatile uint8_t y = buf[0];                    /* use-after-free */
+        (void)y;
+        buf = NULL;
+    }
+    if (buf) free(buf);
+    return 1;
+}
+
 #else
-#error "Define one of HARNESS_TARGET_IMAGEIO / _AUDIOTOOLBOX / _COREGRAPHICS"
+#error "Define one of HARNESS_TARGET_IMAGEIO / _AUDIOTOOLBOX / _COREGRAPHICS / _SELFTEST"
 #endif
 
 static int g_ready = 0;
@@ -211,10 +260,11 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     g_last_decoded = 0;
     if (!g_ready && !resolve_target()) return 0;
-    CFDataRef cfdata = p_CFDataCreate(NULL, data, (CFIndex)size);
-    if (!cfdata) return 0;
+    /* CoreFoundation is optional (the self-test target needs no framework). */
+    CFDataRef cfdata = p_CFDataCreate ? p_CFDataCreate(NULL, data, (CFIndex)size)
+                                      : NULL;
     g_last_decoded = run_target(data, size, cfdata);
-    p_CFRelease(cfdata);
+    if (cfdata && p_CFRelease) p_CFRelease(cfdata);
     return 0;
 }
 

@@ -465,3 +465,45 @@ per-command saving and cleaner startup justify it) → Issue #7 → PR.
 ### GitHub Tracking (session 6)
 
 - Issues created: 1 (#7) · PRs created: 1 · PRs merged: 1
+
+## Session 7 (2026-08-23) — mac-fuzzing quality & performance
+
+Optimization loop over the real (non-mock) `mac:<framework>` targets. Because
+native crashes have no honest knob→metric gradient, this ran as a **campaign**
+(`tools/mac_campaign/run.py`), not an experiment-loop environment (see
+`docs/MAC-FUZZING.md`). Two honest gradients were optimized: throughput and
+crash-path quality.
+
+### Performance — throughput (`mac:imageio`, Xcode 26.6, 24-core)
+
+| configuration | exec/s |
+|---------------|--------|
+| baseline (one process per input) | 16 |
+| `--batch 64` | 876 |
+| `--batch 1000` (single process) | 4026 |
+| `--batch 512 --workers 6` (tuned defaults) | **8841** |
+
+~**550×** end to end. Parallel scaling plateaus at ~4–6 concurrent ASan processes
+and regresses beyond that (memory/scheduler contention), so the auto worker count
+is capped at 6. Implemented: batched `MacFuzzTarget.execute_batch`, parallel
+worker pool + tuned defaults in the campaign runner. Higher rates would need
+in-process persistent-mode libFuzzer (recommendation, filed as an issue).
+
+### Quality — real-crash pipeline validation
+
+Added `mac:selftest`, a controlled buggy parser (no framework; deliberate ASan
+bugs) so the whole path runs on genuine crashes:
+
+- 3 distinct real classifications recovered from real ASan/UBSan reports
+  (`OUT_OF_BOUNDS_READ`, `OUT_OF_BOUNDS_WRITE`, `USE_AFTER_FREE`) with real
+  faulting addresses; 224 crashes deduped to 3 signatures.
+- `crash reproduce` re-triggers (expected == observed signature); `crash
+  minimize` (ddmin) shrinks a 200-byte input to the **3-byte** marker with the
+  signature preserved.
+- **Parser bug found & fixed:** UBSan can fire before ASan on an out-of-bounds
+  store; the parser classified those `undefined-behavior` reports as `UNKNOWN`
+  with no address. Added UBSan message classification + broadened address
+  extraction (`targets/asan.py`).
+
+267 tests pass (was 236). Native e2e for both ImageIO and self-test run when a
+suitable ASan clang is present; skip otherwise (CI stays mock-only).
