@@ -97,6 +97,8 @@ KIND_SURFACE_MAP = {
                   "entry_points": ["network"]},
     "lockeddevice": {"surface_kind": "framework-parser",
                      "entry_points": ["physical-access"]},
+    "mach": {"surface_kind": "mach-service",
+             "entry_points": ["network"]},
 }
 
 
