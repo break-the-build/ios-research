@@ -25,6 +25,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "native: requires a real macOS toolchain/ASan runtime; opt-in, deselected in CI",
+]
 
 [tool.coverage.run]
 branch = true
