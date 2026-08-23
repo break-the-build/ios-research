@@ -19,7 +19,7 @@ from typing import Any
 from .errors import ValidationError
 from .hashing import canonical_json, sha256_text
 
-TAXONOMY_VERSION = 2
+TAXONOMY_VERSION = 3
 OVERRIDE_RELPATH = "config/target-flags.json"
 
 # Analysis indicator levels that can support a memory-corruption outcome.
@@ -48,7 +48,8 @@ DEFAULT_TAXONOMY: list[dict[str, Any]] = [
                            "matrix_confirmation", "primitive_indicator"]},
     {"id": "network-zero-click-userspace", "label": "User-space control via network attack without user interaction",
      "entry_point": "network", "outcome": "userspace-code-execution", "reward_hint": 350000,
-     "keywords": ["daemon", "mdns", "network"], "indicators": _CORRUPTION_INDICATORS,
+     "keywords": ["daemon", "mdns", "network", "netip:", "pq3:",
+                  "messaging"], "indicators": _CORRUPTION_INDICATORS,
      "evidence_required": ["reproducible_crash", "minimized_input", "build_provenance",
                            "primitive_indicator"]},
     {"id": "network-one-click-kernel", "label": "Kernel control via network attack after user interaction",
@@ -58,14 +59,16 @@ DEFAULT_TAXONOMY: list[dict[str, Any]] = [
                            "matrix_confirmation", "primitive_indicator"]},
     {"id": "proximity-radio-app-processor", "label": "Application-processor control via wireless proximity attack",
      "entry_point": "wireless-proximity", "outcome": "app-processor-control", "reward_hint": 1000000,
-     "keywords": ["bluetooth", "wifi", "wlan", "awdl", "airdrop", "proximity"],
+     "keywords": ["bluetooth", "wifi", "wlan", "awdl", "airdrop", "proximity",
+                  "nfc", "wifiaware:", "continuity:", "proxapp:"],
      "indicators": _CORRUPTION_INDICATORS,
      "evidence_required": ["reproducible_crash", "minimized_input", "build_provenance",
                            "matrix_confirmation", "primitive_indicator"]},
     {"id": "physical-access-sensitive-data", "label": "Sensitive user data access from a locked device",
      "entry_point": "physical-access", "outcome": "sensitive-data-access", "reward_hint": 500000,
      "keywords": ["lockscreen", "keychain", "data-protection", "lockdownd",
-                  "usb", "iap2", "notification"],
+                  "usb", "iap2", "notification", "fsclient:", "voiceassist:",
+                  "lockeddevice"],
      "indicators": set(), "evidence_required":
          ["reproducible_crash", "minimized_input", "build_provenance", "demonstration_refs"]},
     {"id": "app-sandbox-escape-kernel", "label": "Kernel control from a sandboxed app",
@@ -76,7 +79,7 @@ DEFAULT_TAXONOMY: list[dict[str, Any]] = [
                            "matrix_confirmation", "primitive_indicator"]},
     {"id": "app-sandbox-escape-sensitive-data", "label": "Sensitive user data access from a sandboxed app",
      "entry_point": "app-sandbox", "outcome": "sensitive-data-access", "reward_hint": 100000,
-     "keywords": ["sandbox", "container", "tcc"],
+     "keywords": ["sandbox", "container", "tcc", "xpc:", "ipc:"],
      "indicators": set(), "evidence_required":
          ["reproducible_crash", "minimized_input", "build_provenance", "demonstration_refs"]},
     {"id": "browser-kernel-control", "label": "Kernel control via Safari webpage navigation",

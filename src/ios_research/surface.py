@@ -55,6 +55,52 @@ SURFACE_KINDS = (
     "framework-parser", "other",
 )
 
+# Target-kind registration (#115): maps each fuzzing-target family onto the
+# inventory vocabulary so new families enter the EV prioritizer with a
+# defensible surface kind and entry-point classification. Legacy families
+# (mock/mac/ios-device) predate the inventory and are intentionally absent.
+KIND_SURFACE_MAP = {
+    "audio": {"surface_kind": "framework-parser",
+              "entry_points": ["network-user-interaction"]},
+    "bluetooth": {"surface_kind": "framework-parser",
+                  "entry_points": ["wireless-proximity"]},
+    "wifi": {"surface_kind": "framework-parser",
+             "entry_points": ["wireless-proximity"]},
+    "nfc": {"surface_kind": "framework-parser",
+            "entry_points": ["wireless-proximity"]},
+    "netip": {"surface_kind": "framework-parser", "entry_points": ["network"]},
+    "wifiaware": {"surface_kind": "framework-parser",
+                  "entry_points": ["wireless-proximity"]},
+    "pq3": {"surface_kind": "framework-parser", "entry_points": ["network"]},
+    "continuity": {"surface_kind": "framework-parser",
+                   "entry_points": ["wireless-proximity"]},
+    "ipc": {"surface_kind": "xpc-service", "entry_points": ["app-sandbox"]},
+    "xpc": {"surface_kind": "xpc-service", "entry_points": ["app-sandbox"]},
+    "docimp": {"surface_kind": "framework-parser",
+               "entry_points": ["network-user-interaction"]},
+    "signeddoc": {"surface_kind": "framework-parser",
+                  "entry_points": ["network-user-interaction"]},
+    "proxapp": {"surface_kind": "framework-parser",
+                "entry_points": ["wireless-proximity"]},
+    "fsclient": {"surface_kind": "framework-parser",
+                 "entry_points": ["physical-access"]},
+    "geo": {"surface_kind": "framework-parser",
+            "entry_points": ["network-user-interaction"]},
+    "voiceassist": {"surface_kind": "framework-parser",
+                    "entry_points": ["physical-access"]},
+    # Families from parallel workstreams, registered for completeness.
+    "messaging": {"surface_kind": "framework-parser",
+                  "entry_points": ["network"]},
+    "lockeddevice": {"surface_kind": "framework-parser",
+                     "entry_points": ["physical-access"]},
+}
+
+
+def surface_registration_for(kind: str) -> dict[str, Any] | None:
+    """Return the inventory registration for a target kind, or ``None``."""
+    reg = KIND_SURFACE_MAP.get(kind)
+    return dict(reg) if reg else None
+
 # Endpoint classes mapped from taxonomy outcomes for tier matching.
 _KERNEL_OUTCOMES = {"kernel-control"}
 _CORRUPTION_OUTCOMES = {

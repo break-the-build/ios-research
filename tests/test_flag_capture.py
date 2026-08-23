@@ -72,7 +72,9 @@ def _report_for(ws, crash):
 # --- taxonomy v2 ---------------------------------------------------------------
 
 def test_taxonomy_v2_includes_pcc_tiers_and_new_element():
-    assert load_taxonomy(None)["taxonomy_version"] == 2
+    # v3 (#115): registered new target-family keywords; version bumped
+    # deliberately so stale cached taxonomies are invalidated.
+    assert load_taxonomy(None)["taxonomy_version"] == 3
     ids = {f["id"] for f in DEFAULT_TAXONOMY}
     assert {"pcc-request-data-access", "pcc-privileged-network-request-data",
             "pcc-unattested-code-execution", "pcc-config-disclosure"} <= ids
