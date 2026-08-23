@@ -14,7 +14,7 @@ from . import __version__
 from .clock import now_iso
 from .errors import NotFoundError
 from .ids import make_id
-from .workspace import Workspace
+from .workspace import Workspace, validate_component
 
 # Experiment lifecycle states.
 CREATED = "created"
@@ -77,6 +77,7 @@ class ExperimentStore:
         self.ws.write_json(self._rel(exp.id), exp.to_dict())
 
     def get(self, exp_id: str) -> Experiment:
+        validate_component(exp_id, what="experiment id")
         rel = self._rel(exp_id)
         if not self.ws.path(rel).exists():
             raise NotFoundError(f"experiment '{exp_id}' not found")
