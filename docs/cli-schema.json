@@ -236,6 +236,82 @@
         ]
       }
     },
+    "beta": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "diff": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "release_a",
+                "flags": [
+                  "--release-a"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "release_b",
+                "flags": [
+                  "--release-b"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "tag": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "config": {
       "arguments": {
         "options": [],
@@ -1743,6 +1819,38 @@
           "arguments": {
             "options": [],
             "positionals": []
+          }
+        },
+        "nfc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "nfc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "ndef|isodep|tagcmd or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
           }
         },
         "show": {

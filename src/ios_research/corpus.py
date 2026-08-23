@@ -43,6 +43,8 @@ class Corpus:
     created_at: str
     target: str | None = None
     testcases: list[dict] = field(default_factory=list)
+    # Optional lineage annotations, e.g. beta release-pair provenance (#56).
+    provenance: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

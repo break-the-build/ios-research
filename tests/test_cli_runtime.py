@@ -125,3 +125,19 @@ def test_artifact_store_is_content_addressed(workspace):
     assert a.sha256 == b.sha256
     assert store.get_bytes(a.sha256) == b"hello"
     assert store.exists(a.sha256)
+
+
+def test_global_flags_before_subcommand_are_kept():
+    """Regression: subparser defaults must not clobber pre-subcommand flags."""
+    from ios_research.cli import build_parser
+    args = build_parser().parse_args(
+        ["--workspace", "/tmp/ws-a", "--json", "target", "list"])
+    assert getattr(args, "workspace_path", None) == "/tmp/ws-a"
+    assert getattr(args, "as_json", False) is True
+
+
+def test_global_flags_absent_leave_namespace_clean():
+    from ios_research.cli import build_parser
+    args = build_parser().parse_args(["target", "list"])
+    assert getattr(args, "workspace_path", None) is None
+    assert getattr(args, "as_json", False) is False

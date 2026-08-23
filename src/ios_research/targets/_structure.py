@@ -102,3 +102,34 @@ def wifi(magic: bytes, data: bytes, rng) -> bytes:
         subtype = 0x7E
     header = declared.to_bytes(2, "big") + bytes([subtype & 0xFF, ie_count & 0xFF])
     return magic + header + payload
+
+
+def nfc(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock NDEF-style message.
+
+    Message layout after ``magic``::
+
+        [declared_length u16 BE][record_tnf u8][id_length u8][payload...]
+
+    Edits steer the header toward the shared NFC defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    tnf = 1
+    id_length = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # oversized ID length -> OOB write in record-ID copy
+        id_length = 0xFF
+    elif choice == 2:    # unknown TNF -> type confusion
+        tnf = 0x06
+    elif choice == 3:    # empty TNF with non-zero ID -> assertion path
+        tnf = 0x00
+        id_length = 4
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # keep valid; exercises generic mutation fallback
+        pass
+    header = declared.to_bytes(2, "big") + bytes([tnf & 0xFF, id_length & 0xFF])
+    return magic + header + payload
