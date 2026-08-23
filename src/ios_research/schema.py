@@ -40,6 +40,7 @@ ARTIFACT_LOCATIONS = {
     "diffs": ".ios-research/diffs/<diff_id>/",
     "reports": ".ios-research/reports/<report_id>/",
     "research": ".ios-research/research/<research_id>.json",
+    "harnesses": ".ios-research/harnesses/<candidate_id>.json",
     "artifacts": ".ios-research/artifacts/<sha2>/<sha256>.bin",
 }
 
