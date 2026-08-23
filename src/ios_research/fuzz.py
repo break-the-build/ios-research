@@ -27,7 +27,7 @@ from .errors import NotFoundError, StateError
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
-from .workspace import Workspace
+from .workspace import Workspace, validate_component
 
 DEFAULT_BASE = b"MOCK" + bytes([1, 1]) + (2).to_bytes(2, "big") + b"ok"
 
@@ -152,6 +152,7 @@ class FuzzEngine:
         self.ws.write_json(self._rel(session.id), session.to_dict())
 
     def get(self, session_id: str) -> FuzzSession:
+        validate_component(session_id, what="fuzz session id")
         rel = self._rel(session_id)
         if not self.ws.path(rel).exists():
             raise NotFoundError(f"fuzz session '{session_id}' not found")
