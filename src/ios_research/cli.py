@@ -29,6 +29,7 @@ from .commands import (
     cve_cmd, net_cmd, lockdown_cmd, oracle_cmd,
     netip_cmd,
     wifiaware_cmd,
+    pq3_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -43,6 +44,7 @@ _REGISTRARS: list[Callable] = [
     lockeddevice_cmd.register,  # must precede target_cmd (installs 'target lockeddevice')
     netip_cmd.register,   # must precede target_cmd (installs 'target netip')
     wifiaware_cmd.register,   # must precede target_cmd (installs 'target wifiaware')
+    pq3_cmd.register,   # must precede target_cmd (installs 'target pq3')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,
