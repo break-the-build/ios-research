@@ -24,6 +24,7 @@ _PREFIXES = {
     "matrix": "mtx",
     "oracle": "ora",
     "evidence": "evd",
+    "seqrun": "seq",
 }
 
 
