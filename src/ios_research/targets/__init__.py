@@ -53,6 +53,13 @@ from .audio import AUDIO_TARGETS  # noqa: E402
 for _tid, _cls in AUDIO_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
 
+# Real macOS in-process fuzzing targets (mock = False). Opt-in: they require a
+# built native libFuzzer/ASan harness and are skipped in CI. Registering the
+# factory is cheap and does not require the harness to be present.
+from .mac import MacFuzzTarget, MAC_FRAMEWORKS  # noqa: E402
+for _key in MAC_FRAMEWORKS:
+    register(f"mac:{_key}", (lambda k: (lambda: MacFuzzTarget(k)))(_key))
+
 __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",
