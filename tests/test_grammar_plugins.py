@@ -267,3 +267,38 @@ def test_engine_records_lineage_for_grammar_mutations(workspace, tmp_path):
                                                                  "crossover:"))]
     if stats["mutator_plugin"]["grammar_uses"]:
         assert grammar_lineage
+
+
+# --- provenance (#127) --------------------------------------------------------
+def test_create_records_plugin_sha256(workspace, tmp_path):
+    from ios_research.hashing import sha256_bytes
+    plugin_path = _write_good_plugin(tmp_path)
+    engine = FuzzEngine(workspace)
+    exp = ExperimentStore(workspace).create(
+        target="mock:parser", device="dev-mock", os_version="1",
+        config_hash="h", seed=0, params={})
+    corpus = CorpusStore(workspace).create("prov", target="mock:parser")
+    session = engine.create(
+        experiment_id=exp.id, target="mock:parser", corpus_id=corpus.id,
+        seed=0, workers=1, max_cases=4, duration_s=None,
+        mutator_plugin_path=str(plugin_path))
+    plugin_file = __import__("pathlib").Path(plugin_path)
+    assert session.mutator_plugin_sha256 == \
+        sha256_bytes(plugin_file.read_bytes())
+    assert session.stats()["mutator_plugin"]["sha256"] == \
+        session.mutator_plugin_sha256
+
+
+def test_create_rejects_missing_plugin_path(workspace):
+    from ios_research.errors import StateError
+    engine = FuzzEngine(workspace)
+    exp = ExperimentStore(workspace).create(
+        target="mock:parser", device="dev-mock", os_version="1",
+        config_hash="h", seed=0, params={})
+    corpus = CorpusStore(workspace).create("prov2", target="mock:parser")
+    with pytest.raises(StateError):
+        engine.create(
+            experiment_id=exp.id, target="mock:parser", corpus_id=corpus.id,
+            seed=0, workers=1, max_cases=4, duration_s=None,
+            mutator_plugin_path=str(tmp_missing := __import__("pathlib")
+                                    .Path(workspace.root) / "nope.py"))
