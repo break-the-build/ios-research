@@ -1492,6 +1492,122 @@
         "positionals": []
       }
     },
+    "lockdown": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "name",
+                "flags": [
+                  "--name"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "target_standard",
+                "flags": [
+                  "--target-standard"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "target_lockdown",
+                "flags": [
+                  "--target-lockdown"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "build_standard",
+                "flags": [
+                  "--build-standard"
+                ],
+                "help": "build id of the standard configuration",
+                "required": true
+              },
+              {
+                "dest": "build_lockdown",
+                "flags": [
+                  "--build-lockdown"
+                ],
+                "help": "build id of the lockdown configuration",
+                "required": true
+              },
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "real_device",
+                "flags": [
+                  "--real-device"
+                ],
+                "help": "pair runs against a real enrolled device (opt-in; default is simulation fixtures)",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "attest",
+                "flags": [
+                  "--attest-lockdown-enabled"
+                ],
+                "help": "researcher attestation that the lockdown configuration was enabled",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "pair_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "pair_id",
+                "required": false
+              }
+            ]
+          }
+        }
+      }
+    },
     "matrix": {
       "arguments": {
         "options": [],
@@ -2356,6 +2472,38 @@
                 "positionals": [
                   {
                     "help": "sms|mime|link-preview or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "netip": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "netip_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "mdns-record|dhcpv6-opt|icmp6-info|edns or a full id",
                     "name": "format",
                     "required": true
                   }

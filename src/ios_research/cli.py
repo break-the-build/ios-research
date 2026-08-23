@@ -27,6 +27,7 @@ from .commands import (
     harness_cmd, spoints_cmd, surface_cmd, targetflags_cmd, advisory_cmd,
     engine_cmd, findings_cmd, beta_cmd, agent_cmd, detect_cmd,
     cve_cmd, net_cmd, lockdown_cmd, oracle_cmd,
+    netip_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -39,6 +40,7 @@ _REGISTRARS: list[Callable] = [
     nfc_cmd.register,         # must precede target_cmd (installs 'target nfc')
     messaging_cmd.register,   # must precede target_cmd (installs 'target messaging')
     lockeddevice_cmd.register,  # must precede target_cmd (installs 'target lockeddevice')
+    netip_cmd.register,   # must precede target_cmd (installs 'target netip')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,
