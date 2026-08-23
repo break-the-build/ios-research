@@ -25,6 +25,7 @@ _PREFIXES = {
     "oracle": "ora",
     "evidence": "evd",
     "seqrun": "seq",
+    "obstrace": "obs",
 }
 
 
