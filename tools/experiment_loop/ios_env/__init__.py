@@ -29,6 +29,7 @@ from . import differential    # ios_research_differential    (goal 12)
 from . import research        # ios_research                 (goal 13)
 from . import agent           # ios_research_agent           (goals 14, 15)
 from . import reporting       # ios_research_reporting       (goal 17)
+from . import device_matching  # ios_research_device_matching (goal 18, issue #11)
 
 __all__ = ["fuzzer", "fuzzer_engine", "minimizer", "corpus", "crash_analysis",
-           "differential", "research", "agent", "reporting"]
+           "differential", "research", "agent", "reporting", "device_matching"]
