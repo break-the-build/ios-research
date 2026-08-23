@@ -77,6 +77,13 @@ from .wifi import WIFI_TARGETS  # noqa: E402
 for _tid, _cls in WIFI_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
 
+# Mock communication-message parser targets (#85; network zero-click
+# profiles). CI-safe by construction: they parse bytes only and never touch a
+# messaging transport, account, or network.
+from .messaging import MESSAGING_TARGETS  # noqa: E402
+for _tid, _cls in MESSAGING_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
 # Mock NFC/NDEF record parser targets (mock = True). CI-safe by construction:
 # they parse bytes only and never touch tag hardware or an RF field.
 from .nfc import NFC_TARGETS  # noqa: E402
