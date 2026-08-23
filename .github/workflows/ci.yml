@@ -46,7 +46,10 @@ jobs:
         run: python -m compileall -q src tests
 
       - name: Test suite with coverage floor
+        # 'native' tests build/run real ASan harnesses against a locally
+        # controlled toolchain and are opt-in (see pyproject markers); hosted
+        # runners cannot reproduce that environment deterministically.
         run: >-
-          python -m pytest tests/
+          python -m pytest tests/ -m "not native"
           --cov=ios_research --cov-report=term-missing
           --cov-fail-under=85
