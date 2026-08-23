@@ -32,6 +32,7 @@ from .commands import (
     pq3_cmd,
     continuity_cmd,
     ipc_cmd,
+    xpc_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -49,6 +50,7 @@ _REGISTRARS: list[Callable] = [
     pq3_cmd.register,   # must precede target_cmd (installs 'target pq3')
     continuity_cmd.register,   # must precede target_cmd (installs 'target continuity')
     ipc_cmd.register,   # must precede target_cmd (installs 'target ipc')
+    xpc_cmd.register,   # must precede target_cmd (installs 'target xpc')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,
