@@ -77,6 +77,9 @@ _ERR_RE = re.compile(
     r"(?P<kind>[A-Za-z0-9_-]+)")
 _UBSAN_RE = re.compile(r"runtime error:\s*(?P<msg>.+)")
 _ADDR_ON_RE = re.compile(r"on (?:unknown )?address\s*(?P<addr>0x[0-9a-fA-F]+)")
+# Broader address match for UBSan wording ("store to address 0x...", "load of
+# address 0x...", or a bare "address 0x...").
+_ADDR_ANY_RE = re.compile(r"address\s*(?P<addr>0x[0-9a-fA-F]+)")
 _PC_RE = re.compile(r"\bpc\s*(?P<pc>0x[0-9a-fA-F]+)")
 _ACCESS_RE = re.compile(r"\b(?P<acc>READ|WRITE)\b\s+of\s+size", re.IGNORECASE)
 _SIGNAL_ACCESS_RE = re.compile(
@@ -111,6 +114,31 @@ def _refine_class(kind: str, access: str, addr_int: int | None) -> str:
             return "NULL_DEREFERENCE"
         return "OUT_OF_BOUNDS_WRITE" if access == "write" else "OUT_OF_BOUNDS_READ"
     return base
+
+
+def _classify_ubsan(msg: str) -> tuple[str, str]:
+    """Classify a UBSan ``runtime error:`` message -> (classification, access).
+
+    UBSan can fire before ASan on a bug both detect (e.g. an out-of-bounds
+    store is both undefined behavior and a heap overflow); when it does, this
+    recovers a specific classification from its wording instead of UNKNOWN.
+    """
+    m = msg.lower()
+    # Null-pointer deref first (so "load of null pointer" is not read as OOB),
+    # excluding UBSan's "non-null pointer" pointer-overflow wording.
+    if ("null pointer" in m and "non-null" not in m) \
+            or "member access within null" in m:
+        return "NULL_DEREFERENCE", "read"
+    if "store to" in m or ("insufficient space" in m and "store" in m):
+        return "OUT_OF_BOUNDS_WRITE", "write"
+    if "load of" in m or ("insufficient space" in m and "load" in m):
+        return "OUT_OF_BOUNDS_READ", "read"
+    if ("overflow" in m or "cannot be represented" in m or "shift" in m
+            or "divide by zero" in m or "division by zero" in m):
+        return "INTEGER_ERROR", "none"
+    if "misaligned address" in m:
+        return "OUT_OF_BOUNDS_READ", "read"
+    return "UNKNOWN", "none"
 
 
 def _extract_symbol(rest: str) -> str:
@@ -149,7 +177,7 @@ def parse(text: str, *, module: str = "") -> Diagnostics:
         if ms:
             kind = ms.group("kind").lower()
     if not kind and _UBSAN_RE.search(text):
-        kind = "signed-integer-overflow"  # generic UBSan bucket
+        kind = "undefined-behavior"
     if not kind:
         kind = "unknown"
 
@@ -162,7 +190,7 @@ def parse(text: str, *, module: str = "") -> Diagnostics:
     # faulting address
     faulting = ""
     addr_int: int | None = None
-    maddr = _ADDR_ON_RE.search(text)
+    maddr = _ADDR_ON_RE.search(text) or _ADDR_ANY_RE.search(text)
     if maddr:
         faulting = _norm_addr(maddr.group("addr"))
         try:
@@ -180,6 +208,15 @@ def parse(text: str, *, module: str = "") -> Diagnostics:
         instr = _norm_addr(mpc.group("pc"))
 
     classification = _refine_class(kind, access, addr_int)
+    # A UBSan report (only, or "undefined-behavior" summary) carries no ASan
+    # error kind; recover a specific classification from its message.
+    if classification == "UNKNOWN":
+        um = _UBSAN_RE.search(text)
+        if um:
+            ub_class, ub_access = _classify_ubsan(um.group("msg"))
+            if ub_class != "UNKNOWN":
+                classification = ub_class
+                access = access or ub_access
     if not access:
         # infer access from refined classification for downstream consistency
         if classification == "OUT_OF_BOUNDS_WRITE":

@@ -54,6 +54,7 @@ define_for() {
     imageio)      echo "-DHARNESS_TARGET_IMAGEIO" ;;
     audiotoolbox) echo "-DHARNESS_TARGET_AUDIOTOOLBOX" ;;
     coregraphics) echo "-DHARNESS_TARGET_COREGRAPHICS" ;;
+    selftest)     echo "-DHARNESS_TARGET_SELFTEST" ;;
     *) return 1 ;;
   esac
 }

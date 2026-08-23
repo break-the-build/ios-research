@@ -54,6 +54,13 @@ _FRAMEWORKS = {
         "formats": ("pdf", "raw"),
         "description": "CoreGraphics data-decode fuzzing (CGDataProvider)",
     },
+    "selftest": {
+        "framework": "SelfTest",
+        "entry": "selftest_parser",
+        "formats": ("raw",),
+        "description": ("controlled buggy parser to validate the real-crash "
+                        "pipeline (no framework; deliberate ASan bugs)"),
+    },
 }
 
 # Sanitizer exit codes: libFuzzer/ASan abort with a non-zero code on a finding.

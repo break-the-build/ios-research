@@ -40,6 +40,32 @@ def shlex_quote(s):
     return shlex.quote(s)
 
 
+def _asan_clang() -> str | None:
+    """Return a clang whose ASan runtime works for the standalone driver.
+
+    The Command Line Tools clang ships an ASan runtime that CHECK-fails when the
+    harness dlopens a system framework, so prefer a full-Xcode / Homebrew clang.
+    Returns None when no suitable toolchain is available (skip the test).
+    """
+    if sys.platform != "darwin" or shutil.which("clang") is None:
+        return None
+    candidates = []
+    xcode = Path("/Applications/Xcode.app/Contents/Developer/Toolchains/"
+                 "XcodeDefault.xctoolchain/usr/bin/clang")
+    if xcode.is_file():
+        candidates.append(str(xcode))
+    if shutil.which("brew"):
+        try:
+            prefix = subprocess.run(["brew", "--prefix", "llvm"],
+                                    capture_output=True, timeout=15)
+            p = Path(prefix.stdout.decode().strip()) / "bin" / "clang"
+            if p.is_file():
+                candidates.append(str(p))
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return candidates[0] if candidates else None
+
+
 REPO = Path(__file__).resolve().parents[1]
 
 # --- real-shaped sanitizer reports -----------------------------------------
@@ -82,6 +108,20 @@ UBSAN_OVERFLOW = """\
 render.c:51:19: runtime error: signed integer overflow: 2147483647 + 1 cannot be represented in type 'int'
     #0 0x104abc in compute_stride render.c:51:19
 SUMMARY: UndefinedBehaviorSanitizer: signed-integer-overflow render.c:51:19
+"""
+
+# UBSan fires before ASan on an out-of-bounds store (undefined-behavior summary).
+UBSAN_WRITE = """\
+harness.c:229:9: runtime error: store to address 0x602000000130 with insufficient space for an object of type 'uint8_t'
+0x602000000130: note: pointer points here
+    #0 0x1028a8b24 in LLVMFuzzerTestOneInput harness.c:229:9
+    #1 0x1028a8d1c in main harness.c:308
+SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior harness.c:229:9
+"""
+
+UBSAN_LOAD = """\
+p.c:10:5: runtime error: load of address 0x602000000200 with insufficient space for an object of type 'int'
+SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior p.c:10:5
 """
 
 
@@ -132,6 +172,34 @@ def test_parse_ubsan_integer_error():
     d = asan.parse(UBSAN_OVERFLOW, module="ImageIO")
     assert d.classification_hint == "INTEGER_ERROR"
     assert d.exception_type == "EXC_ARITHMETIC"
+
+
+def test_parse_ubsan_write_recovers_oob_write():
+    # UBSan-only report (no ASan kind) must still classify + get the address.
+    d = asan.parse(UBSAN_WRITE, module="SelfTest")
+    assert d.classification_hint == "OUT_OF_BOUNDS_WRITE"
+    assert d.access_type == "write"
+    assert d.faulting_address == "0x0000602000000130"
+
+
+def test_parse_ubsan_load_recovers_oob_read():
+    d = asan.parse(UBSAN_LOAD, module="SelfTest")
+    assert d.classification_hint == "OUT_OF_BOUNDS_READ"
+    assert d.access_type == "read"
+    assert d.faulting_address == "0x0000602000000200"
+
+
+@pytest.mark.parametrize("msg,expected", [
+    ("load of null pointer of type 'int'", "NULL_DEREFERENCE"),
+    ("member access within null pointer of type 'S'", "NULL_DEREFERENCE"),
+    ("division by zero", "INTEGER_ERROR"),
+    ("shift exponent 64 is too large", "INTEGER_ERROR"),
+    ("misaligned address 0x1 for type 'int'", "OUT_OF_BOUNDS_READ"),
+    ("applying non-zero offset to non-null pointer", "UNKNOWN"),
+])
+def test_ubsan_message_classification(msg, expected):
+    report = f"x.c:1:1: runtime error: {msg}\nSUMMARY: UndefinedBehaviorSanitizer: undefined-behavior x.c:1:1\n"
+    assert asan.parse(report).classification_hint == expected
 
 
 def test_parse_is_deterministic_and_signature_stable():
@@ -328,6 +396,12 @@ def test_target_structure_mutate_hook_delegates():
 
 # --- campaign runner (#17) -------------------------------------------------
 
+def _load_campaign():
+    sys.path.insert(0, str(REPO / "tools" / "mac_campaign"))
+    import importlib
+    return importlib.import_module("run")
+
+
 def test_campaign_runner_against_stub(tmp_path, monkeypatch):
     stub = tmp_path / "imageio_fuzzer"
     stub.write_text(
@@ -335,15 +409,91 @@ def test_campaign_runner_against_stub(tmp_path, monkeypatch):
         'i=0\nfor f in "$@"; do echo "DONE $i decoded"; i=$((i+1)); done\nexit 0\n')
     stub.chmod(0o755)
     monkeypatch.setenv("IOS_RESEARCH_MAC_HARNESS", str(stub))
-    sys.path.insert(0, str(REPO / "tools" / "mac_campaign"))
-    import importlib
-    run = importlib.import_module("run")
+    run = _load_campaign()
     out = run.run_campaign("mac:imageio", cases=10, seed=1, batch=4)
     assert out is not None
     summary, crash_inputs = out
     assert summary["cases"] == 10
     assert summary["counts"]["accepted"] == 10
     assert summary["total_crashes"] == 0
+
+
+def test_campaign_runner_parallel_workers(tmp_path, monkeypatch):
+    # Same deterministic result with >1 worker; exercises the thread-pool path.
+    stub = tmp_path / "imageio_fuzzer"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'i=0\nfor f in "$@"; do echo "DONE $i decoded"; i=$((i+1)); done\nexit 0\n')
+    stub.chmod(0o755)
+    monkeypatch.setenv("IOS_RESEARCH_MAC_HARNESS", str(stub))
+    run = _load_campaign()
+    serial = run.run_campaign("mac:imageio", cases=40, seed=1, batch=4, workers=1)
+    parallel = run.run_campaign("mac:imageio", cases=40, seed=1, batch=4, workers=4)
+    assert serial[0]["counts"] == parallel[0]["counts"]
+    assert parallel[0]["cases"] == 40
+
+
+# --- self-test target (real-crash pipeline validation) ---------------------
+
+def test_selftest_target_registered_and_seeds():
+    assert is_registered("mac:selftest")
+    t = create("mac:selftest")
+    assert t.mock is False
+    markers = b"".join(t.seeds())
+    assert b"OOB" in markers and b"WRT" in markers and b"UAF" in markers
+
+
+def _selftest_clang() -> str | None:
+    # The self-test does not dlopen a framework, so any macOS clang with an ASan
+    # runtime works (including Command Line Tools).
+    if sys.platform != "darwin" or shutil.which("clang") is None:
+        return None
+    return _asan_clang() or "clang"
+
+
+@pytest.mark.skipif(_selftest_clang() is None,
+                    reason="requires a macOS clang with an ASan runtime")
+def test_selftest_real_crash_pipeline(tmp_path):
+    """Build the self-test harness and drive real ASan crashes through the target.
+
+    Validates the real-crash path (issue #10) on genuine data: three distinct
+    classifications from real ASan/UBSan reports, and a clean input accepted.
+    """
+    build = REPO / "tools" / "harness" / "build.sh"
+    env = dict(os.environ)
+    env["CC"] = _selftest_clang()
+    r = subprocess.run(["bash", str(build), "selftest"],
+                       capture_output=True, env=env, timeout=180)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    binary = REPO / "tools" / "harness" / "build" / "selftest_fuzzer"
+    assert binary.is_file()
+
+    t = MacFuzzTarget("selftest", harness=str(binary), timeout_s=30)
+    assert t.available()
+
+    expect = {
+        b"OOB" + b"." * 20: "OUT_OF_BOUNDS_READ",
+        b"WRT" + b"." * 20: "OUT_OF_BOUNDS_WRITE",
+        b"UAF" + b"." * 20: "USE_AFTER_FREE",
+    }
+    sigs = set()
+    for payload, cls in expect.items():
+        res = t.execute(payload)
+        if res.outcome == Outcome.ABNORMAL and "CHECK failed" in res.detail:
+            pytest.skip("toolchain ASan runtime unusable")
+        assert res.outcome == Outcome.CRASH, res.detail
+        assert res.diagnostics.classification_hint == cls
+        assert res.diagnostics.faulting_address
+        sigs.add(res.diagnostics.signature)
+    assert len(sigs) == 3  # distinct signatures -> dedup works
+
+    clean = t.execute(b"clean-input-no-marker")
+    assert clean.outcome in (Outcome.ACCEPTED, Outcome.REJECTED)
+
+    # Batched: the crash-in-batch fallback still attributes each crash.
+    results = t.execute_batch(list(expect.keys()) + [b"clean"])
+    crash_results = [r for r in results if r.outcome == Outcome.CRASH]
+    assert len(crash_results) == 3
 
 
 def test_mac_target_nonzero_without_report_is_abnormal(tmp_path):
@@ -365,32 +515,6 @@ def test_mac_target_timeout(tmp_path):
 
 
 # --- opt-in native end-to-end (requires macOS with a working ASan clang) ----
-
-def _asan_clang() -> str | None:
-    """Return a clang whose ASan runtime works for the standalone driver.
-
-    The Command Line Tools clang ships an ASan runtime that CHECK-fails when the
-    harness dlopens a system framework, so prefer a full-Xcode / Homebrew clang.
-    Returns None when no suitable toolchain is available (skip the test).
-    """
-    if sys.platform != "darwin" or shutil.which("clang") is None:
-        return None
-    candidates = []
-    # Full Xcode toolchain clang (if Xcode is installed).
-    xcode = Path("/Applications/Xcode.app/Contents/Developer/Toolchains/"
-                 "XcodeDefault.xctoolchain/usr/bin/clang")
-    if xcode.is_file():
-        candidates.append(str(xcode))
-    if shutil.which("brew"):
-        try:
-            prefix = subprocess.run(["brew", "--prefix", "llvm"],
-                                    capture_output=True, timeout=15)
-            p = Path(prefix.stdout.decode().strip()) / "bin" / "clang"
-            if p.is_file():
-                candidates.append(str(p))
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    return candidates[0] if candidates else None
 
 
 @pytest.mark.skipif(_asan_clang() is None,

@@ -71,6 +71,25 @@ Available framework keys and their entry points:
 | `mac:imageio`       | ImageIO        | `CGImageSourceCreateWithData`      |
 | `mac:audiotoolbox`  | AudioToolbox   | `AudioFileOpenWithCallbacks`       |
 | `mac:coregraphics`  | CoreGraphics   | `CGDataProviderCreateWithCFData`   |
+| `mac:selftest`      | (none)         | controlled buggy parser — see below |
+
+### Self-test target (real-crash pipeline validation)
+
+`mac:selftest` is a tiny, intentionally-buggy in-process parser with **no
+framework dlopen** — it deliberately triggers three real ASan/UBSan findings
+(`OOB` → heap OOB read, `WRT` → heap OOB write, `UAF` → use-after-free) on a byte
+marker. It exists to validate the whole real-crash path end-to-end (fuzz → real
+ASan → parse → dedup → minimize → reproduce), which hardened frameworks rarely
+exercise in a short run. It builds on **any** macOS clang (no dlopen), so it also
+serves as a toolchain smoke test.
+
+```bash
+tools/harness/build.sh selftest
+IOS_RESEARCH_MAC_HARNESS=$PWD/tools/harness/build/selftest_fuzzer \
+  ios-research fuzz start --target mac:selftest --max-cases 200
+# -> 3 unique real crashes; crash reproduce re-triggers; crash minimize (ddmin)
+#    shrinks a 200-byte input to the 3-byte marker with the signature preserved.
+```
 
 ### Build modes
 
@@ -88,13 +107,15 @@ can recover per-input outcome and attribute a crash within a batch.
 ### Campaign runner (recommended)
 
 ```bash
-python tools/mac_campaign/run.py --target mac:imageio --cases 2000 --batch 100 \
+python tools/mac_campaign/run.py --target mac:imageio --cases 20000 \
+    --batch 512 --workers 0 \
     --report /tmp/campaign.json --save-crashes /tmp/crashes
 ```
 
 The runner seeds a corpus from the target's format-aware seeds, mutates with the
-shared engine, drives inputs in **batches** (one process for many inputs — ~80×
-faster than one-process-per-input), and summarizes real crashes. It is a
+shared engine, drives inputs in **batches** across **parallel worker processes**,
+and summarizes real crashes. `--batch` sets inputs per harness process (default
+256); `--workers 0` auto-picks a safe worker count (see Throughput). It is a
 real-signal *campaign*, deliberately **not** an experiment-loop environment (see
 below).
 
@@ -136,11 +157,22 @@ addresses).
 
 ## Throughput
 
-The batch driver amortizes process spawn + `dlopen` over many inputs. Measured on
-`mac:imageio` (Xcode 26.6): **~16 exec/s** one-process-per-input vs **~1300
-exec/s** at `--batch 100` — roughly an 80× improvement. When a crash occurs
-mid-batch the target re-runs that batch input-by-input so each crash is precisely
-attributed.
+Two multipliers compound (measured on `mac:imageio`, Xcode 26.6, 24-core):
+
+1. **Batching** — the driver amortizes process spawn + `dlopen` over many inputs:
+   ~16 exec/s (one-process-per-input) → ~4000 exec/s at `--batch 1000`.
+2. **Parallel workers** — batches run concurrently across cores
+   (`execute_batch` spawns a subprocess and releases the GIL): another ~2.6×.
+
+Combined: **~8800 exec/s** at `--batch 512 --workers 6` — roughly a **550×**
+improvement over the naive path. Parallel scaling **plateaus at ~4–6 workers** and
+regresses beyond that (many concurrent ASan processes contend for memory and the
+scheduler), so `--workers 0` caps the auto default at 6. This is the practical
+ceiling for an out-of-process ASan harness; higher rates need in-process
+persistent-mode libFuzzer.
+
+When a crash occurs mid-batch the target re-runs that batch input-by-input so each
+crash is precisely attributed (so crash-heavy runs trade throughput for accuracy).
 
 ## Relationship to experiment-loop
 

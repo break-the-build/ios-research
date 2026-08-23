@@ -42,7 +42,8 @@ def _seed_corpus(target) -> list[bytes]:
     return seeds or [b"\x00" * 16]
 
 
-def run_campaign(target_id: str, cases: int, seed: int, batch: int):
+def run_campaign(target_id: str, cases: int, seed: int, batch: int,
+                 workers: int = 1):
     target = create(target_id)
     if not getattr(target, "available", lambda: True)():
         print(f"error: harness for {target_id} is not built/available.\n"
@@ -58,19 +59,35 @@ def run_campaign(target_id: str, cases: int, seed: int, batch: int):
     crash_inputs: list[bytes] = []
     seen_sigs: set[str] = set()
 
-    start = time.monotonic()
-    produced = 0
-    i = 0
-    while produced < cases:
-        chunk_inputs: list[bytes] = []
-        while len(chunk_inputs) < batch and produced < cases:
-            base = corpus[produced % len(corpus)]
+    # Materialize the deterministic (seed, iteration) inputs, split into batches.
+    batches: list[list[bytes]] = []
+    for start_i in range(0, cases, batch):
+        chunk = []
+        for i in range(start_i, min(start_i + batch, cases)):
+            base = corpus[i % len(corpus)]
             data, _strategy = mutation.mutate(base, seed, i)
-            chunk_inputs.append(data)
-            produced += 1
-            i += 1
-        results = target.execute_batch(chunk_inputs)
+            chunk.append(data)
+        batches.append(chunk)
+
+    # More workers than batches is pure overhead.
+    workers = max(1, min(workers, len(batches)))
+
+    start = time.monotonic()
+    # execute_batch spawns a subprocess (releasing the GIL while it waits), so a
+    # thread pool spreads batches across CPU cores. workers=1 => serial.
+    if workers <= 1 or len(batches) <= 1:
+        batch_results = [(b, target.execute_batch(b)) for b in batches]
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results_map = list(pool.map(target.execute_batch, batches))
+        batch_results = list(zip(batches, results_map))
+    elapsed = time.monotonic() - start
+
+    produced = 0
+    for chunk_inputs, results in batch_results:
         for data, res in zip(chunk_inputs, results):
+            produced += 1
             counts[res.outcome] = counts.get(res.outcome, 0) + 1
             if res.outcome == Outcome.CRASH and res.diagnostics is not None:
                 sig = res.diagnostics.signature
@@ -85,13 +102,13 @@ def run_campaign(target_id: str, cases: int, seed: int, batch: int):
                 if sig not in seen_sigs:
                     seen_sigs.add(sig)
                     crash_inputs.append(data)
-    elapsed = time.monotonic() - start
 
     return {
         "target": target_id,
         "cases": produced,
         "seed": seed,
         "batch": batch,
+        "workers": workers,
         "elapsed_s": round(elapsed, 2),
         "exec_per_s": round(produced / elapsed, 1) if elapsed else 0.0,
         "counts": counts,
@@ -108,14 +125,22 @@ def main(argv=None) -> int:
                     help="mac:<framework> target id (default: mac:imageio)")
     ap.add_argument("--cases", type=int, default=1000, help="inputs to run")
     ap.add_argument("--seed", type=int, default=1337, help="RNG seed")
-    ap.add_argument("--batch", type=int, default=64,
-                    help="inputs per harness process (throughput; default 64)")
+    ap.add_argument("--batch", type=int, default=256,
+                    help="inputs per harness process (throughput; default 256)")
+    ap.add_argument("--workers", type=int, default=0,
+                    help="concurrent harness processes; 0 = auto (~half the CPUs)")
     ap.add_argument("--report", default=None, help="write JSON summary to this path")
     ap.add_argument("--save-crashes", default=None,
                     help="directory to write one input file per unique crash")
     args = ap.parse_args(argv)
 
-    out = run_campaign(args.target, args.cases, args.seed, max(1, args.batch))
+    workers = args.workers
+    if workers <= 0:
+        # Throughput plateaus at ~4-6 concurrent ASan processes and regresses
+        # beyond that (memory/scheduler contention), so cap the auto default.
+        workers = max(1, min(6, (os.cpu_count() or 2) // 2))
+    out = run_campaign(args.target, args.cases, args.seed, max(1, args.batch),
+                       workers=workers)
     if out is None:
         return 3
     summary, crash_inputs = out

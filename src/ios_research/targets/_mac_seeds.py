@@ -50,6 +50,10 @@ _SEEDS = {
     "imageio": [_PNG_1x1, _GIF_1x1, _BMP_2x2, _TIFF, _ICO],
     "audiotoolbox": [_wav(), _AIFF],
     "coregraphics": [_PNG_1x1, b"%PDF-1.4\n%%EOF\n", bytes(64)],
+    # Self-test markers trigger the harness's deliberate ASan bugs; the trailing
+    # padding gives ddmin something to shrink while preserving the signature.
+    "selftest": [b"OOB" + b"." * 24, b"WRT" + b"." * 24,
+                 b"UAF" + b"." * 24, b"clean" + b"." * 24],
 }
 
 
