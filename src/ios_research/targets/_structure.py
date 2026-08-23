@@ -532,3 +532,33 @@ def geo(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + bytes([geom_kind & 0xFF,
                                                   pt_scale & 0xFF])
     return magic + header + payload
+def voiceassist(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock voice-assistant record (#114).
+
+    Record layout after ``magic``::
+
+        [declared_length u16 BE][rec_class u8][rec_flags u8][payload...]
+
+    Edits steer the header toward the shared voice-assist defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    rec_class = 1
+    rec_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # record class 0 -> null caller metadata dereference
+        rec_class = 0x00
+    elif choice == 2:    # localized-string count flag -> integer overflow
+        rec_flags |= 0x10
+    elif choice == 3:    # released-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # render-state type confusion
+        rec_class = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([rec_class & 0xFF,
+                                                  rec_flags & 0xFF])
+    return magic + header + payload
