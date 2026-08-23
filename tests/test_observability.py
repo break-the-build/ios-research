@@ -75,11 +75,10 @@ def test_unapproved_target_emits_no_telemetry(workspace):
 
 
 def test_mismatched_adapter_scope_is_a_safety_error(workspace):
+    # A misconfigured registry entry (adapter filed under the wrong target id)
+    # must be caught by the scope guard, never silently applied.
     registry = ObservabilityRegistry()
-    registry.register("test:other", lambda: ChattyAdapter())
-
-    class OtherTarget(AppTarget):
-        pass
+    registry.register("test:not-other", lambda: ChattyAdapter())
 
     engine = ObservabilityEngine(workspace, registry)
     with pytest.raises(SafetyError, match="scoped"):

@@ -137,12 +137,15 @@ class TraceOracle:
 
 def oracle_from_spec(spec: dict[str, Any]) -> TraceOracle:
     try:
-        return TraceOracle(field=spec["field"], op=spec["op"],
-                           value=spec["value"],
-                           where_kind=spec.get("where_kind"))
+        oracle = TraceOracle(field=spec["field"], op=spec["op"],
+                             value=spec["value"],
+                             where_kind=spec.get("where_kind"))
     except (KeyError, TypeError) as exc:
         raise ValidationError(
             f"oracle spec needs field/op/value: {exc}") from exc
+    if oracle.op not in _OPS:
+        raise ValidationError(f"unknown oracle op '{oracle.op}'")
+    return oracle
 
 
 # --- collection engine -------------------------------------------------------------
