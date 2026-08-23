@@ -165,20 +165,36 @@ def _find_all(data: bytes, pat: StringPattern) -> list[int]:
         needle = needle.lower()
     offsets: list[int] = []
     start = 0
-    while len(offsets) < MAX_MATCHES_PER_STRING:
-        idx = hay.find(needle, start)
-        if idx < 0:
-            break
-        if pat.mask is None:
+    if pat.mask is None:
+        while len(offsets) < MAX_MATCHES_PER_STRING:
+            idx = hay.find(needle, start)
+            if idx < 0:
+                break
             offsets.append(idx)
-        else:
-            end = idx + len(pat.mask)
-            if end <= len(data):
-                window = data[idx:end]
-                if all(m == 0 or (w & m) == p
-                       for w, m, p in zip(window, pat.mask, pat.pattern)):
-                    offsets.append(idx)
-        start = idx + 1
+            start = idx + 1
+        return offsets
+
+    # Masked (hex-with-wildcards): anchor the search on the first *fixed*
+    # byte so wildcards match any value, then verify the whole window.
+    masked_needle = bytes(p & m for p, m in zip(pat.pattern, pat.mask))
+    fixed = [(i, pat.pattern[i]) for i, m in enumerate(pat.mask) if m]
+    if not fixed:                       # all-wildcard: matches any offset
+        return list(range(min(MAX_MATCHES_PER_STRING,
+                              max(len(hay) - len(pat.mask) + 1, 0))))
+    anchor_at, anchor_byte = fixed[0]
+    width = len(pat.mask)
+    while len(offsets) < MAX_MATCHES_PER_STRING:
+        hit = hay.find(bytes([anchor_byte]), start)
+        if hit < 0:
+            break
+        idx = hit - anchor_at
+        start = hit + 1
+        if idx < 0 or idx + width > len(hay):
+            continue
+        window = hay[idx:idx + width]
+        if all((w & m) == p
+               for w, m, p in zip(window, pat.mask, masked_needle)):
+            offsets.append(idx)
     return offsets
 
 
@@ -297,6 +313,20 @@ def parse_rules(doc: dict[str, Any], *, source: str = "<memory>") -> list[Rule]:
     return rules
 
 
+def _relation_key(node: dict, rule_name: str) -> str:
+    """Exactly one relation key; 'of' only beside 'at_least'.
+
+    Extra keys must fail validation so ``detect lint`` stays authoritative
+    for what ``detect scan`` will accept.
+    """
+    subs = {k for k in node if k in ("all", "any", "at_least")}
+    extra = set(node) - subs - ({"of"} if "at_least" in subs else set())
+    if len(subs) != 1 or extra:
+        raise ValidationError(
+            f"rule '{rule_name}': malformed condition {sorted(node)}")
+    return next(iter(subs))
+
+
 def _validate_condition(rule: Rule) -> None:
     known = {sp.sid for sp in rule.strings}
 
@@ -306,11 +336,7 @@ def _validate_condition(rule: Rule) -> None:
                 walk(item)
             return
         if isinstance(node, dict):
-            sub = next(iter(node), None)
-            if sub not in ("all", "any", "at_least"):
-                raise ValidationError(
-                    f"rule '{rule.name}': malformed nested condition "
-                    f"{sorted(node)}")
+            sub = _relation_key(node, rule.name)
             if sub == "at_least" and "of" not in node:
                 raise ValidationError(
                     f"rule '{rule.name}': 'at_least' requires 'of'")
@@ -329,12 +355,11 @@ def _validate_condition(rule: Rule) -> None:
     if not cond:
         raise ValidationError(
             f"rule '{rule.name}': missing 'condition'")
-    key = next(iter(cond))
-    if key not in ("all", "any"):
-        if key != "at_least" or "of" not in cond:
+    key = _relation_key(cond, rule.name)
+    if key == "at_least":
+        if "of" not in cond:
             raise ValidationError(
-                f"rule '{rule.name}': unsupported condition form "
-                f"{sorted(cond)}")
+                f"rule '{rule.name}': 'at_least' requires 'of'")
         if not isinstance(cond.get("at_least"), int):
             raise ValidationError(
                 f"rule '{rule.name}': 'at_least' must be an integer")
@@ -404,9 +429,24 @@ def scan_bytes(data: bytes, rules: list[Rule]) -> dict[str, Any]:
     }
 
 
-def scan_file(path: str, rules: list[Rule]) -> dict[str, Any]:
+# Refuse to buffer samples larger than this by default: scanning is an
+# analytical operation and must not become a memory-exhaustion vector.
+DEFAULT_MAX_SAMPLE_BYTES = 64 * 1024 * 1024
+
+
+def scan_file(path: str, rules: list[Rule], *,
+              max_sample_bytes: int = DEFAULT_MAX_SAMPLE_BYTES) -> dict[str, Any]:
+    if max_sample_bytes < 0:
+        raise ValidationError("max_sample_bytes must be non-negative")
     with open(path, "rb") as fh:
-        data = fh.read()
+        # Read one byte past the cap so oversize inputs are detected exactly,
+        # without ever buffering more than cap+1 bytes.
+        data = fh.read(max_sample_bytes + 1)
+    if len(data) > max_sample_bytes:
+        raise ValidationError(
+            f"sample exceeds the {max_sample_bytes}-byte scan cap "
+            f"({max_sample_bytes + 1}+ bytes); split it or raise "
+            f"max_sample_bytes explicitly")
     result = scan_bytes(data, rules)
     result["path"] = path
     return result

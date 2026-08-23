@@ -20,7 +20,7 @@ from .crashes import CrashStore, CrashRecord
 from .experiment import ExperimentStore
 from .ids import make_id
 from .triage import Triage
-from .workspace import Workspace
+from .workspace import Workspace, validate_component
 
 # Text that must never appear in a report (weaponization).
 _FORBIDDEN_MARKERS = ("shellcode", "rop chain", "ropchain", "payload gadget",
@@ -91,6 +91,7 @@ class ReportGenerator:
         return report
 
     def get(self, report_id: str) -> Report:
+        validate_component(report_id, what="report id")
         rel = self._rel(report_id)
         if not self.ws.path(rel).exists():
             from .errors import NotFoundError
@@ -139,6 +140,8 @@ class ReportGenerator:
         if experiment is not None:
             from .betadiff import beta_provenance_for_experiment
             beta = beta_provenance_for_experiment(self.ws, experiment)
+        delivery = (experiment.params or {}).get("delivery") \
+            if experiment is not None else None
         return {
             "title": f"{crash.classification} in {crash.target} "
                      f"({crash.fmt}) processing",
@@ -205,6 +208,12 @@ class ReportGenerator:
                 "source": "corpus lineage",
                 **beta}}
                if beta else {}),
+            **({"delivery_provenance": {
+                "source": "experiment declaration",
+                "delivery": delivery,
+                "note": ("Researcher-declared input-delivery channel for the "
+                         "captured session; reporting metadata only.")}}
+               if delivery else {}),
             "timeline": [{"date": crash.first_seen, "event": "crash discovered"},
                          {"date": now_iso(), "event": "report generated"}],
             "attachments": [

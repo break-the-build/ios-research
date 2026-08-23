@@ -55,6 +55,18 @@ Every command supports `--json` for a stable, machine-readable envelope.
 | `lockeddevice:{lockdownd,mfi-auth,notification}` | Mock locked-device surface parsers (physical-access profiles #86); shared defect model (bytes-only; no device, accessory, or data access) |
 | `mac:{imageio,audiotoolbox,coregraphics}` | **Real** macOS in-process libFuzzer/ASan targets (`mock = False`); opt-in, require a built harness — see [docs/MAC-FUZZING.md](docs/MAC-FUZZING.md) |
 | `ios-device:{file,imageio,audiotoolbox,coregraphics}` | **Real** black-box on-device targets (`mock = False`); stage an input to a USB-attached, *authorized* iPhone and harvest the resulting `.ips` crash log — **confirmation, not analysis**. Opt-in, require a connected device + `libimobiledevice` — see [docs/ON-DEVICE-TARGET.md](docs/ON-DEVICE-TARGET.md) |
+| `voiceassist:{siri-suggestion,callkit-intent}` | Mock lockscreen intent-record parsers (text-only; never activates audio input) |
+| `geo:{gpx,fit,geojson,tile-proto}` | Mock geodata/workout import parsers with range oracles (synthetic coords) |
+| `fsclient:{exfat-vol,smb2-resp}` | Mock exFAT/SMB2 client-side structure parsers (bytes-only) |
+| `proxapp:{hap-tlv,airplay-nego,mpc-frame,pbap-vcard}` | Mock proximity application-protocol parsers sharing a defect model |
+| `signeddoc:{profile,provision,receipt,pkpass}` | Mock ASN.1/CMS signed-document structure parsers (verify-only) |
+| `docimp:{zip-archive,ooxml-part,font,pdfform}` | Mock document-importer structure parsers sharing a defect model |
+| `xpc:{dict,array,endpoint}` | Mock XPC/Mach message-schema parsers + offline schema-seed harvester (no daemon messages sent) |
+| `ipc:{share-payload,docprovider-item,intent-donation}` | Mock trust-boundary payload-envelope parsers (authorized-app decode modeling) |
+| `continuity:{handoff,findmy-adv,hotspot-tlv}` | Mock Continuity beacon-record parsers sharing a defect model (synthetic; no tracking) |
+| `pq3:{handshake,rekey}` | Mock ratchet session-transcript parsers with epoch-ordering oracles (synthetic vectors only) |
+| `wifiaware:{publish,subscribe,datapath}` | Mock Wi-Fi Aware frame parsers sharing a defect model (bytes-only; no radio access) |
+| `netip:{mdns-record,dhcpv6-opt,icmp6-info,edns}` | Mock IP-stack input-path parsers sharing a defect model (bytes-only; no sockets) |
 
 New authorized research-device targets plug in behind the same interface — see
 [docs/RESEARCH-DEVICE.md](docs/RESEARCH-DEVICE.md). For real crashes without a

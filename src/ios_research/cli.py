@@ -27,6 +27,9 @@ from .commands import (
     harness_cmd, spoints_cmd, surface_cmd, targetflags_cmd, advisory_cmd,
     engine_cmd, findings_cmd, beta_cmd, agent_cmd, detect_cmd,
     cve_cmd, net_cmd, lockdown_cmd, oracle_cmd, proximity_cmd,
+    netip_cmd, wifiaware_cmd, pq3_cmd, continuity_cmd, ipc_cmd, xpc_cmd,
+    docimp_cmd, signeddoc_cmd, proxapp_cmd, fsclient_cmd, geo_cmd,
+    voiceassist_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -39,6 +42,18 @@ _REGISTRARS: list[Callable] = [
     nfc_cmd.register,         # must precede target_cmd (installs 'target nfc')
     messaging_cmd.register,   # must precede target_cmd (installs 'target messaging')
     lockeddevice_cmd.register,  # must precede target_cmd (installs 'target lockeddevice')
+    netip_cmd.register,   # must precede target_cmd (installs 'target netip')
+    wifiaware_cmd.register,   # must precede target_cmd (installs 'target wifiaware')
+    pq3_cmd.register,   # must precede target_cmd (installs 'target pq3')
+    continuity_cmd.register,   # must precede target_cmd (installs 'target continuity')
+    ipc_cmd.register,   # must precede target_cmd (installs 'target ipc')
+    xpc_cmd.register,   # must precede target_cmd (installs 'target xpc')
+    docimp_cmd.register,   # must precede target_cmd (installs 'target docimp')
+    signeddoc_cmd.register,   # must precede target_cmd (installs 'target signeddoc')
+    proxapp_cmd.register,   # must precede target_cmd (installs 'target proxapp')
+    fsclient_cmd.register,   # must precede target_cmd (installs 'target fsclient')
+    geo_cmd.register,   # must precede target_cmd (installs 'target geo')
+    voiceassist_cmd.register,   # must precede target_cmd (installs 'target voiceassist')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,

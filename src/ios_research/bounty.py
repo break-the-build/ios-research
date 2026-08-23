@@ -105,7 +105,16 @@ class BountyReadiness:
         # candidate flags from analysis are surfaced as guidance only.
         taxonomy = load_taxonomy(self.ws)
         analysis = self._analysis_for(crash)
-        candidates = (candidates_for(crash.to_dict(), analysis, taxonomy)
+        experiment_params: dict = {}
+        exp_id = getattr(crash, "experiment_id", None)
+        if exp_id:
+            try:
+                experiment_params = self.reports.experiments.get(
+                    exp_id).params or {}
+            except Exception:
+                experiment_params = {}
+        candidates = (candidates_for(crash.to_dict(), analysis, taxonomy,
+                                     experiment_params=experiment_params)
                       if analysis else [])
 
         # Target Flag capture evidence (#84): recorded only when detection
@@ -166,6 +175,8 @@ class BountyReadiness:
                 "taxonomy_version": taxonomy["taxonomy_version"],
                 "taxonomy_sha256": taxonomy["sha256"],
                 "claimed": [c["flag_id"] for c in claimed],
+                **({"delivery": experiment_params["delivery"]}
+                   if experiment_params.get("delivery") else {}),
                 "candidates": [
                     {"flag_id": c["flag_id"], "confidence": c["confidence"]}
                     for c in candidates],

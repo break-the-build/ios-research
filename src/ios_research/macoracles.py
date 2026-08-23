@@ -208,7 +208,7 @@ def sandbox_escape_oracle(evidence: dict[str, Any]) -> Verdict:
         claim_separation=("No outside-container observation was recorded."))
 
 
-_ORACLES = {"tcc": tcc_oracle,
+MAC_ORACLES = {"tcc": tcc_oracle,
             "gatekeeper": gatekeeper_oracle,
             "sandbox-escape": sandbox_escape_oracle}
 
@@ -220,10 +220,10 @@ class MacOracleEngine:
         self.ws = workspace
 
     def run(self, *, name: str, evidence_path: str) -> dict[str, Any]:
-        if name not in _ORACLES:
+        if name not in MAC_ORACLES:
             raise ValidationError(
-                f"unknown oracle '{name}'; known: {', '.join(sorted(_ORACLES))}")
-        verdict = _ORACLES[name](_load_evidence(evidence_path))
+                f"unknown oracle '{name}'; known: {', '.join(sorted(MAC_ORACLES))}")
+        verdict = MAC_ORACLES[name](_load_evidence(evidence_path))
         digest = sha256_text(json.dumps(verdict.to_dict(), sort_keys=True))
         record_id = make_id("oracleverdict", name, digest)
         record = {

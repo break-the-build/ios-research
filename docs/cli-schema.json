@@ -1492,6 +1492,122 @@
         "positionals": []
       }
     },
+    "lockdown": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "name",
+                "flags": [
+                  "--name"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "target_standard",
+                "flags": [
+                  "--target-standard"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "target_lockdown",
+                "flags": [
+                  "--target-lockdown"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "build_standard",
+                "flags": [
+                  "--build-standard"
+                ],
+                "help": "build id of the standard configuration",
+                "required": true
+              },
+              {
+                "dest": "build_lockdown",
+                "flags": [
+                  "--build-lockdown"
+                ],
+                "help": "build id of the lockdown configuration",
+                "required": true
+              },
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "real_device",
+                "flags": [
+                  "--real-device"
+                ],
+                "help": "pair runs against a real enrolled device (opt-in; default is simulation fixtures)",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "attest",
+                "flags": [
+                  "--attest-lockdown-enabled"
+                ],
+                "help": "researcher attestation that the lockdown configuration was enabled",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "pair_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "pair_id",
+                "required": false
+              }
+            ]
+          }
+        }
+      }
+    },
     "matrix": {
       "arguments": {
         "options": [],
@@ -1683,6 +1799,43 @@
           "arguments": {
             "options": [],
             "positionals": []
+          }
+        },
+        "mac": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "mac_subcommand",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "oracles": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            },
+            "run": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "oracle name (see 'oracle mac oracles')",
+                    "name": "name",
+                    "required": true
+                  },
+                  {
+                    "help": "path to the evidence JSON record",
+                    "name": "evidence",
+                    "required": true
+                  }
+                ]
+              }
+            }
           }
         },
         "run": {
@@ -2300,6 +2453,166 @@
             }
           }
         },
+        "continuity": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "continuity_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "handoff|findmy-adv|hotspot-tlv or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "docimp": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "docimp_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "zip-archive|ooxml-part|font|pdfform or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "fsclient": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "fsclient_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "exfat-vol|smb2-resp or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "geo": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "geo_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "gpx|fit|geojson|tile-proto or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "ipc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "ipc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "share-payload|docprovider-item|intent-donation or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "list": {
           "arguments": {
             "options": [],
@@ -2370,6 +2683,38 @@
             }
           }
         },
+        "netip": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "netip_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "mdns-record|dhcpv6-opt|icmp6-info|edns or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "nfc": {
           "arguments": {
             "options": [],
@@ -2402,6 +2747,70 @@
             }
           }
         },
+        "pq3": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "pq3_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "handshake|rekey or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "proxapp": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "proxapp_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "hap-tlv|airplay-nego|mpc-frame|pbap-vcard or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "show": {
           "arguments": {
             "options": [],
@@ -2412,6 +2821,70 @@
                 "required": true
               }
             ]
+          }
+        },
+        "signeddoc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "signeddoc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "profile|provision|receipt|pkpass or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "voiceassist": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "voiceassist_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "siri-suggestion|callkit-intent or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
           }
         },
         "wifi": {
@@ -2432,6 +2905,82 @@
                 "positionals": [
                   {
                     "help": "beacon|probe-resp|action or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "wifiaware": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "wifiaware_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "publish|subscribe|datapath or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "xpc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "xpc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "harvest": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "",
+                    "name": "schema_file",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "dict|array|endpoint or a full id",
                     "name": "format",
                     "required": true
                   }

@@ -35,6 +35,26 @@ def register(subparsers, parent) -> None:
                             help="list oracle runs")
     p_list.set_defaults(func=cmd_list)
 
+    # macOS reward-category verification oracles (#62): pure classifiers over
+    # researcher-supplied evidence records; verdicts never assert a bypass.
+    p_mac = sub.add_parser("mac", parents=[parent],
+                           help="macOS reward-category verification oracles "
+                                "(evidence classifiers)")
+    mac_sub = p_mac.add_subparsers(dest="mac_subcommand", metavar="<action>")
+
+    p_mac_run = mac_sub.add_parser("run", parents=[parent],
+                                   help="classify one researcher-supplied "
+                                        "evidence record")
+    p_mac_run.add_argument("name", help="oracle name (see 'oracle mac oracles')")
+    p_mac_run.add_argument("evidence", help="path to the evidence JSON record")
+    p_mac_run.set_defaults(func=cmd_mac_run)
+
+    p_mac_oracles = mac_sub.add_parser("oracles", parents=[parent],
+                                       help="list available macOS oracles")
+    p_mac_oracles.set_defaults(func=cmd_mac_oracles)
+
+    p_mac.set_defaults(func=cmd_mac_oracles)
+
     p.set_defaults(func=cmd_list)
 
 
@@ -71,3 +91,18 @@ def cmd_list(ctx, args) -> Result:
                       messages=["no oracle runs recorded"])
     return Result(command="oracle list",
                   data={"runs": runs, "count": len(runs)})
+
+
+def cmd_mac_run(ctx, args) -> Result:
+    from ..macoracles import MacOracleEngine
+    record = MacOracleEngine(ctx.workspace()).run(
+        name=args.name, evidence_path=args.evidence)
+    return Result(command="oracle mac run", data=record,
+                  messages=[f"classification: {record['classification']} "
+                            "(observation only; not a bypass claim)"])
+
+
+def cmd_mac_oracles(ctx, args) -> Result:
+    from ..macoracles import MAC_ORACLES
+    return Result(command="oracle mac oracles",
+                  data={"oracles": sorted(MAC_ORACLES)})

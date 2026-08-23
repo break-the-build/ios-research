@@ -17,21 +17,42 @@ _REDACT_KEYS = {
     "password", "passwd", "secret", "token", "api_key", "apikey",
     "authorization", "auth", "credential", "credentials", "private_key",
 }
+# Substring rules catch compound real-world keys (access_token,
+# session_token, client_secret, refresh_token, set_cookie, ...).
+_REDACT_SUBSTRINGS = (
+    "token", "secret", "password", "passwd", "apikey", "api_key",
+    "api-key", "authorization", "credential", "private_key", "cookie",
+)
 _REDACTED = "***REDACTED***"
 
 LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
 
 
+def _is_sensitive(key: str) -> bool:
+    lowered = key.lower()
+    if lowered in _REDACT_KEYS:
+        return True
+    return any(marker in lowered for marker in _REDACT_SUBSTRINGS)
+
+
 def redact(fields: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of ``fields`` with sensitive values redacted."""
+    """Return a copy of ``fields`` with sensitive values redacted.
+
+    Recurses through nested dicts **and** lists/tuples so secrets do not
+    leak just because they sit inside a collection.
+    """
+    def clean_value(value: Any) -> Any:
+        if isinstance(value, dict):
+            return redact(value)
+        if isinstance(value, (list, tuple)):
+            cleaned = [clean_value(item) for item in value]
+            return cleaned if isinstance(value, list) else tuple(cleaned)
+        return value
+
     clean: dict[str, Any] = {}
     for key, value in fields.items():
-        if key.lower() in _REDACT_KEYS:
-            clean[key] = _REDACTED
-        elif isinstance(value, dict):
-            clean[key] = redact(value)
-        else:
-            clean[key] = value
+        clean[key] = _REDACTED if _is_sensitive(str(key)) \
+            else clean_value(value)
     return clean
 
 

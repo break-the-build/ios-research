@@ -202,3 +202,363 @@ def locked_device(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + bytes([record_type & 0xFF,
                                                   flags & 0xFF])
     return magic + header + payload
+def netip(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock IP-stack message.
+
+    Message layout after ``magic``::
+
+        [declared_length u16 BE][rr_type u8][opt_flags u8][payload...]
+
+    Edits steer toward the shared netip defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    rr_type = 1
+    opt_flags = 2
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # zero rr_type -> null rdata pointer dereference
+        rr_type = 0x00
+    elif choice == 2:    # decompression flag -> use-after-free
+        opt_flags |= 0x01
+    elif choice == 3:    # rr-type confusion
+        rr_type = 0xC0
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # assertion path rr_type
+        rr_type = 0x7E
+    header = declared.to_bytes(2, "big") + bytes([rr_type & 0xFF,
+                                                  opt_flags & 0xFF])
+    return magic + header + payload
+def wifiaware(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock Wi-Fi Aware frame (#103).
+
+    Frame layout after ``magic``::
+
+        [declared_length u16 BE][attr_id u8][tlv_count u8][payload...]
+
+    Edits steer the header toward the shared Wi-Fi Aware defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    attr_id = 1
+    tlv_count = 3
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # zero TLV count -> integer/divide error
+        tlv_count = 0
+    elif choice == 2:    # reclaimed-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 3:    # attribute type confusion
+        attr_id = 0xC0
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # assertion path attribute id
+        attr_id = 0x7E
+    header = declared.to_bytes(2, "big") + bytes([attr_id & 0xFF,
+                                                  tlv_count & 0xFF])
+    return magic + header + payload
+def pq3(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock PQ3 transcript message (#104).
+
+    Message layout after ``magic``::
+
+        [declared_length u16 BE][epoch u16 BE][msg_type u8][payload...]
+
+    Edits steer the header toward the shared PQ3 defect paths.
+    """
+    payload = data[len(magic) + 5:] if len(data) > len(magic) + 5 else b"data"
+    declared = len(payload)
+    epoch = 1
+    msg_type = 1
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read in transcript copy
+        declared = 0xFFFF
+    elif choice == 1:    # zero message type -> null epoch-state dereference
+        msg_type = 0x00
+    elif choice == 2:    # maximum-epoch sentinel -> integer wrap in ratchet state
+        epoch = 0xFFFF
+    elif choice == 3:    # stale-epoch replay marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # epoch-invariant assertion message type
+        msg_type = 0x7E
+    header = declared.to_bytes(2, "big") + epoch.to_bytes(2, "big") + \
+        bytes([msg_type & 0xFF])
+    return magic + header + payload
+def continuity(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock Continuity beacon record.
+
+    Record layout after ``magic``::
+
+        [declared_length u16 BE][rec_type u8][rec_flags u8][payload...]
+
+    Edits steer the header toward the shared Continuity defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    rec_type = 1
+    rec_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        # kept below the 0xF000 timeout gate so this path stays reachable
+        declared = 0xFFFF
+    elif choice == 1:    # null record type -> NULL_DEREFERENCE
+        rec_type = 0x00
+    elif choice == 2:    # scaling flag bit -> integer overflow in offsets
+        rec_flags |= 0x02
+    elif choice == 3:    # reclaimed-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # assertion path record type
+        rec_type = 0x7E
+    header = declared.to_bytes(2, "big") + bytes([rec_type & 0xFF,
+                                                  rec_flags & 0xFF])
+    return magic + header + payload
+def ipc(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock IPC envelope (#107).
+
+    Envelope layout after ``magic``::
+
+        [declared_length u16 BE][item_type u8][item_count u8][payload...]
+
+    Edits steer the header toward the shared trust-boundary decode paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    item_type = 1
+    item_count = 2
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # null extension endpoint -> NULL_DEREFERENCE
+        item_type = 0x00
+    elif choice == 2:    # oversized item count -> fixed-table OOB write
+        item_count = 9
+    elif choice == 3:    # released-attachment marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # incompatible schema reinterpretation
+        item_type = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([item_type & 0xFF,
+                                                  item_count & 0xFF])
+    return magic + header + payload
+def xpc(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock XPC/Mach message.
+
+    Message layout after ``magic``::
+
+        [declared_length u16 BE][entry_type u8][entry_count u8][payload...]
+
+    Edits steer the header toward the shared XPC defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    entry_type = 1
+    entry_count = 2
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # entry type 0 -> null connection-context dereference
+        entry_type = 0x00
+    elif choice == 2:    # zero entry count -> divide-by-zero table scaling
+        entry_count = 0
+    elif choice == 3:    # released-dictionary marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # typed-slot value confusion
+        entry_type = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([entry_type & 0xFF,
+                                                  entry_count & 0xFF])
+    return magic + header + payload
+def docimp(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock document container.
+
+    Container layout after ``magic``::
+
+        [declared_length u16 BE][part_class u8][part_flags u8][payload...]
+
+    Edits steer the header toward the shared document-importer defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    part_class = 1
+    part_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # null part class -> NULL_DEREFERENCE
+        part_class = 0x00
+    elif choice == 2:    # table-expansion flag -> integer error
+        part_flags |= 0x04
+    elif choice == 3:    # released-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # schema-state type confusion
+        part_class = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([part_class & 0xFF,
+                                                  part_flags & 0xFF])
+    return magic + header + payload
+def signeddoc(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock signed document (#110).
+
+    Document layout after ``magic``::
+
+        [declared_length u16 BE][asn1_class u8][der_flags u8][payload...]
+
+    Edits steer the header toward the shared signed-document defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    asn1_class = 1
+    der_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # ASN.1 class 0 -> empty certificate chain dereference
+        asn1_class = 0x00
+    elif choice == 2:    # indefinite-length DER flag -> length arithmetic overflow
+        der_flags |= 0x08
+    elif choice == 3:    # released SET-OF marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # OID arc class confusion
+        asn1_class = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([asn1_class & 0xFF,
+                                                  der_flags & 0xFF])
+    return magic + header + payload
+def proxapp(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock proximity record (#111).
+
+    Record layout after ``magic``::
+
+        [declared u16 BE][tlv_type u8][tlv_flags u8][payload...]
+
+    Edits steer the header toward the shared proximity defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    tlv_type = 1
+    tlv_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # copy flag set -> OOB write in TLV copy
+        tlv_flags |= 0x01
+    elif choice == 2:    # TLV type 0 -> null method-handler dereference
+        tlv_type = 0x00
+    elif choice == 3:    # released-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # session-state type confusion
+        tlv_type = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([tlv_type & 0xFF,
+                                                  tlv_flags & 0xFF])
+    return magic + header + payload
+def fsclient(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock filesystem-client response (#112).
+
+    Response layout after ``magic``::
+
+        [declared_length u16 BE][struct_class u8][cluster_flags u8][payload...]
+
+    Edits steer the header toward the shared filesystem-client defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    struct_class = 1
+    cluster_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # structure class 0 -> null boot-sector dereference
+        struct_class = 0x00
+    elif choice == 2:    # zero-cluster flag -> divide-by-zero chain math
+        cluster_flags |= 0x01
+    elif choice == 3:    # released-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # structure-class type confusion
+        struct_class = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([struct_class & 0xFF,
+                                                  cluster_flags & 0xFF])
+    return magic + header + payload
+def geo(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock geodata import (#113).
+
+    Import layout after ``magic``::
+
+        [declared_length u16 BE][geom_kind u8][pt_scale u8][payload...]
+
+    Edits steer the header toward the shared geodata defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    geom_kind = 1
+    pt_scale = 8
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # zero point scale -> integer/divide error
+        pt_scale = 0
+    elif choice == 2:    # geometry kind 0 -> null track-record dereference
+        geom_kind = 0x00
+    elif choice == 3:    # released-tile marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # geometry kind type confusion
+        geom_kind = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([geom_kind & 0xFF,
+                                                  pt_scale & 0xFF])
+    return magic + header + payload
+def voiceassist(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock voice-assistant record (#114).
+
+    Record layout after ``magic``::
+
+        [declared_length u16 BE][rec_class u8][rec_flags u8][payload...]
+
+    Edits steer the header toward the shared voice-assist defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    rec_class = 1
+    rec_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # record class 0 -> null caller metadata dereference
+        rec_class = 0x00
+    elif choice == 2:    # localized-string count flag -> integer overflow
+        rec_flags |= 0x10
+    elif choice == 3:    # released-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # render-state type confusion
+        rec_class = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([rec_class & 0xFF,
+                                                  rec_flags & 0xFF])
+    return magic + header + payload
