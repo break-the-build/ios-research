@@ -91,7 +91,31 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     for registrar in _REGISTRARS:
         registrar(subparsers, parent)
+    _suppress_subparser_global_defaults(parser)
     return parser
+
+
+# Global-flag dests shared by the root parser and every subparser. Subparsers
+# parse into a fresh namespace whose results are copied unconditionally over
+# the root namespace, so a subparser *default* (e.g. ``as_json=False``) would
+# silently discard a global flag given before the subcommand. Marking these
+# actions ``SUPPRESS`` keeps absent flags from being copied; handlers already
+# read them via :func:`getattr` fallbacks.
+_GLOBAL_DESTS = ("as_json", "verbose", "quiet",
+                 "workspace_path", "config_path", "assume_yes")
+
+
+def _suppress_subparser_global_defaults(parser: argparse.ArgumentParser) -> None:
+    subparsers_action = next(
+        (a for a in parser._actions
+         if isinstance(a, argparse._SubParsersAction)), None)
+    if subparsers_action is None:
+        return
+    for sub in subparsers_action.choices.values():
+        for action in sub._actions:
+            if getattr(action, "dest", None) in _GLOBAL_DESTS:
+                action.default = argparse.SUPPRESS
+        _suppress_subparser_global_defaults(sub)
 
 
 def _context_from_args(args: argparse.Namespace) -> Context:
