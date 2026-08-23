@@ -237,6 +237,82 @@
         ]
       }
     },
+    "beta": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "diff": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "release_a",
+                "flags": [
+                  "--release-a"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "release_b",
+                "flags": [
+                  "--release-b"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "tag": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "config": {
       "arguments": {
         "options": [],
@@ -627,6 +703,47 @@
       "arguments": {
         "options": [],
         "positionals": []
+      }
+    },
+    "engine": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "experiment_id",
+                "flags": [
+                  "--experiment-id"
+                ],
+                "help": "attach imported findings to an existing experiment",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "path to the import manifest JSON",
+                "name": "manifest",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        }
       }
     },
     "experiment": {
