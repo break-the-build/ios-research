@@ -288,6 +288,30 @@ class MacFuzzTarget(Target):
         finally:
             self.cleanup()
 
+    @staticmethod
+    def build_libfuzzer_command(harness: Path, corpus_dir: str,
+                                artifact_dir: str, *, runs: int,
+                                workers: int,
+                                max_total_time: float | None = None,
+                                value_profile: bool = False) -> list[str]:
+        """Build the libFuzzer argv. Exposed for tests and campaign provenance.
+
+        #30: ``value_profile`` opts into comparison/value-profile guidance
+        (requires a harness built with ``-fsanitize-coverage=trace-cmp``).
+        """
+        cmd = [str(harness), corpus_dir,
+               f"-artifact_prefix={artifact_dir}/",
+               f"-runs={runs}",
+               # -fork enables -ignore_crashes so the run collects MANY
+               # crash artifacts instead of stopping at the first.
+               f"-fork={max(1, workers)}", "-ignore_crashes=1",
+               "-print_final_stats=1"]
+        if value_profile:
+            cmd.append("-use_value_profile=1")
+        if max_total_time is not None:
+            cmd.append(f"-max_total_time={int(max_total_time)}")
+        return cmd
+
     def _run_batch(self, harness: Path, inputs: list[bytes]) -> list[ExecResult]:
         import tempfile
         import time
@@ -364,7 +388,8 @@ class MacFuzzTarget(Target):
 
     def fuzz_corpus(self, seeds: list[bytes], *, runs: int = 100_000,
                     max_total_time: float | None = None, workers: int = 1,
-                    artifact_dir: str | None = None
+                    artifact_dir: str | None = None,
+                    value_profile: bool = False
                     ) -> tuple[list[tuple[bytes, ExecResult]], dict]:
         """Run libFuzzer's in-process persistent loop over a seeded corpus.
 
@@ -373,6 +398,10 @@ class MacFuzzTarget(Target):
         parallel, and writes each crashing input to ``artifact_prefix``. We then
         re-run each unique crash artifact once through the same binary to capture
         a clean ASan report and normalize it via :mod:`asan`.
+
+        ``value_profile=True`` passes ``-use_value_profile=1`` (#30), enabling
+        comparison/value-profile-guided mutation for builds compiled with
+        ``-fsanitize-coverage=trace-cmp``.
 
         Returns ``(unique_crashes, stats)`` where ``unique_crashes`` is a list of
         ``(crashing_input, ExecResult)`` deduped by signature. Requires a
@@ -401,15 +430,10 @@ class MacFuzzTarget(Target):
                     with open(os.path.join(corpus_dir, f"seed_{i:06d}"), "wb") as fh:
                         fh.write(s)
 
-                cmd = [str(harness), corpus_dir,
-                       f"-artifact_prefix={artifact_dir}/",
-                       f"-runs={runs}",
-                       # -fork enables -ignore_crashes so the run collects MANY
-                       # crash artifacts instead of stopping at the first.
-                       f"-fork={max(1, workers)}", "-ignore_crashes=1",
-                       "-print_final_stats=1"]
-                if max_total_time is not None:
-                    cmd.append(f"-max_total_time={int(max_total_time)}")
+                cmd = self.build_libfuzzer_command(
+                    harness, corpus_dir, artifact_dir, runs=runs,
+                    workers=workers, max_total_time=max_total_time,
+                    value_profile=value_profile)
 
                 env = dict(os.environ)
                 env.setdefault("ASAN_OPTIONS", "detect_leaks=0")
@@ -450,6 +474,7 @@ class MacFuzzTarget(Target):
                                    if executed and elapsed else None),
                     "artifacts": len(arts),
                     "unique_crashes": len(unique),
+                    "value_profile": bool(value_profile),
                 }
                 return unique, stats
             finally:

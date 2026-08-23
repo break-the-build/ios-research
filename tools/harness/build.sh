@@ -14,9 +14,13 @@
 #                   brew install llvm && CC=$(brew --prefix llvm)/bin/clang
 #
 # Usage:
-#   tools/harness/build.sh [--driver|--libfuzzer] <framework> [<framework> ...]
+#   tools/harness/build.sh [--driver|--libfuzzer] [--trace-cmp] <framework> [<framework> ...]
 #   tools/harness/build.sh all
 #   frameworks: imageio | audiotoolbox | coregraphics | all
+#
+# --trace-cmp adds -fsanitize-coverage=trace-cmp (#30) so comparison
+# instrumentation is available to the standalone driver. libFuzzer builds
+# already include trace-cmp via -fsanitize=fuzzer.
 #
 # Output: tools/harness/build/<framework>_fuzzer
 # The mac:<framework> target auto-discovers that path, or set:
@@ -30,6 +34,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$HERE/mac_fuzz_harness.c"
 OUT_DIR="$HERE/build"
 MODE="driver"
+TRACE_CMP=0
 
 # Prefer the active toolchain's clang (xcrun). The Command Line Tools clang ships
 # an ASan runtime that CHECK-fails (asan_init_is_running) when the harness
@@ -63,7 +68,11 @@ sanitize_flags() {
   if [ "$MODE" = "libfuzzer" ]; then
     echo "-fsanitize=fuzzer,address,undefined"
   else
-    echo "-fsanitize=address,undefined -fsanitize-coverage=trace-pc-guard -DHARNESS_SANCOV -DHARNESS_STANDALONE"
+    local cov="-fsanitize-coverage=trace-pc-guard"
+    if [ "$TRACE_CMP" = "1" ]; then
+      cov="$cov,trace-cmp"
+    fi
+    echo "-fsanitize=address,undefined $cov -DHARNESS_SANCOV -DHARNESS_STANDALONE"
   fi
 }
 
@@ -97,6 +106,7 @@ main() {
     case "$a" in
       --driver)    MODE="driver" ;;
       --libfuzzer) MODE="libfuzzer" ;;
+      --trace-cmp) TRACE_CMP=1 ;;
       --help|-h)
         sed -n '2,30p' "$HERE/build.sh" | sed 's/^# \{0,1\}//'
         exit 0 ;;
