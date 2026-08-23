@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -263,3 +264,53 @@ def test_cli_list_rules(ctx):
     assert result.data["count"] >= 5
     names = {r["name"] for r in result.data["rules"]}
     assert "keychain_credential_harvest_combo" in names
+
+
+# --- regressions (#130, #131) ----------------------------------------------------
+
+def test_hex_wildcard_matches_any_byte():
+    from ios_research.detection import _compile_string, _find_all
+    pat = _compile_string(
+        {"id": "$a", "type": "hex", "value": "DE AD ?? BE EF"})
+    assert _find_all(bytes.fromhex("dead12beef"), pat) == [0]   # non-zero
+    assert _find_all(bytes.fromhex("ffdead12beef77"), pat) == [1]
+    assert _find_all(bytes.fromhex("dead00beef"), pat) == [0]   # zero still ok
+    assert _find_all(bytes.fromhex("dead12feef"), pat) == []    # fixed byte off
+
+
+def test_condition_validation_rejects_extra_keys_at_any_depth():
+    import pytest
+
+    from ios_research.detection import _validate_condition
+    rule = SimpleNamespace(name="t",
+                           strings=[SimpleNamespace(sid="$a")],
+                           condition={"all": [], "bogus": 1})
+    with pytest.raises(ValidationError, match="malformed condition"):
+        _validate_condition(rule)
+
+    nested = SimpleNamespace(name="t2", strings=[],
+                             condition={"all": [{"any": [], "x": 1}]})
+    with pytest.raises(ValidationError, match="malformed condition"):
+        _validate_condition(nested)
+
+
+def test_lint_and_scan_agree_on_malformed_rules(workspace, tmp_path):
+    """A rules file that fails lint must not pass validation inside scan."""
+    bad = {
+        "rules": [{
+            "name": "extra_key_rule", "scope": "any",
+            "strings": [{"id": "$a", "type": "string", "value": "x"}],
+            "condition": {"all": ["$a"], "junk": 1},
+        }]
+    }
+    path = tmp_path / "bad-rules.json"
+    path.write_text(json.dumps(bad), encoding="utf-8")
+
+    from ios_research.cli import main
+    from ios_research.errors import ExitCode
+    ws = ["--workspace", str(workspace.root)]
+    lint_code = main([*ws, "--json", "detect", "lint", "--rules", str(path)])
+    scan_code = main([*ws, "--json", "detect", "scan", str(path),
+                      "--rules", str(path)])
+    assert lint_code != ExitCode.OK
+    assert scan_code != ExitCode.OK

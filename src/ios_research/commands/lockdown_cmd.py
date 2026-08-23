@@ -102,14 +102,16 @@ def cmd_list(ctx, args) -> Result:
 
 
 def cmd_show(ctx, args) -> Result:
-    from ..errors import ValidationError
+    from ..errors import NotFoundError, StateError
     from ..lockdown import LockdownEngine
     engine = LockdownEngine(ctx.workspace())
     pair = _resolve(engine, args.pair_id)
     try:
         results = ctx.workspace().read_json(f"analysis/{pair.id}-results.json")
     except Exception as exc:
-        raise ValidationError(f"pair '{pair.id}' has not been run") from exc
+        if isinstance(exc, NotFoundError):
+            raise
+        raise StateError(f"pair '{pair.id}' has not been run") from exc
     rows = "\n".join(
         f"{r['verdict']:18} {r['input_sha256'][:16]} std={r['standard']['outcome']:<9} "
         f"lm={r['lockdown']['outcome']:<9}"

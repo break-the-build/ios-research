@@ -12,6 +12,8 @@ Oracles (observations only; never auto-labeled "bypass"):
   surface appears reachable despite Lockdown protections.
 * ``hardening-delta``       — the lockdown side rejects an input (or avoids a
   crash) that the standard side accepts. Hardening evidence, not a finding.
+* ``inconclusive``          — a timeout on either side: tracked explicitly and
+  never promoted to hardening or candidate evidence.
 
 Provenance is explicit: both sides must declare build identifiers and a
 researcher attestation that the lockdown configuration was actually enabled.
@@ -39,6 +41,7 @@ LOCKDOWN_SCHEMA_VERSION = 1
 CANDIDATE = "candidate-finding"
 HARDENING = "hardening-delta"
 OK = "consistent"
+INCONCLUSIVE = "inconclusive"
 
 # Behavior categories for relation checks.
 _CRASHY = {Outcome.CRASH, Outcome.ABNORMAL}
@@ -67,12 +70,17 @@ class LockdownPair:
 
 def _classify(out_std: str, out_lm: str,
               sig_std: str, sig_lm: str) -> tuple[str, str]:
+    # A timeout on either side is inconclusive: a hang under Lockdown Mode is
+    # not hardening evidence and must never become (or mask) a verdict.
+    if out_std == Outcome.TIMEOUT or out_lm == Outcome.TIMEOUT:
+        return INCONCLUSIVE, ("timeout observed on "
+                              f"{'standard' if out_std == Outcome.TIMEOUT else 'lockdown'}"
+                              " side; observation inconclusive")
     if out_lm in _CRASHY:
         reason = ("lockdown-side crash: surface appears reachable under "
                   "Lockdown Mode")
         return CANDIDATE, reason
-    if out_std in _CRASHY and out_lm not in _CRASHY \
-            and sig_std != sig_lm:
+    if out_std in _CRASHY and out_lm not in _CRASHY:
         return HARDENING, ("standard side crashes where the lockdown side "
                            "does not; consistent with hardening")
     if out_std == Outcome.ACCEPTED and out_lm == Outcome.REJECTED:
@@ -165,7 +173,7 @@ class LockdownEngine:
         lm = targets.create(pair.target_lockdown)
 
         results: list[dict[str, Any]] = []
-        counts = {CANDIDATE: 0, HARDENING: 0, OK: 0}
+        counts = {CANDIDATE: 0, HARDENING: 0, OK: 0, INCONCLUSIVE: 0}
         for tc in corpus.testcases:
             data = self.corpora.read_bytes(corpus, tc["sha256"])
             r_std = std.execute(data)
@@ -181,7 +189,7 @@ class LockdownEngine:
                 "lockdown": {"outcome": r_lm.outcome, "signature": sig_lm},
                 "verdict": verdict,
                 "reason": reason,
-                "observation_only": verdict != OK,
+                "observation_only": verdict in (CANDIDATE, HARDENING),
             })
 
         summary = {
