@@ -69,6 +69,12 @@ for _surface in DEVICE_SURFACES:
     register(f"ios-device:{_surface}",
              (lambda s: (lambda: IosDeviceTarget(s)))(_surface))
 
+# JavaScriptCore semantic profile (#46). The default executor is a
+# deterministic in-process mock so the pipeline runs anywhere; the opt-in
+# shell executor requires a user-built, authorized JSC binary.
+from .jsc import JSCSemanticTarget  # noqa: E402
+register("jsc:semantic", lambda: JSCSemanticTarget())
+
 __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",
