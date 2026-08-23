@@ -4,8 +4,30 @@ from __future__ import annotations
 
 import time
 
-from ..errors import NotFoundError, UsageError
+from ..errors import NotFoundError, StateError, UsageError
 from ..output import Result
+
+
+def _require_available(target, target_id: str) -> None:
+    """Fail fast with a clear blocker for an unavailable real (non-mock) target.
+
+    Real targets (macOS harness, on-device) need hardware/toolchain that may be
+    absent. Rather than fabricate ``ABNORMAL`` crash records for every case, stop
+    with an actionable blocker — no fabricated results (see the experiment-loop
+    doc and issue #11).
+    """
+    if getattr(target, "mock", True):
+        return
+    available = getattr(target, "available", None)
+    if callable(available) and not available():
+        blocker = ""
+        blocker_fn = getattr(target, "blocker", None)
+        if callable(blocker_fn):
+            blocker = blocker_fn()
+        raise StateError(
+            f"target '{target_id}' is not available: "
+            f"{blocker or 'required device/toolchain not present'}",
+            details={"target": target_id, "blocker": blocker})
 
 
 def register(subparsers, parent) -> None:
@@ -63,6 +85,7 @@ def cmd_start(ctx, args) -> Result:
     target_id = args.target or cfg.get("default_target")
     if not targets.is_registered(target_id):
         raise UsageError(f"unknown target '{target_id}'")
+    _require_available(targets.create(target_id), target_id)
     seed = args.seed if args.seed is not None else cfg.get("fuzz.seed", 0)
     max_cases = args.max_cases if args.max_cases is not None \
         else cfg.get("fuzz.max_cases", 1000)

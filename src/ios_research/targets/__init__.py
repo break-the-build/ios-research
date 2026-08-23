@@ -60,6 +60,15 @@ from .mac import MacFuzzTarget, MAC_FRAMEWORKS  # noqa: E402
 for _key in MAC_FRAMEWORKS:
     register(f"mac:{_key}", (lambda k: (lambda: MacFuzzTarget(k)))(_key))
 
+# Real black-box on-device targets (mock = False). Opt-in: they require a
+# connected, authorized device + libimobiledevice and are skipped in CI.
+# Registering the factory is cheap and needs no device present. This path
+# *confirms* a Mac-discovered crash on real hardware; it does not analyze.
+from .device import IosDeviceTarget, DEVICE_SURFACES  # noqa: E402
+for _surface in DEVICE_SURFACES:
+    register(f"ios-device:{_surface}",
+             (lambda s: (lambda: IosDeviceTarget(s)))(_surface))
+
 __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",

@@ -4,6 +4,12 @@ By default every target in `ios-research` is a **mock** target that runs in CI
 without any hardware. This document describes how an *authorized* research
 device could later be attached behind the same target interface.
 
+> A concrete black-box on-device target now ships: `ios-device:<surface>` stages
+> an input to a USB-attached, authorized iPhone and harvests the resulting
+> `.ips` crash log (**confirmation, not analysis**). See
+> **[ON-DEVICE-TARGET.md](ON-DEVICE-TARGET.md)**. The steps below describe the
+> general pattern any device target follows.
+
 > **Authorized research only.** Attach only devices you own or are explicitly
 > authorized to test. The framework never bypasses permissions, activates the
 > camera/microphone, or performs any covert access — see `SECURITY.md`.
