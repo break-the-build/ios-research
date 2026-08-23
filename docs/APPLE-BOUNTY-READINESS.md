@@ -40,6 +40,40 @@ taxonomy without code changes; the effective taxonomy version and SHA-256 are
 recorded in validation results and exported packs. This remains local-only:
 it never interacts with Apple systems or actual Target Flag infrastructure.
 
+## Target Flag capture detection (#84)
+
+`analyze` additionally runs a structural check of stored diagnostics against
+Apple's published **Commpage Target Flag** patterns (register control /
+arbitrary read-write / code execution, userspace or kernel). When a pattern
+matches — e.g. a faulting address that also appears live in a general-purpose
+register on an `EXC_BAD_ACCESS` — the analysis records a
+`target_flag_capture` block (primitive, space, bit width, confidence,
+basis). NULL-page faults are never classified as captures.
+
+Higher-fidelity detection uses the boot-random commpage contents captured on
+the research device during the PoC run. Pass them via researcher metadata:
+
+```json
+{"commpage_values": {"value": "0x…", "address": "0x…",
+                     "kern_value": "0x…", "kern_address": "0x…"}}
+```
+
+For **TCC Target Flag** demonstrations (macOS), supply the captured output of
+Apple's own verification command to make the readiness check binding:
+
+```bash
+ios-research report bounty-validate <report-id> \
+  --metadata researcher.json --tccutil-output tcc-check.txt
+```
+
+`tccutil flag check` reporting `modified` satisfies the check; reporting no
+modification fails it explicitly. Detection results appear in
+`bounty-validate` under `target_flags.capture` / `target_flags.tccutil`, are
+usable as a `target_flag_capture` evidence element by override taxonomies,
+and are exported in evidence packs. All parsing is local: the framework never
+modifies TCC state, fabricates register data, or generates exploit material.
+The taxonomy also gained the published PCC reward tiers (v2).
+
 `bounty-export` creates a deterministic local directory containing
 `manifest.json` and hash-verified copies of the retained original/minimized
 inputs, crash record, and diagnostics. Only fixed workspace-relative paths are
