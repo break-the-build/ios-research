@@ -159,3 +159,9 @@ for _tid, _cls in XPC_TARGETS.items():
 from .docimp import DOCIMP_TARGETS  # noqa: E402
 for _tid, _cls in DOCIMP_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock signed-document targets (mock = True). Verify-only structural parsing
+# of synthetic documents; no key material, no signing oracle.
+from .signeddoc import SIGNEDDOC_TARGETS  # noqa: E402
+for _tid, _cls in SIGNEDDOC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))

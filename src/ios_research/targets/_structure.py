@@ -412,3 +412,33 @@ def docimp(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + bytes([part_class & 0xFF,
                                                   part_flags & 0xFF])
     return magic + header + payload
+def signeddoc(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock signed document (#110).
+
+    Document layout after ``magic``::
+
+        [declared_length u16 BE][asn1_class u8][der_flags u8][payload...]
+
+    Edits steer the header toward the shared signed-document defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    asn1_class = 1
+    der_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # ASN.1 class 0 -> empty certificate chain dereference
+        asn1_class = 0x00
+    elif choice == 2:    # indefinite-length DER flag -> length arithmetic overflow
+        der_flags |= 0x08
+    elif choice == 3:    # released SET-OF marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # OID arc class confusion
+        asn1_class = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([asn1_class & 0xFF,
+                                                  der_flags & 0xFF])
+    return magic + header + payload
