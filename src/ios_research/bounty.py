@@ -123,6 +123,10 @@ class BountyReadiness:
                 "attachments": attachments,
             },
             "artifacts": self._artifact_manifest(report),
+            # Researcher-recorded artifacts (#38) are listed separately from
+            # tool-generated sections so attached evidence stays clearly
+            # distinguished from the framework's own analysis.
+            "attached_evidence": self._attached_evidence(report),
             "researcher_metadata": metadata,
             "limitations": [
                 "Contains references and hashes for locally retained evidence; it does not package exploits or payloads.",
@@ -177,6 +181,24 @@ class BountyReadiness:
             items.append({"source": source, "archive_path": f"evidence/{source}",
                           "sha256": digest, "size": file.stat().st_size})
         return items
+
+    def _attached_evidence(self, report: Report) -> list[dict[str, Any]]:
+        """Integrity-verified listing of imported researcher evidence (#38)."""
+        try:
+            from .evidence import EvidenceStore
+            items = EvidenceStore(self.ws).list(report.crash_id)
+        except ValidationError:
+            return []
+        verified = []
+        for item in items:
+            entry = {key: item[key] for key in
+                     ("id", "kind", "sha256", "captured_at", "warnings")
+                     if key in item}
+            entry["integrity_ok"] = self.ws.path(item["file"]).is_file() and \
+                sha256_bytes(
+                    self.ws.path(item["file"]).read_bytes()) == item["sha256"]
+            verified.append(entry)
+        return verified
 
     def _workspace_file(self, relative: str) -> Path:
         if not isinstance(relative, str):

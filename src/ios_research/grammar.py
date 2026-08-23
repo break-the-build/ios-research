@@ -206,8 +206,8 @@ class PluginHost:
         serialized_ok, blob = self._call("serialize", plugin, node_out)
         if not serialized_ok or not isinstance(blob, (bytes, bytearray)):
             return None
-        blob = bytes(blob)[:MAX_OUTPUT_BYTES]
-        if len(bytes(blob)) > MAX_OUTPUT_BYTES:
+        blob = bytes(blob)
+        if len(blob) > MAX_OUTPUT_BYTES:
             self.fallbacks += 1
             self.last_error = (f"{plugin.plugin_id}: crossover output "
                                f"exceeds {MAX_OUTPUT_BYTES} bytes")

@@ -104,10 +104,11 @@ def parse_dictionary(text: str, *, source: str = "") -> list[DictionaryToken]:
             raise ValidationError(
                 f"dictionary line {lineno}: token exceeds "
                 f"{MAX_TOKEN_LENGTH} bytes")
-        if name in seen_names:
+        if name and name in seen_names:
             raise ValidationError(
                 f"dictionary line {lineno}: duplicate token name '{name}'")
-        seen_names.add(name)
+        if name:
+            seen_names.add(name)
         tokens.append(DictionaryToken(name=name, value=value, source=source))
         if len(tokens) > MAX_TOKENS:
             raise ValidationError(

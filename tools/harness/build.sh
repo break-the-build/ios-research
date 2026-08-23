@@ -115,11 +115,17 @@ sanitize_flags() {
     if [ "$TRACE_CMP" = "1" ]; then
       cov="$cov,trace-cmp"
     fi
-    if [ -n "$prof" ] && [ "$SANITIZER_PROFILE" != "asan-ubsan" ]; then
-      echo "$prof $cov -DHARNESS_SANCOV -DHARNESS_STANDALONE"
-    else
-      echo "-fsanitize=address,undefined $cov -DHARNESS_SANCOV -DHARNESS_STANDALONE"
-    fi
+    case "$SANITIZER_PROFILE" in
+      baseline)
+        # Coverage-only build: no sanitizer runtime (#31).
+        echo "$cov -DHARNESS_SANCOV -DHARNESS_STANDALONE" ;;
+      asan-ubsan|"")
+
+        echo "-fsanitize=address,undefined $cov -DHARNESS_SANCOV -DHARNESS_STANDALONE" ;;
+      *)
+        # Named replacement profile (cfi | tsan | lsan | msan).
+        echo "$prof $cov -DHARNESS_SANCOV -DHARNESS_STANDALONE" ;;
+    esac
   fi
 }
 

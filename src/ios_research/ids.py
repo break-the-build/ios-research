@@ -23,6 +23,7 @@ _PREFIXES = {
     "artifact": "art",
     "matrix": "mtx",
     "oracle": "ora",
+    "evidence": "evd",
 }
 
 

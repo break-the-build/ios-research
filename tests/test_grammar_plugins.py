@@ -70,6 +70,22 @@ def test_plugin_output_reproducible_for_fixed_seed():
     assert out_a[1].startswith("grammar:chunked-bin@1.0.0")
 
 
+def test_crossover_rejects_oversize_output():
+    from ios_research.grammar import MAX_OUTPUT_BYTES, PluginHost
+
+    class _OversizePlugin(ChunkedBinPlugin):
+        def serialize(self, node):
+            return b"\x00" * (MAX_OUTPUT_BYTES + 1)
+
+    host = PluginHost()
+    host.plugins = [_OversizePlugin()]
+    out = host.crossover_bytes(VALID_CHUNKED, VALID_CHUNKED,
+                               random.Random(1))
+    assert out is None
+    assert host.fallbacks == 1
+    assert "exceeds" in (host.last_error or "")
+
+
 def test_crossover_combines_parents_structurally():
     host = PluginHost()
     host.plugins = [ChunkedBinPlugin()]
