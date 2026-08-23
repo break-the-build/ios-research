@@ -201,13 +201,20 @@ def get_flag(taxonomy: dict[str, Any], flag_id: str) -> dict[str, Any] | None:
 
 
 def candidates_for(crash: dict[str, Any], analysis: dict[str, Any],
-                   taxonomy: dict[str, Any]) -> list[dict[str, Any]]:
+                   taxonomy: dict[str, Any],
+                   experiment_params: dict[str, Any] | None = None
+                   ) -> list[dict[str, Any]]:
     """Propose candidate target flags from stored evidence.
 
     Deterministic and conservative: a candidate requires either a matching
     component keyword or an exploitability indicator listed for the flag. When
     no rule matches, no candidate is proposed rather than guessing. Output is
     a hypothesis list only — never an assertion of achievement.
+
+    ``experiment_params`` may carry researcher-declared delivery provenance
+    (#106): when ``delivery == "zero-click"``, network-entry-point flags are
+    surfaced as LOW-confidence candidates even without a keyword match, so
+    zero-click delivery evidence reaches the readiness report.
     """
     diag_modules = (crash.get("diagnostics") or {}).get("modules") or []
     component = str(diag_modules[0] if diag_modules
@@ -233,6 +240,15 @@ def candidates_for(crash: dict[str, Any], analysis: dict[str, Any],
                              f"'{flag['id']}'")
         proposals.append({"flag_id": flag["id"], "confidence": confidence,
                           "rationale": rationale})
+    if (experiment_params or {}).get("delivery") == "zero-click":
+        have = {p["flag_id"] for p in proposals}
+        for flag in taxonomy["flags"]:
+            if flag.get("entry_point") != "network" or flag["id"] in have:
+                continue
+            proposals.append({
+                "flag_id": flag["id"], "confidence": "LOW",
+                "rationale": ["experiment delivery provenance is 'zero-click'"],
+            })
     proposals.sort(key=lambda p: p["flag_id"])
     return proposals
 
