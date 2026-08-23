@@ -567,6 +567,118 @@
         "positionals": []
       }
     },
+    "evidence": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "kind",
+                "flags": [
+                  "--kind"
+                ],
+                "help": "crash-log | sysdiagnose | video | screenshot | syslog | other",
+                "required": true
+              },
+              {
+                "dest": "device_id",
+                "flags": [
+                  "--device-id"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "build",
+                "flags": [
+                  "--build"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "process",
+                "flags": [
+                  "--process"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "captured_at",
+                "flags": [
+                  "--captured-at"
+                ],
+                "help": "researcher-supplied ISO-8601 capture time",
+                "required": false
+              },
+              {
+                "dest": "redaction_ack",
+                "flags": [
+                  "--redaction-ack"
+                ],
+                "help": "confirm review/redaction responsibility for video/screenshot artifacts",
+                "required": false
+              },
+              {
+                "dest": "notes",
+                "flags": [
+                  "--notes"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "verify": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "item_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "experiment": {
       "arguments": {
         "options": [],
@@ -749,6 +861,38 @@
                 ],
                 "help": "cases to execute this invocation (for resumable runs)",
                 "required": false
+              },
+              {
+                "dest": "dictionary",
+                "flags": [
+                  "--dictionary"
+                ],
+                "help": "path to a token dictionary (constraint-guided mutation, #30)",
+                "required": false
+              },
+              {
+                "dest": "value_profile",
+                "flags": [
+                  "--value-profile"
+                ],
+                "help": "record value-profile guidance in campaign metadata (#30)",
+                "required": false
+              },
+              {
+                "dest": "sanitizer_profile",
+                "flags": [
+                  "--sanitizer-profile"
+                ],
+                "help": "named sanitizer build profile recorded as provenance (#31)",
+                "required": false
+              },
+              {
+                "dest": "mutator_plugin",
+                "flags": [
+                  "--mutator-plugin"
+                ],
+                "help": "path to a grammar-aware mutator plugin (#41)",
+                "required": false
               }
             ],
             "positionals": []
@@ -813,6 +957,182 @@
         "positionals": []
       }
     },
+    "matrix": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "input",
+                "flags": [
+                  "--input"
+                ],
+                "help": "path to the input to confirm",
+                "required": true
+              },
+              {
+                "dest": "trials",
+                "flags": [
+                  "--trials"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "cells",
+                "flags": [
+                  "--cells"
+                ],
+                "help": "JSON file with an array of cell specs (device_id, model, os_name, os_version, build)",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "matrix_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "matrix_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "oracle": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "relations": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "corpus id (default: target's seed inputs)",
+                "required": false
+              },
+              {
+                "dest": "relations",
+                "flags": [
+                  "--relations"
+                ],
+                "help": "relation IDs to evaluate",
+                "required": false
+              },
+              {
+                "dest": "transforms",
+                "flags": [
+                  "--transforms"
+                ],
+                "help": "transform IDs to apply",
+                "required": false
+              },
+              {
+                "dest": "trials",
+                "flags": [
+                  "--trials"
+                ],
+                "help": "re-checks before a violation is confirmed",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "run_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "report": {
       "arguments": {
         "options": [],
@@ -875,6 +1195,44 @@
             ]
           }
         },
+        "coverage": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "as_markdown",
+                "flags": [
+                  "--markdown"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "coverage-compare": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "base_session_id",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "head_session_id",
+                "required": true
+              }
+            ]
+          }
+        },
         "create": {
           "arguments": {
             "options": [],
@@ -920,6 +1278,27 @@
           "arguments": {
             "options": [],
             "positionals": []
+          }
+        },
+        "reachability": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "inventory",
+                "flags": [
+                  "--inventory"
+                ],
+                "help": "JSON file with a list of statically reachable feature/function IDs",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
           }
         },
         "show": {
@@ -1091,6 +1470,160 @@
                 "required": false
               }
             ]
+          }
+        }
+      }
+    },
+    "sequence": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "fuzz": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "adapter",
+                "flags": [
+                  "--adapter"
+                ],
+                "help": "path to a user-declared workflow adapter module",
+                "required": true
+              },
+              {
+                "dest": "cases",
+                "flags": [
+                  "--cases"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "max_length",
+                "flags": [
+                  "--max-length"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
+    "sync": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "export": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "output bundle directory",
+                "required": true
+              },
+              {
+                "dest": "worker",
+                "flags": [
+                  "--worker"
+                ],
+                "help": "worker identifier recorded in the manifest",
+                "required": false
+              },
+              {
+                "dest": "cursor",
+                "flags": [
+                  "--cursor"
+                ],
+                "help": "session cursor to record for lag tracking",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "corpus_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "allow_roots",
+                "flags": [
+                  "--allow-root"
+                ],
+                "help": "directory the bundle must live under; repeatable, required",
+                "required": false
+              },
+              {
+                "dest": "minimize",
+                "flags": [
+                  "--minimize",
+                  "--no-minimize"
+                ],
+                "help": "greedy coverage set-cover before merging",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "corpus_id",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "bundle_dir",
+                "required": true
+              }
+            ]
+          }
+        },
+        "status": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "workers",
+                "flags": [
+                  "--worker"
+                ],
+                "help": "worker export directory; repeatable",
+                "required": true
+              }
+            ],
+            "positionals": []
           }
         }
       }
