@@ -2517,6 +2517,38 @@
             }
           }
         },
+        "fsclient": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "fsclient_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "exfat-vol|smb2-resp or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "ipc": {
           "arguments": {
             "options": [],
