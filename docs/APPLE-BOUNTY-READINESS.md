@@ -20,6 +20,26 @@ authorization/contact attestations. A failed check means the evidence is
 incomplete; it does **not** determine Apple Security Bounty eligibility,
 severity, or reward.
 
+## Target Flag awareness (#58)
+
+`report bounty-validate` also maps findings to Apple's public **Target Flag**
+taxonomy. `analyze` proposes *candidate* flags from stored evidence
+(hypotheses only — never assertions of achievement), and researcher-declared
+claims (`--metadata` JSON with `"target_flags": ["<flag-id>", ...]`) are checked
+against the flag's required evidence elements:
+
+```bash
+ios-research targetflags list                 # local taxonomy + content hash
+ios-research report bounty-validate <id> \
+  --metadata researcher.json                  # includes per-flag checklists
+```
+
+An optional workspace override at `.ios-research/config/target-flags.json`
+(`{"version": int, "flags": [...]}`) lets deployments track Apple's published
+taxonomy without code changes; the effective taxonomy version and SHA-256 are
+recorded in validation results and exported packs. This remains local-only:
+it never interacts with Apple systems or actual Target Flag infrastructure.
+
 `bounty-export` creates a deterministic local directory containing
 `manifest.json` and hash-verified copies of the retained original/minimized
 inputs, crash record, and diagnostics. Only fixed workspace-relative paths are

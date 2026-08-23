@@ -144,6 +144,16 @@ class Analyzer:
         diag = crash.diagnostics
         component = (diag.get("modules") or [crash.target])[0]
 
+        # Candidate Target Flags are hypotheses derived from the same stored
+        # evidence (#58); they never assert a flag is achieved.
+        from .targetflags import candidates_for, load_taxonomy
+        taxonomy = load_taxonomy(self.ws)
+        candidates = candidates_for(crash.to_dict(),
+                                    {"exploitability_classification":
+                                     classification,
+                                     "likely_affected_component": component},
+                                    taxonomy)
+
         analysis = Analysis(
             id=make_id("analysis", crash.id, crash.signature),
             crash_id=crash.id,
@@ -162,7 +172,10 @@ class Analyzer:
             confidence=confidence,
             created_at=now_iso(),
             extra={"faulting_address": diag.get("faulting_address"),
-                   "exception_type": diag.get("exception_type")},
+                   "exception_type": diag.get("exception_type"),
+                   "candidate_target_flags":
+                       [c["flag_id"] for c in candidates],
+                   "target_flag_taxonomy_sha256": taxonomy["sha256"]},
         )
         self.ws.write_json(self._rel(analysis.id), analysis.to_dict())
         # Convenience copy beside the crash + backlink.
