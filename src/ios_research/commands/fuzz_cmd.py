@@ -46,6 +46,14 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--workers", type=int, default=None)
     p_start.add_argument("--chunk", type=int, default=None,
                          help="cases to execute this invocation (for resumable runs)")
+    p_start.add_argument("--dictionary", default=None,
+                         help="path to a token dictionary (constraint-guided mutation, #30)")
+    p_start.add_argument("--value-profile", action="store_true", dest="value_profile",
+                         help="record value-profile guidance in campaign metadata (#30)")
+    p_start.add_argument("--sanitizer-profile", default=None, dest="sanitizer_profile",
+                         help="named sanitizer build profile recorded as provenance (#31)")
+    p_start.add_argument("--mutator-plugin", default=None, dest="mutator_plugin",
+                         help="path to a grammar-aware mutator plugin (#41)")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -121,10 +129,18 @@ def cmd_start(ctx, args) -> Result:
             params={"corpus": corpus.id, "max_cases": max_cases})
 
     engine = FuzzEngine(ws)
+    dictionary = getattr(args, "dictionary", None)
     session = engine.create(experiment_id=experiment.id, target=target_id,
                             corpus_id=corpus.id, seed=seed, workers=workers,
                             max_cases=max_cases, duration_s=args.duration,
-                            strategy_weights=cfg.get("fuzz.strategy_weights"))
+                            strategy_weights=cfg.get("fuzz.strategy_weights"),
+                            dictionary_path=dictionary,
+                            value_profile=bool(getattr(args, "value_profile",
+                                                       False)),
+                            sanitizer_profile=getattr(
+                                args, "sanitizer_profile", None),
+                            mutator_plugin_path=getattr(
+                                args, "mutator_plugin", None))
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

@@ -70,7 +70,7 @@ Available framework keys and their entry points:
 |---------------------|----------------|------------------------------------|
 | `mac:imageio`       | ImageIO        | `CGImageSourceCreateWithData`      |
 | `mac:audiotoolbox`  | AudioToolbox   | `AudioFileOpenWithCallbacks`       |
-| `mac:coregraphics`  | CoreGraphics   | `CGDataProviderCreateWithCFData`   |
+| `mac:coregraphics`  | CoreGraphics   | `CGPDFDocumentCreateWithProvider` + page render |
 | `mac:selftest`      | (none)         | controlled buggy parser — see below |
 
 ### Self-test target (real-crash pipeline validation)

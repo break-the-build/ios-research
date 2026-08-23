@@ -14,9 +14,17 @@
 #                   brew install llvm && CC=$(brew --prefix llvm)/bin/clang
 #
 # Usage:
-#   tools/harness/build.sh [--driver|--libfuzzer] <framework> [<framework> ...]
+#   tools/harness/build.sh [--driver|--libfuzzer] [--trace-cmp] <framework> [<framework> ...]
 #   tools/harness/build.sh all
 #   frameworks: imageio | audiotoolbox | coregraphics | all
+#
+# --trace-cmp adds -fsanitize-coverage=trace-cmp (#30) so comparison
+# instrumentation is available to the standalone driver. libFuzzer builds
+# already include trace-cmp via -fsanitize=fuzzer.
+#
+# --sanitizer <profile> selects a named sanitizer profile (#31), mirroring
+# ios_research.sanitizers.PROFILES: baseline | asan-ubsan | cfi | tsan | lsan |
+# msan. Unsupported platform/profile combos fail before compiling.
 #
 # Output: tools/harness/build/<framework>_fuzzer
 # The mac:<framework> target auto-discovers that path, or set:
@@ -30,6 +38,39 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$HERE/mac_fuzz_harness.c"
 OUT_DIR="$HERE/build"
 MODE="driver"
+TRACE_CMP=0
+SANITIZER_PROFILE="asan-ubsan"
+
+# Sanitizer profile flags (#31) — mirrors ios_research.sanitizers.PROFILES.
+profile_flags() {
+  case "$1" in
+    baseline)   echo "" ;;
+    asan-ubsan) echo "-fsanitize=address,undefined" ;;
+    cfi)        echo "-fsanitize=cfi -flto -fvisibility=hidden" ;;
+    tsan)       echo "-fsanitize=thread" ;;
+    lsan)       echo "-fsanitize=leak" ;;
+    msan)       echo "-fsanitize=memory" ;;
+    *)          return 1 ;;
+  esac
+}
+
+profile_supported_on() {
+  # $1 = profile, $2 = uname (Darwin/Linux). Fail closed with an actionable
+  # reason before any compilation happens.
+  case "$1" in
+    msan)
+      if [ "$2" != "Linux" ]; then
+        echo "profile 'msan' is not supported on '$2' (supported: linux)" >&2
+        return 1
+      fi ;;
+    cfi)
+      if [ -z "${CC:-}" ] || ! echo "$CC" | grep -qi "llvm\|clang"; then
+        echo "profile 'cfi' requires a clang toolchain with lld (set CC)" >&2
+        return 1
+      fi ;;
+  esac
+  return 0
+}
 
 # Prefer the active toolchain's clang (xcrun). The Command Line Tools clang ships
 # an ASan runtime that CHECK-fails (asan_init_is_running) when the harness
@@ -60,10 +101,31 @@ define_for() {
 }
 
 sanitize_flags() {
+  local prof
+  prof="$(profile_flags "$SANITIZER_PROFILE")" || {
+    echo "unknown sanitizer profile: $SANITIZER_PROFILE" >&2
+    return 2
+  }
   if [ "$MODE" = "libfuzzer" ]; then
     echo "-fsanitize=fuzzer,address,undefined"
   else
-    echo "-fsanitize=address,undefined -fsanitize-coverage=trace-pc-guard -DHARNESS_SANCOV -DHARNESS_STANDALONE"
+    # A non-default sanitizer profile replaces the default ASan/UBSan flags;
+    # coverage stays on so the driver keeps emitting its guard map.
+    local cov="-fsanitize-coverage=trace-pc-guard"
+    if [ "$TRACE_CMP" = "1" ]; then
+      cov="$cov,trace-cmp"
+    fi
+    case "$SANITIZER_PROFILE" in
+      baseline)
+        # Coverage-only build: no sanitizer runtime (#31).
+        echo "$cov -DHARNESS_SANCOV -DHARNESS_STANDALONE" ;;
+      asan-ubsan|"")
+
+        echo "-fsanitize=address,undefined $cov -DHARNESS_SANCOV -DHARNESS_STANDALONE" ;;
+      *)
+        # Named replacement profile (cfi | tsan | lsan | msan).
+        echo "$prof $cov -DHARNESS_SANCOV -DHARNESS_STANDALONE" ;;
+    esac
   fi
 }
 
@@ -81,9 +143,12 @@ build_one() {
     echo "unknown framework key: $key (want: imageio audiotoolbox coregraphics)" >&2
     return 2
   fi
+  if ! profile_supported_on "$SANITIZER_PROFILE" "$(uname -s)"; then
+    return 4
+  fi
   mkdir -p "$OUT_DIR"
   out="$OUT_DIR/${key}_fuzzer"
-  echo ">> building $key ($MODE) -> $out"
+  echo ">> building $key ($MODE, sanitizer=$SANITIZER_PROFILE) -> $out"
   # shellcheck disable=SC2046,SC2086
   "$CC" -g -O1 -fno-omit-frame-pointer $(sanitize_flags) $(sdk_flags) \
     ${CFLAGS:-} "$def" "$SRC" -o "$out"
@@ -92,16 +157,29 @@ build_one() {
 
 main() {
   local args=()
-  local a
-  for a in "$@"; do
-    case "$a" in
+  while [ $# -gt 0 ]; do
+    case "$1" in
       --driver)    MODE="driver" ;;
       --libfuzzer) MODE="libfuzzer" ;;
+      --trace-cmp) TRACE_CMP=1 ;;
+      --sanitizer)
+        if [ $# -lt 2 ]; then
+          echo "--sanitizer requires a profile argument" >&2
+          exit 2
+        fi
+        SANITIZER_PROFILE="$2"
+        if ! profile_flags "$SANITIZER_PROFILE" >/dev/null 2>&1; then
+          echo "unknown sanitizer profile: '$SANITIZER_PROFILE' (want: baseline asan-ubsan cfi tsan lsan msan)" >&2
+          exit 2
+        fi
+        shift ;;
       --help|-h)
         sed -n '2,30p' "$HERE/build.sh" | sed 's/^# \{0,1\}//'
         exit 0 ;;
-      *) args+=("$a") ;;
+      *)
+        args+=("$1") ;;
     esac
+    shift
   done
 
   if [ "${#args[@]}" -eq 0 ]; then

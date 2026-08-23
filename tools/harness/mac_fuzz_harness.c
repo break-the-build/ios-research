@@ -15,7 +15,7 @@
  * The entry point is selected at build time via -DHARNESS_TARGET_<NAME>:
  *   -DHARNESS_TARGET_IMAGEIO        ImageIO / CGImageSourceCreateWithData
  *   -DHARNESS_TARGET_AUDIOTOOLBOX   AudioToolbox / AudioFileOpenWithCallbacks
- *   -DHARNESS_TARGET_COREGRAPHICS   CoreGraphics / CGDataProviderCreateWithData
+ *   -DHARNESS_TARGET_COREGRAPHICS   CoreGraphics / CGPDFDocumentCreateWithProvider
  *
  * Two build modes (selected by build.sh):
  *   default            -DHARNESS_STANDALONE + -fsanitize=address,undefined.
@@ -147,9 +147,32 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
 
 #elif defined(HARNESS_TARGET_COREGRAPHICS)
 
+/* CoreGraphics path (#27): drive a real PDF decode/render pipeline instead of
+ * merely wrapping bytes. CGDataProviderCreateWithCFData only wraps a buffer and
+ * never parses (every input was "accepted", no decoder logic ran), so we now
+ * open a CGPDFDocument over the provider — the full PDF parser — then force a
+ * decode by rendering page 1 into an offscreen bitmap context. Malformed inputs
+ * are rejected by the parser (meaningful REJECTED signal); malformed ones that
+ * survive parsing exercise real decode code under ASan/UBSan. */
 typedef CFTypeRef CGDataProviderRef;
+typedef CFTypeRef CGPDFDocumentRef;
+typedef CFTypeRef CGPDFPageRef;
+typedef CFTypeRef CGContextRef;
+typedef CFTypeRef CGColorSpaceRef;
+
 static CGDataProviderRef (*p_CGDataProviderCreateWithCFData)(CFDataRef) = NULL;
 static void (*p_CGDataProviderRelease)(CGDataProviderRef) = NULL;
+static CGPDFDocumentRef (*p_CGPDFDocumentCreateWithProvider)(CGDataProviderRef) = NULL;
+static void (*p_CGPDFDocumentRelease)(CGPDFDocumentRef) = NULL;
+static size_t (*p_CGPDFDocumentGetNumberOfPages)(CGPDFDocumentRef) = NULL;
+static CGPDFPageRef (*p_CGPDFDocumentGetPage)(CGPDFDocumentRef, size_t) = NULL;
+static CGContextRef (*p_CGBitmapContextCreate)(void *, size_t, size_t,
+                                               size_t, size_t, CGColorSpaceRef,
+                                               uint32_t) = NULL;
+static void (*p_CGContextRelease)(CGContextRef) = NULL;
+static void (*p_CGContextDrawPDFPage)(CGContextRef, CGPDFPageRef) = NULL;
+static CGColorSpaceRef (*p_CGColorSpaceCreateDeviceRGB)(void) = NULL;
+static void (*p_CGColorSpaceRelease)(CGColorSpaceRef) = NULL;
 
 static int resolve_target(void) {
     if (!resolve_common()) return 0;
@@ -159,14 +182,49 @@ static int resolve_target(void) {
     if (!fw_handle) { fprintf(stderr, "harness: dlopen CoreGraphics: %s\n", dlerror()); return 0; }
     p_CGDataProviderCreateWithCFData = dlsym(fw_handle, "CGDataProviderCreateWithCFData");
     p_CGDataProviderRelease = dlsym(fw_handle, "CGDataProviderRelease");
-    return p_CGDataProviderCreateWithCFData && p_CGDataProviderRelease;
+    p_CGPDFDocumentCreateWithProvider = dlsym(fw_handle, "CGPDFDocumentCreateWithProvider");
+    p_CGPDFDocumentRelease = dlsym(fw_handle, "CGPDFDocumentRelease");
+    p_CGPDFDocumentGetNumberOfPages = dlsym(fw_handle, "CGPDFDocumentGetNumberOfPages");
+    p_CGPDFDocumentGetPage = dlsym(fw_handle, "CGPDFDocumentGetPage");
+    p_CGBitmapContextCreate = dlsym(fw_handle, "CGBitmapContextCreate");
+    p_CGContextRelease = dlsym(fw_handle, "CGContextRelease");
+    p_CGContextDrawPDFPage = dlsym(fw_handle, "CGContextDrawPDFPage");
+    p_CGColorSpaceCreateDeviceRGB = dlsym(fw_handle, "CGColorSpaceCreateDeviceRGB");
+    p_CGColorSpaceRelease = dlsym(fw_handle, "CGColorSpaceRelease");
+    return p_CGDataProviderCreateWithCFData && p_CGDataProviderRelease
+        && p_CGPDFDocumentCreateWithProvider && p_CGPDFDocumentRelease
+        && p_CGPDFDocumentGetNumberOfPages && p_CGPDFDocumentGetPage
+        && p_CGBitmapContextCreate && p_CGContextRelease
+        && p_CGContextDrawPDFPage && p_CGColorSpaceCreateDeviceRGB
+        && p_CGColorSpaceRelease;
 }
+
+#define IOSR_CG_BITMAP_ALPHA 2  /* kCGImageAlphaPremultipliedFirst */
 
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     CGDataProviderRef prov = p_CGDataProviderCreateWithCFData(cfdata);
     if (!prov) return 0;
+    int decoded = 0;
+    CGPDFDocumentRef doc = p_CGPDFDocumentCreateWithProvider(prov);
+    if (doc) {
+        if (p_CGPDFDocumentGetNumberOfPages(doc) > 0) {
+            CGPDFPageRef page = p_CGPDFDocumentGetPage(doc, 1);
+            if (page) {
+                /* Small offscreen RGBA bitmap; row bytes = width * 4. */
+                CGContextRef ctx = p_CGBitmapContextCreate(
+                    NULL, 64, 64, 8, 64 * 4,
+                    p_CGColorSpaceCreateDeviceRGB(), IOSR_CG_BITMAP_ALPHA);
+                if (ctx) {
+                    p_CGContextDrawPDFPage(ctx, page);  /* forces full decode */
+                    p_CGContextRelease(ctx);
+                    decoded = 1;
+                }
+            }
+        }
+        p_CGPDFDocumentRelease(doc);
+    }
     p_CGDataProviderRelease(prov);
-    return 1;
+    return decoded;
 }
 
 #elif defined(HARNESS_TARGET_AUDIOTOOLBOX)

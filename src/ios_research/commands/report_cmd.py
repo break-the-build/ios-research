@@ -53,6 +53,25 @@ def register(subparsers, parent) -> None:
                                  help="output directory (default: report evidence directory)")
     p_bounty_export.set_defaults(func=cmd_bounty_export)
 
+    p_cov = sub.add_parser("coverage", parents=[parent],
+                           help="coverage/corpus-quality report for a fuzz session (#34)")
+    p_cov.add_argument("session_id", nargs="?", default=None)
+    p_cov.add_argument("--markdown", action="store_true", dest="as_markdown")
+    p_cov.set_defaults(func=cmd_coverage)
+
+    p_cov_cmp = sub.add_parser("coverage-compare", parents=[parent],
+                               help="compare two coverage reports for growth/regression (#34)")
+    p_cov_cmp.add_argument("base_session_id")
+    p_cov_cmp.add_argument("head_session_id")
+    p_cov_cmp.set_defaults(func=cmd_coverage_compare)
+
+    p_reach = sub.add_parser("reachability", parents=[parent],
+                             help="compare declared static inventory with dynamic coverage (#34)")
+    p_reach.add_argument("session_id", nargs="?", default=None)
+    p_reach.add_argument("--inventory", required=True,
+                         help="JSON file with a list of statically reachable feature/function IDs")
+    p_reach.set_defaults(func=cmd_reachability)
+
     p.set_defaults(func=cmd_list)
 
 
@@ -130,3 +149,45 @@ def cmd_bounty_export(ctx, args) -> Result:
                   data={"manifest": str(path), "directory": str(path.parent),
                         "ready": result["ready"],
                         "safety": "local validated evidence copies only; no data transmitted"})
+
+
+def cmd_coverage(ctx, args) -> Result:
+    from ..coverage_report import CoverageReporter
+    report = CoverageReporter(ctx.workspace()).from_session_id(
+        args.session_id)
+    if getattr(args, "as_markdown", False):
+        return Result(command="report coverage",
+                      data={"markdown": CoverageReporter.markdown(report)},
+                      human=lambda d: d["markdown"])
+    return Result(command="report coverage", data=report)
+
+
+def cmd_coverage_compare(ctx, args) -> Result:
+    from ..coverage_report import CoverageReporter
+    reporter = CoverageReporter(ctx.workspace())
+    base = reporter.from_session_id(args.base_session_id)
+    head = reporter.from_session_id(args.head_session_id)
+    comparison = CoverageReporter.compare(base, head)
+    verdict = ("growth" if comparison["delta"] > 0 else
+               "regression" if comparison["delta"] < 0 else "flat")
+    return Result(command="report coverage-compare",
+                  data=comparison,
+                  messages=[f"coverage {verdict}: "
+                            f"{comparison['base_unique']} -> "
+                            f"{comparison['head_unique']} features"])
+
+
+def cmd_reachability(ctx, args) -> Result:
+    import json as _json
+    from ..coverage_report import CoverageReporter
+    from ..errors import ValidationError
+    try:
+        inventory = _json.loads(Path(args.inventory).read_text("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValidationError(f"cannot read inventory: {exc}") from exc
+    if not isinstance(inventory, list) or \
+            not all(isinstance(item, str) for item in inventory):
+        raise ValidationError("inventory must be a JSON array of strings")
+    report = CoverageReporter(ctx.workspace()).from_session_id(args.session_id)
+    analysis = CoverageReporter.reachability(report, inventory)
+    return Result(command="report reachability", data=analysis)
