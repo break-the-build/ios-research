@@ -59,6 +59,12 @@ from .bluetooth import BLUETOOTH_TARGETS  # noqa: E402
 for _tid, _cls in BLUETOOTH_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
 
+# Mock Wi-Fi management-frame parser targets (mock = True). CI-safe by
+# construction: they parse bytes only and never touch a Wi-Fi radio.
+from .wifi import WIFI_TARGETS  # noqa: E402
+for _tid, _cls in WIFI_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
 # Real macOS in-process fuzzing targets (mock = False). Opt-in: they require a
 # built native libFuzzer/ASan harness and are skipped in CI. Registering the
 # factory is cheap and does not require the harness to be present.
