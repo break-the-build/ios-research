@@ -202,6 +202,18 @@ def test_device_target_is_not_mock():
     assert t.describe()["available"] is False   # no device in CI
 
 
+def test_known_imageio_surface_pins_its_expected_process():
+    t = IosDeviceTarget("imageio", backend=FakeBackend())
+    assert t.expected_process == "MediaPlaybackd"
+    assert t.describe()["expected_process"] == "MediaPlaybackd"
+
+
+def test_generic_file_surface_exposes_ambiguous_matching_warning():
+    d = IosDeviceTarget("file", backend=FakeBackend()).describe()
+    assert d["expected_process"] == "(any)"
+    assert "inconclusive" in d["matching_warning"]
+
+
 def test_unknown_surface_raises():
     from ios_research.errors import NotFoundError
     with pytest.raises(NotFoundError):
@@ -334,6 +346,17 @@ def test_newest_report_is_ranked_by_parsed_timestamp_not_identifier():
     res = _target(backend, surface="file", process="Target").execute(b"d")
     assert res.outcome == Outcome.CRASH
     assert res.diagnostics.thread["report"] == newer[0]
+
+
+def test_multiple_unpinned_reports_are_an_explicit_blocker_not_a_crash():
+    reports = [
+        ("a.ips", _json_ips(proc="A")),
+        ("b.ips", _json_ips(proc="B")),
+    ]
+    res = _target(FakeBackend(new_report=reports), surface="file").execute(b"d")
+    assert res.outcome == Outcome.ABNORMAL
+    assert res.diagnostics is None
+    assert "attribution is inconclusive" in res.detail
 
 
 def test_crash_routes_through_ips_parser_module_tag():
