@@ -17,6 +17,12 @@ issues, differential testing, and producing responsible-disclosure reports.
   (`detect` commands; analytical scanning of samples the researcher supplies)
 - Patch-regression validation of already-public CVEs in an authorized lab
   (`cve` commands; published inputs re-run against registered targets only)
+- Paired-run differential classification across researcher-declared
+  standard/Lockdown configurations (`lockdown` commands; observations over
+  registered targets, with timeouts kept explicitly inconclusive)
+- macOS reward-category verification oracles (`oracle mac` commands; pure
+  classifiers over evidence records the researcher supplies — they never
+  assert a bypass or perform privileged operations)
 
 ## Forbidden capabilities (never implemented)
 
@@ -54,6 +60,11 @@ The forbidden list is load-bearing. To keep it that way:
   perform them silently.
 - Logs redact common secret-bearing keys (tokens, passwords, credentials).
 - All shipped targets are **mock** targets safe to run in CI.
+- **Mutator plugins and generated-harness proposals are trusted input.**
+  Loading a grammar plugin (`fuzz start --mutator-plugin`) executes its Python;
+  smoke-running a harness candidate executes it in an isolated child process.
+  Only point the framework at code you wrote or reviewed. Fuzz sessions record
+  the plugin file's SHA-256 alongside its path so runs stay auditable.
 
 ## Reporting
 

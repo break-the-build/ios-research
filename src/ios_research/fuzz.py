@@ -13,6 +13,7 @@ separately. It never generates exploit payloads.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
@@ -27,7 +28,7 @@ from .errors import NotFoundError, StateError
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
-from .workspace import Workspace
+from .workspace import Workspace, validate_component
 
 DEFAULT_BASE = b"MOCK" + bytes([1, 1]) + (2).to_bytes(2, "big") + b"ok"
 
@@ -88,6 +89,7 @@ class FuzzSession:
     sanitizer_profile: str = ""
     cases_since_new_feature: int = 0
     mutator_plugin_path: str = ""
+    mutator_plugin_sha256: str = ""
     grammar_uses: int = 0
     max_input_bytes: int = 0
     skipped_oversize: int = 0
@@ -127,6 +129,7 @@ class FuzzSession:
             "sanitizer_profile": self.sanitizer_profile,
             "mutator_plugin": {
                 "path": self.mutator_plugin_path,
+                "sha256": self.mutator_plugin_sha256,
                 "grammar_uses": self.grammar_uses,
             },
             "max_input_bytes": self.max_input_bytes,
@@ -152,6 +155,7 @@ class FuzzEngine:
         self.ws.write_json(self._rel(session.id), session.to_dict())
 
     def get(self, session_id: str) -> FuzzSession:
+        validate_component(session_id, what="fuzz session id")
         rel = self._rel(session_id)
         if not self.ws.path(rel).exists():
             raise NotFoundError(f"fuzz session '{session_id}' not found")
@@ -212,6 +216,17 @@ class FuzzEngine:
                     f"{check['reason']}",
                     details={"profile": sanitizer_profile})
             profile = sanitizer_profile
+        # Plugin provenance: record the file hash so runs are auditable.
+        # Loading a plugin executes its Python (user-declared, trusted input).
+        plugin_sha = ""
+        plugin_file = Path(mutator_plugin_path) if mutator_plugin_path \
+            else None
+        if plugin_file is not None and plugin_file.is_file():
+            plugin_sha = sha256_bytes(plugin_file.read_bytes())
+        elif plugin_file is not None:
+            raise StateError(
+                f"mutator plugin path does not exist: {mutator_plugin_path}",
+                details={"path": str(mutator_plugin_path)})
         session = FuzzSession(
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
@@ -225,6 +240,7 @@ class FuzzEngine:
             value_profile=bool(value_profile),
             sanitizer_profile=profile,
             mutator_plugin_path=str(mutator_plugin_path or ""),
+            mutator_plugin_sha256=plugin_sha,
             max_input_bytes=(DEFAULT_MAX_INPUT_BYTES if max_input_bytes is None
                              else max(0, int(max_input_bytes))),
         )

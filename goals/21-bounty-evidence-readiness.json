@@ -1,0 +1,34 @@
+{
+  "id": "iosr-bounty-evidence-readiness-v1",
+  "objective": "Maximize submission-ready evidence completeness for responsible-disclosure packs (Apple Security Bounty workflow) without losing export determinism",
+  "environment": "ios_research_bounty_readiness",
+  "primary_metric": "validation_pass_rate",
+  "metrics": [
+    {"name": "validation_pass_rate", "direction": "maximize", "unit": "ratio", "description": "Share of report bounty-validate checks passing before export."},
+    {"name": "missing_checks", "direction": "minimize", "unit": "count"},
+    {"name": "export_determinism", "direction": "maximize", "unit": "ratio", "description": "1.0 when repeated exports produce identical evidence packs."},
+    {"name": "pack_artifacts", "direction": "maximize", "unit": "count"},
+    {"name": "evidence_pipeline_seconds", "direction": "minimize", "unit": "seconds"}
+  ],
+  "constraints": [
+    {
+      "metric": "export_determinism",
+      "op": ">=",
+      "value": 1.0,
+      "hard": true,
+      "description": "Evidence exports must be byte-deterministic in every arm"
+    }
+  ],
+  "safety_rules": [
+    "max-knobs:4",
+    "promotion-requires-holdout-validation",
+    "no-bounty-eligibility-claim-from-readiness-metrics"
+  ],
+  "budget": {
+    "max_experiments_per_batch": 8,
+    "max_parallel": 8,
+    "max_experiments_total": 60,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 20.0
+  }
+}

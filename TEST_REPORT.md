@@ -1,11 +1,12 @@
 # Test Report
 
-Generated during phase 10 (final audit).
+Generated during phase 10 (final audit); refreshed after the security-hardening
+and detection/CVE change sets.
 
 ## Summary
 
-- **Result:** 355 passed, 1 skipped (as of the hardening/detection/CVE change set)
-- **Coverage:** 92% across `ios_research`
+- **Result:** 796 passed, 1 skipped
+- **Coverage:** ~89% across `ios_research` (52 test modules)
 - **Runner:** `pytest` (Python 3.14), deterministic via a frozen clock
 - **Command:** `pytest --cov=ios_research --cov-report=term-missing`
 
@@ -32,6 +33,12 @@ Generated during phase 10 (final audit).
 | `test_edge_paths.py` | context/report/fuzz error-handling and control-transition edge paths |
 | `test_detection.py` | YARA-style detection engine, built-in signature rules, detect CLI |
 | `test_cvereg.py` | CVE registry CRUD, deterministic validation pass/fail/skip, cve CLI |
+| `test_workspace_containment.py` | path-containment guard, id validation, symlink escape rejection |
+| `test_harness_isolation.py` | generated-harness candidates run in an isolated child process |
+
+*(The table above lists the original phase suites; the repo now carries 52
+test modules covering every command group and target family — run
+`pytest --collect-only -q | tail -1` for the live count.)*
 
 ## Test types
 

@@ -8,8 +8,11 @@ campaigns stay reproducible without network access or model calls. A
 an LLM) as JSON, keeping the same validation and audit trail.
 
 Safety: generated code is validated structurally and by ``compile()`` always;
-it is *executed* only when an explicit ``--smoke`` opt-in is supplied, and only
-against the framework's own registered targets.
+it is *executed* only when an explicit ``--smoke`` opt-in is supplied, only
+against the framework's own registered targets, and always inside a disposable
+child process (``ios_research.harness_runner``) so an untrusted candidate
+cannot corrupt or crash the framework process. Child isolation reduces blast
+radius but is not a sandbox; proposals are trusted-input artifacts (SECURITY.md).
 """
 
 from __future__ import annotations
@@ -155,23 +158,58 @@ def validate_code(code: str) -> dict[str, Any]:
     return {"ok": not problems, "problems": problems}
 
 
-def smoke_run(code: str, target_id: str) -> dict[str, Any]:
-    """Execute the driver once against a seed input of its own target."""
-    from .targets.base import Outcome
-    namespace: dict[str, Any] = {"__name": "generated_harness"}
+def smoke_run(code: str, target_id: str, *,
+              timeout_s: float = 15.0) -> dict[str, Any]:
+    """Execute the driver once against a seed input of its own target.
+
+    Generated code is untrusted, so it runs in a disposable child process
+    (``ios_research.harness_runner``) instead of this process: a crashing,
+    exiting, or state-corrupting candidate cannot take the framework down.
+    The child still runs with the researcher's privileges — isolation is not
+    a sandbox (see SECURITY.md).
+    """
+    import os
+    import subprocess
+    import sys
+
+    request = json.dumps({"code": code, "target_id": target_id})
+    env = dict(os.environ)
+    pkg_root = str(__import__("pathlib").Path(
+        __file__).resolve().parent.parent)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [pkg_root] + ([env["PYTHONPATH"]]
+                      if env.get("PYTHONPATH") else [])).lstrip(os.pathsep)
     try:
-        exec(compile(code, "<generated-harness>", "exec"), namespace)  # noqa: S102
-        driver = namespace.get("fuzz")
-        if not callable(driver):
-            return {"ok": False, "error": "no callable 'fuzz' after execution"}
-        target = targets.create(target_id)
-        seeds = target.seeds()
-        sample = seeds[0] if seeds else b"MOCK\x01\x01\x00\x02ok"
-        outcome = driver(sample)
-        ok = outcome in Outcome.ALL
-        return {"ok": ok, "outcome": outcome}
-    except Exception as exc:  # defensive: generated code is untrusted
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        proc = subprocess.run(
+            [sys.executable, "-m", "ios_research.harness_runner"],
+            input=request.encode("utf-8"),
+            capture_output=True, timeout=timeout_s, env=env)
+    except subprocess.TimeoutExpired:
+        return {"ok": False,
+                "error": f"smoke run exceeded {timeout_s:g}s and was killed"}
+    except OSError as exc:
+        return {"ok": False, "error": f"could not spawn runner: {exc}"}
+
+    if proc.returncode != 0:
+        detail = f"exit code {proc.returncode}"
+        if proc.stderr:
+            tail = proc.stderr.decode("utf-8", "replace").strip()[-200:]
+            detail = f"{detail}: {tail}" if tail else detail
+        return {"ok": False, "error": f"runner terminated ({detail})"}
+    # Only trust a JSON object emitted by the runner; generated code may have
+    # printed arbitrary bytes before it, including on the same line.
+    stdout = proc.stdout.decode("utf-8", "replace")[-65536:]
+    start = stdout.rfind("{")
+    while start >= 0:
+        try:
+            verdict = json.loads(stdout[start:])
+        except json.JSONDecodeError:
+            start = stdout.rfind("{", 0, start)
+            continue
+        if isinstance(verdict, dict) and {"ok"} <= set(verdict):
+            return verdict
+        start = stdout.rfind("{", 0, start)
+    return {"ok": False, "error": "runner produced no parsable verdict"}
 
 
 # --- store -------------------------------------------------------------------

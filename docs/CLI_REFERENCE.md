@@ -32,6 +32,32 @@ Every command supports `--json` and returns:
 
 ## Commands
 
+
+### `ios-research advisory`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research advisory import`
+
+Positional arguments:
+
+- `path` (required)
+
+### `ios-research advisory list`
+
+### `ios-research advisory match`
+
+Positional arguments:
+
+- `crash_id` (required)
+
+### `ios-research advisory scan`
+
+Options:
+
+- `--experiment-id`
 ### `ios-research agent`
 
 ### `ios-research agent analyze`
@@ -82,6 +108,37 @@ Options:
 
 - `--batch` — analyze all crashes (default when no id is given)
 
+
+### `ios-research beta`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research beta diff`
+
+Options:
+
+- `--release-a`
+- `--release-b`
+
+### `ios-research beta list`
+
+### `ios-research beta show`
+
+Positional arguments:
+
+- `diff_id` (required)
+
+### `ios-research beta tag`
+
+Positional arguments:
+
+- `diff_id` (required)
+
+Options:
+
+- `--corpus`
 ### `ios-research config`
 
 ### `ios-research config get`
@@ -180,6 +237,74 @@ Positional arguments:
 
 - `crash_id` (required)
 
+
+### `ios-research cve`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research cve add`
+
+Positional arguments:
+
+- `cve_id` (required)
+
+Options:
+
+- `--title`
+- `--input-hex`
+- `--input-file`
+- `--vulnerable`
+- `--fixed`
+- `--reference`
+- `--note`
+
+### `ios-research cve catalog`
+
+### `ios-research cve install-catalog`
+
+### `ios-research cve list`
+
+### `ios-research cve remove`
+
+Positional arguments:
+
+- `cve_id` (required)
+
+### `ios-research cve validate`
+
+Positional arguments:
+
+- `cve_id` (optional)
+
+### `ios-research detect`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research detect lint`
+
+Options:
+
+- `--rules`
+
+### `ios-research detect list-rules`
+
+Options:
+
+- `--rules`
+
+### `ios-research detect scan`
+
+Positional arguments:
+
+- `path` (required)
+
+Options:
+
+- `--rules`
 ### `ios-research device`
 
 ### `ios-research device list`
@@ -224,6 +349,24 @@ Positional arguments:
 
 ### `ios-research doctor`
 
+
+### `ios-research engine`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research engine import`
+
+Positional arguments:
+
+- `manifest` (required)
+
+Options:
+
+- `--experiment-id`
+
+### `ios-research engine list`
 ### `ios-research experiment`
 
 ### `ios-research experiment create`
@@ -391,6 +534,7 @@ Positional arguments:
 
 - `candidate_id` (required)
 
+<<<<<<< HEAD
 ### `ios-research kernel`
 
 ### `ios-research kernel msg-build`
@@ -415,6 +559,85 @@ Positional arguments:
 
 ### `ios-research kernel surface`
 
+=======
+
+### `ios-research matrix`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research matrix create`
+
+Options:
+
+- `--target`
+- `--input`
+- `--trials`
+- `--seed`
+- `--cells`
+
+### `ios-research matrix list`
+
+### `ios-research matrix run`
+
+Positional arguments:
+
+- `matrix_id` (required)
+
+### `ios-research matrix show`
+
+Positional arguments:
+
+- `matrix_id` (required)
+
+### `ios-research net`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research net deliver`
+
+Options:
+
+- `--target`
+- `--input`
+- `--schedule`
+
+### `ios-research net replay`
+
+Options:
+
+- `--target`
+- `--input`
+- `--schedule`
+- `--capture`
+
+### `ios-research oracle`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research oracle list`
+
+### `ios-research oracle run`
+
+Positional arguments:
+
+- `spec` (required)
+
+Options:
+
+- `--corpus`
+
+### `ios-research oracle show`
+
+Positional arguments:
+
+- `run_id` (required)
+>>>>>>> origin/main
 ### `ios-research report`
 
 ### `ios-research report bounty-export`
@@ -544,6 +767,35 @@ Positional arguments:
 
 - `report_id` (required)
 
+
+### `ios-research surface`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research surface ingest`
+
+Positional arguments:
+
+- `path` (required)
+
+### `ios-research surface list`
+
+### `ios-research surface plan`
+
+Options:
+
+- `--inventory`
+- `--previous-plan`
+- `--novelty-yield`
+- `--saturation-penalty`
+
+### `ios-research surface show`
+
+Positional arguments:
+
+- `plan_id` (required)
 ### `ios-research target`
 
 ### `ios-research target audio`
@@ -564,4 +816,18 @@ Positional arguments:
 
 - `target_id` (required)
 
+
+### `ios-research targetflags`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research targetflags list`
+
+### `ios-research targetflags show`
+
+Positional arguments:
+
+- `flag_id` (required)
 ### `ios-research version`

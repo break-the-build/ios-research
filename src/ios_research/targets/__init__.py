@@ -122,3 +122,75 @@ __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",
 ]
+
+# Mock IP-stack input-path parser targets (mock = True). CI-safe by construction:
+# bytes-only parsing; no sockets or network access.
+from .netip import NETIP_TARGETS  # noqa: E402
+for _tid, _cls in NETIP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock Wi-Fi Aware frame-parser targets (mock = True). CI-safe by construction:
+# bytes-only parsing; no RF transmission or association.
+from .wifiaware import WIFIAWARE_TARGETS  # noqa: E402
+for _tid, _cls in WIFIAWARE_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock PQ3-style ratchet transcript targets (mock = True). Synthetic transcripts only;
+# no decryption or third-party traffic analysis.
+from .pq3 import PQ3_TARGETS  # noqa: E402
+for _tid, _cls in PQ3_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock Continuity beacon record targets (mock = True). Synthetic records only;
+# no tracking of third-party devices, no real-radio advertising.
+from .continuity import CONTINUITY_TARGETS  # noqa: E402
+for _tid, _cls in CONTINUITY_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock trust-boundary payload-envelope targets (mock = True). Decode modeling only;
+# no permission/TCC mechanics; templates intended for authorized owned apps.
+from .ipc import IPC_TARGETS  # noqa: E402
+for _tid, _cls in IPC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock XPC/Mach message-schema targets (mock = True). Local chain-tail tooling;
+# v1 sends nothing to system daemons (offline schema harvest only).
+from .xpc import XPC_TARGETS  # noqa: E402
+for _tid, _cls in XPC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock document-importer targets (mock = True). Bytes-only parsing;
+# no quarantine/launch simulation.
+from .docimp import DOCIMP_TARGETS  # noqa: E402
+for _tid, _cls in DOCIMP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock signed-document targets (mock = True). Verify-only structural parsing
+# of synthetic documents; no key material, no signing oracle.
+from .signeddoc import SIGNEDDOC_TARGETS  # noqa: E402
+for _tid, _cls in SIGNEDDOC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock proximity application-protocol targets (mock = True). No real accessory
+# connections, no RF transmission; bytes-only parse modeling.
+from .proxapp import PROXAPP_TARGETS  # noqa: E402
+for _tid, _cls in PROXAPP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock filesystem-client parser targets (mock = True). Bytes-only;
+# loopback templates only; nothing mounts against unowned hosts.
+from .fsclient import FSCLIENT_TARGETS  # noqa: E402
+for _tid, _cls in FSCLIENT_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock geodata/workout importer targets (mock = True). Synthetic coordinates;
+# parses bytes only; tracks no person or device.
+from .geo import GEO_TARGETS  # noqa: E402
+for _tid, _cls in GEO_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock lockscreen voice-assistant record targets (mock = True). Text/intent
+# records only; never activates microphone or audio capture (SECURITY.md).
+from .voiceassist import VOICEASSIST_TARGETS  # noqa: E402
+for _tid, _cls in VOICEASSIST_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
