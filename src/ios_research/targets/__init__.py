@@ -153,3 +153,9 @@ for _tid, _cls in IPC_TARGETS.items():
 from .xpc import XPC_TARGETS  # noqa: E402
 for _tid, _cls in XPC_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock document-importer targets (mock = True). Bytes-only parsing;
+# no quarantine/launch simulation.
+from .docimp import DOCIMP_TARGETS  # noqa: E402
+for _tid, _cls in DOCIMP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
