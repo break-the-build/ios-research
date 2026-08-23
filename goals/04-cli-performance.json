@@ -1,4 +1,5 @@
 {
+  "id": "iosr-cli-performance-gate-v1",
   "objective": "Reduce ios-research CLI latency and resource consumption without reducing correctness",
   "environment": "ios_research_cli",
   "primary_metric": "p95_command_latency_ms",

@@ -1,4 +1,5 @@
 {
+  "id": "iosr-device-matching-v1",
   "objective": "Maximize the black-box on-device target's ability to correctly attribute a harvested .ips crash report to the input that triggered it, on a busy device (issue #11)",
   "environment": "ios_research_device_matching",
   "primary_metric": "attribution_accuracy",

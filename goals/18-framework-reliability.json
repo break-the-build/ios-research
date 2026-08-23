@@ -1,4 +1,5 @@
 {
+  "id": "iosr-framework-reliability-v1",
   "objective": "Maximize end-to-end reliability of the ios-research framework",
   "environment": "ios_research",
   "primary_metric": "end_to_end_success_rate",

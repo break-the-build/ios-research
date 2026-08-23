@@ -5,6 +5,12 @@ can autonomously optimize real framework behavior. Each environment implements
 `run(config, samples, seed) -> Observation` and exposes the metrics declared by
 its goal in [`goals/`](../../goals).
 
+Read the [goal portfolio policy](../../goals/README.md) before interpreting a
+result. The current environments are deterministic simulations or local quality
+gates unless the policy explicitly classifies them as authorized-target
+validation; simulator results must not be reported as real-device performance,
+operational cost, or verified vulnerability findings.
+
 ## Usage
 
 ```bash

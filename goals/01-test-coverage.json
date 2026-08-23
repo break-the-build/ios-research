@@ -1,4 +1,5 @@
 {
+  "id": "iosr-test-coverage-gate-v1",
   "objective": "Increase meaningful automated test coverage of ios-research without reducing test reliability",
   "environment": "ios_research_test_suite",
   "primary_metric": "coverage_percent",

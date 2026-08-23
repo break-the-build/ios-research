@@ -1,9 +1,10 @@
 {
-  "objective": "Improve fuzzing corpus diversity and discovery efficiency",
+  "id": "iosr-corpus-quality-simulator-v1",
+  "objective": "Improve mock-target corpus behavior diversity and discovery efficiency",
   "environment": "ios_research_corpus",
   "primary_metric": "coverage_per_input",
   "metrics": [
-    {"name": "coverage_per_input", "direction": "maximize", "unit": "coverage"},
+    {"name": "coverage_per_input", "direction": "maximize", "unit": "behavioral-proxy/input", "description": "Distinct mock outcome/signature behaviors; not instrumented coverage."},
     {"name": "corpus_diversity", "direction": "maximize", "unit": "ratio"},
     {"name": "unique_behavior_rate", "direction": "maximize", "unit": "ratio"},
     {"name": "corpus_size", "direction": "minimize", "unit": "inputs"}
@@ -17,7 +18,7 @@
       "description": "Corpus must remain manageable"
     }
   ],
-  "safety_rules": ["max-knobs:3"],
+  "safety_rules": ["max-knobs:3", "promotion-requires-holdout-validation", "no-coverage-claim-from-behavioral-proxy"],
   "budget": {
     "max_experiments_per_batch": 6,
     "max_parallel": 4,

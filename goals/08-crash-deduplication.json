@@ -1,4 +1,5 @@
 {
+  "id": "iosr-crash-deduplication-simulator-v1",
   "objective": "Maximize accurate crash deduplication while minimizing false merges and false splits",
   "environment": "ios_research_crash_analysis",
   "primary_metric": "deduplication_f1",

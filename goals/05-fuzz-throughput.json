@@ -1,4 +1,5 @@
 {
+  "id": "iosr-fuzz-throughput-inner-v1",
   "objective": "Increase useful fuzzing throughput of ios-research",
   "environment": "ios_research_fuzzer",
   "primary_metric": "executions_per_second",

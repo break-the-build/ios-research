@@ -1,4 +1,5 @@
 {
+  "id": "iosr-root-cause-analysis-simulator-v1",
   "objective": "Improve automated root-cause classification of reproducible ios-research crashes",
   "environment": "ios_research_crash_analysis",
   "primary_metric": "classification_accuracy",
