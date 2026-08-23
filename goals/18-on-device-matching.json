@@ -1,0 +1,28 @@
+{
+  "objective": "Maximize the black-box on-device target's ability to correctly attribute a harvested .ips crash report to the input that triggered it, on a busy device (issue #11)",
+  "environment": "ios_research_device_matching",
+  "primary_metric": "attribution_accuracy",
+  "metrics": [
+    {"name": "attribution_accuracy", "direction": "maximize", "unit": "ratio"},
+    {"name": "false_attribution_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "miss_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "match_latency_ms", "direction": "minimize", "unit": "ms"}
+  ],
+  "constraints": [
+    {
+      "metric": "false_attribution_rate",
+      "op": "<=",
+      "value": 0.05,
+      "hard": true,
+      "description": "A non-crashing input must not be recorded as a crash (no fabricated findings)"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 4,
+    "max_parallel": 2,
+    "max_experiments_total": 24,
+    "max_cost_usd": 20.0,
+    "max_cost_usd_per_batch": 5.0
+  }
+}
