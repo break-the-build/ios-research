@@ -54,6 +54,9 @@ def register(subparsers, parent) -> None:
                          help="named sanitizer build profile recorded as provenance (#31)")
     p_start.add_argument("--mutator-plugin", default=None, dest="mutator_plugin",
                          help="path to a grammar-aware mutator plugin (#41)")
+    p_start.add_argument("--max-input-bytes", type=int, default=None,
+                         help="skip mutated inputs larger than this many bytes "
+                              "(default 1048576; 0 disables the bound)")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -130,6 +133,9 @@ def cmd_start(ctx, args) -> Result:
 
     engine = FuzzEngine(ws)
     dictionary = getattr(args, "dictionary", None)
+    max_input_bytes = getattr(args, "max_input_bytes", None)
+    if max_input_bytes is None:
+        max_input_bytes = cfg.get("limits.max_input_bytes")
     session = engine.create(experiment_id=experiment.id, target=target_id,
                             corpus_id=corpus.id, seed=seed, workers=workers,
                             max_cases=max_cases, duration_s=args.duration,
@@ -140,7 +146,8 @@ def cmd_start(ctx, args) -> Result:
                             sanitizer_profile=getattr(
                                 args, "sanitizer_profile", None),
                             mutator_plugin_path=getattr(
-                                args, "mutator_plugin", None))
+                                args, "mutator_plugin", None),
+                            max_input_bytes=max_input_bytes)
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

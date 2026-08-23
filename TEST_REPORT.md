@@ -4,8 +4,8 @@ Generated during phase 10 (final audit).
 
 ## Summary
 
-- **Result:** 197 passed, 0 failed
-- **Branch coverage:** 95% (statements + branches) across `ios_research`
+- **Result:** 355 passed, 1 skipped (as of the hardening/detection/CVE change set)
+- **Coverage:** 92% across `ios_research`
 - **Runner:** `pytest` (Python 3.14), deterministic via a frozen clock
 - **Command:** `pytest --cov=ios_research --cov-report=term-missing`
 
@@ -30,6 +30,8 @@ Generated during phase 10 (final audit).
 | `test_command_handlers.py` | CLI handlers (corpus/audio/agent/research/diff/report/config) via `main` |
 | `test_logging_output.py` | structured logging levels/redaction/file output; `Result` renderer |
 | `test_edge_paths.py` | context/report/fuzz error-handling and control-transition edge paths |
+| `test_detection.py` | YARA-style detection engine, built-in signature rules, detect CLI |
+| `test_cvereg.py` | CVE registry CRUD, deterministic validation pass/fail/skip, cve CLI |
 
 ## Test types
 

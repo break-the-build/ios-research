@@ -31,10 +31,30 @@ from .workspace import Workspace
 
 DEFAULT_BASE = b"MOCK" + bytes([1, 1]) + (2).to_bytes(2, "big") + b"ok"
 
+# Hardening bound: mutated inputs larger than this are skipped (counted, never
+# executed) so a runaway duplication-style mutation cannot exhaust memory on a
+# real harness. Sessions persist the value, so resume behavior is identical.
+DEFAULT_MAX_INPUT_BYTES = 1_048_576
+
 RUNNING = "running"
 PAUSED = "paused"
 STOPPED = "stopped"
 COMPLETED = "completed"
+
+
+def _session_from_dict(data: dict) -> "FuzzSession":
+    """Build a session from persisted JSON with a stable error on drift.
+
+    A raw ``FuzzSession(**data)`` would surface schema drift or a corrupted
+    record as ``TypeError``; raise :class:`StateError` instead so agents get a
+    stable exit code and an actionable message.
+    """
+    try:
+        return FuzzSession(**data)
+    except TypeError:
+        raise StateError(
+            "fuzz session record is corrupt or from an incompatible version",
+            details={"keys": sorted(data)}) from None
 
 
 @dataclass
@@ -69,6 +89,8 @@ class FuzzSession:
     cases_since_new_feature: int = 0
     mutator_plugin_path: str = ""
     grammar_uses: int = 0
+    max_input_bytes: int = 0
+    skipped_oversize: int = 0
     started_at: str = ""
     updated_at: str = ""
 
@@ -107,6 +129,8 @@ class FuzzSession:
                 "path": self.mutator_plugin_path,
                 "grammar_uses": self.grammar_uses,
             },
+            "max_input_bytes": self.max_input_bytes,
+            "skipped_oversize": self.skipped_oversize,
         }
 
 
@@ -131,7 +155,7 @@ class FuzzEngine:
         rel = self._rel(session_id)
         if not self.ws.path(rel).exists():
             raise NotFoundError(f"fuzz session '{session_id}' not found")
-        return FuzzSession(**self.ws.read_json(rel))
+        return _session_from_dict(self.ws.read_json(rel))
 
     def tokens_for(self, session: FuzzSession) -> list[DictionaryToken] | None:
         """Load the persisted dictionary for a session, if it has one."""
@@ -142,7 +166,7 @@ class FuzzEngine:
         return tokens_from_records(records) or None
 
     def list(self) -> list[FuzzSession]:
-        return [FuzzSession(**d) for d in self.ws.list_json("fuzz")]
+        return [_session_from_dict(d) for d in self.ws.list_json("fuzz")]
 
     def latest(self) -> FuzzSession | None:
         sessions = self.list()
@@ -159,7 +183,8 @@ class FuzzEngine:
                dictionary_tokens: list[DictionaryToken] | None = None,
                value_profile: bool = False,
                sanitizer_profile: str | None = None,
-               mutator_plugin_path: str | None = None) -> FuzzSession:
+               mutator_plugin_path: str | None = None,
+               max_input_bytes: int | None = None) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -200,6 +225,8 @@ class FuzzEngine:
             value_profile=bool(value_profile),
             sanitizer_profile=profile,
             mutator_plugin_path=str(mutator_plugin_path or ""),
+            max_input_bytes=(DEFAULT_MAX_INPUT_BYTES if max_input_bytes is None
+                             else max(0, int(max_input_bytes))),
         )
         if tokens:
             self.ws.write_json(self._dict_rel(session.id), {
@@ -311,6 +338,15 @@ class FuzzEngine:
                     strategies=pool, tokens=tokens)
             if strategy.startswith("dict_"):
                 session.token_uses += 1
+            if session.max_input_bytes and \
+                    len(mutated) > session.max_input_bytes:
+                # Hardening bound: never hand an oversized input to a target.
+                # Skipping (rather than truncating) keeps executed inputs
+                # byte-identical to an uncapped run's same-index executions.
+                session.skipped_oversize += 1
+                session.cursor += 1
+                executed_this += 1
+                continue
             result = target.execute(mutated)
             session.outcomes[result.outcome] = \
                 session.outcomes.get(result.outcome, 0) + 1

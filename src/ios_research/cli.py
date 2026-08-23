@@ -22,10 +22,11 @@ from .output import Result, render
 from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
     corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, wifi_cmd, nfc_cmd,
+    messaging_cmd, lockeddevice_cmd,
     crash_cmd, analyze_cmd, diff_cmd, report_cmd, research_cmd, matrix_cmd,
     harness_cmd, spoints_cmd, findings_cmd, surface_cmd, targetflags_cmd,
     advisory_cmd, engine_cmd, beta_cmd, agent_cmd,
-    net_cmd, kernel_cmd,
+    net_cmd, kernel_cmd, oracle_cmd, detect_cmd, cve_cmd, lockdown_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -36,6 +37,8 @@ _REGISTRARS: list[Callable] = [
     bluetooth_cmd.register,   # must precede target_cmd (installs 'target bluetooth')
     wifi_cmd.register,        # must precede target_cmd (installs 'target wifi')
     nfc_cmd.register,         # must precede target_cmd (installs 'target nfc')
+    messaging_cmd.register,   # must precede target_cmd (installs 'target messaging')
+    lockeddevice_cmd.register,  # must precede target_cmd (installs 'target lockeddevice')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,
@@ -50,13 +53,17 @@ _REGISTRARS: list[Callable] = [
     report_cmd.register,
     research_cmd.register,
     matrix_cmd.register,
+    detect_cmd.register,
+    cve_cmd.register,
     engine_cmd.register,
+    oracle_cmd.register,
     agent_cmd.register,
     targetflags_cmd.register,
     advisory_cmd.register,
     surface_cmd.register,
     beta_cmd.register,
     net_cmd.register,
+    lockdown_cmd.register,
 ]
 
 
