@@ -29,9 +29,19 @@ pipeline already consumes. No iPhone required.
 
 ## Requirements (opt-in; CI stays mock-only)
 
-- macOS with a **full Xcode** toolchain (the fuzzer runtime,
-  `libclang_rt.fuzzer_osx.a`, is **not** in the Command Line Tools clang).
-- `xcode-select -s /Applications/Xcode.app/Contents/Developer` if needed.
+Two build modes (see below). The **default driver mode** needs only ASan/UBSan,
+which the Apple toolchain provides — but note:
+
+- The **Command Line Tools** clang's ASan runtime CHECK-fails
+  (`asan_init_is_running`) when the harness `dlopen`s a system framework. Use a
+  **full Xcode** clang (or Homebrew LLVM). `build.sh` auto-selects the active
+  toolchain's clang via `xcrun` and warns when Command Line Tools is active:
+  ```bash
+  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+  ```
+- **libFuzzer mode** additionally requires `libclang_rt.fuzzer_osx.a`, which
+  **Apple ships in neither the Command Line Tools nor full Xcode**. Install an
+  open-source LLVM for it: `brew install llvm`.
 
 The `mac:<framework>` factories are always registered (cheap), but a target is
 only `available` once its harness binary is built. CI never builds or runs them.
@@ -39,9 +49,12 @@ only `available` once its harness binary is built. CI never builds or runs them.
 ## Build the harness
 
 ```bash
-# one framework, or "all"
+# default: standalone ASan/UBSan driver — works on the stock Apple (Xcode) clang
 tools/harness/build.sh imageio
 tools/harness/build.sh all
+
+# libFuzzer mode (needs a fuzzer-capable clang, e.g. Homebrew LLVM)
+CC=$(brew --prefix llvm)/bin/clang tools/harness/build.sh --libfuzzer imageio
 ```
 
 Output: `tools/harness/build/<framework>_fuzzer`. The target auto-discovers that
@@ -59,30 +72,60 @@ Available framework keys and their entry points:
 | `mac:audiotoolbox`  | AudioToolbox   | `AudioFileOpenWithCallbacks`       |
 | `mac:coregraphics`  | CoreGraphics   | `CGDataProviderCreateWithCFData`   |
 
-## Run it through the pipeline
+### Build modes
+
+| mode | flags | main() | toolchain |
+|------|-------|--------|-----------|
+| `--driver` (default) | `-fsanitize=address,undefined -DHARNESS_STANDALONE` | built into the harness | stock Apple (full-Xcode) clang |
+| `--libfuzzer` | `-fsanitize=fuzzer,address,undefined` | supplied by libFuzzer | LLVM/clang with the fuzzer runtime |
+
+The standalone driver accepts **one or more** input files and speaks a tiny
+stdout protocol (`RUN <i>` / `DONE <i> decoded|rejected`) so the Python target
+can recover per-input outcome and attribute a crash within a batch.
+
+## Run it
+
+### Campaign runner (recommended)
 
 ```bash
-ios-research target list                         # mac:* show available=true once built
+python tools/mac_campaign/run.py --target mac:imageio --cases 2000 --batch 100 \
+    --report /tmp/campaign.json --save-crashes /tmp/crashes
+```
+
+The runner seeds a corpus from the target's format-aware seeds, mutates with the
+shared engine, drives inputs in **batches** (one process for many inputs — ~80×
+faster than one-process-per-input), and summarizes real crashes. It is a
+real-signal *campaign*, deliberately **not** an experiment-loop environment (see
+below).
+
+### Through the CLI pipeline
+
+```bash
+ios-research target show mac:imageio               # available=true once built
 ios-research fuzz start --target mac:imageio --corpus <dir>
-ios-research crash list
-ios-research crash reproduce <crash-id>          # re-trigger the real crash
-ios-research crash minimize <crash-id>           # ddmin, signature preserved
-ios-research crash analyze <crash-id>            # exploitability on a real address
+ios-research crash reproduce <crash-id>            # re-trigger the real crash
+ios-research crash minimize <crash-id>             # ddmin, signature preserved
+ios-research crash analyze <crash-id>              # exploitability on a real address
 ```
 
 ## How the target maps outcomes
 
-`MacFuzzTarget._run(data)` writes the input to a temp file, runs
-`<harness> <file>` (libFuzzer runs a single input to completion when given a file
-argument), and maps the result:
+`MacFuzzTarget` runs `<harness> <file>` (single) or `<harness> <file> …` (batch)
+and maps the result:
 
-| harness result                                   | `Outcome`  |
-|--------------------------------------------------|------------|
-| exit `0`                                         | `ACCEPTED` |
+| harness result                                     | `Outcome`  |
+|----------------------------------------------------|------------|
+| exit `0`, stdout `DONE <i> decoded`                | `ACCEPTED` |
+| exit `0`, stdout `DONE <i> rejected`               | `REJECTED` |
+| exit `0`, no per-input marker (libFuzzer build)    | `ACCEPTED` |
 | non-zero **with** a recognizable ASan/UBSan report | `CRASH` (+ normalized `Diagnostics`) |
-| non-zero **without** a report                    | `ABNORMAL` |
-| exceeds the time budget                          | `TIMEOUT`  |
-| harness not built / not found                    | `ABNORMAL` (with a build hint) |
+| non-zero **without** a report                      | `ABNORMAL` |
+| exceeds the time budget                            | `TIMEOUT`  |
+| harness not built / not found                      | `ABNORMAL` (with a build hint) |
+
+The `decoded` vs `rejected` distinction matters: on a decode target most
+malformed inputs are *rejected* by the framework (entry point returns `NULL`),
+not decoded — collapsing both to `ACCEPTED` would erase useful corpus signal.
 
 `ASAN_OPTIONS=abort_on_error=0:exitcode=99:detect_leaks=0` keeps a full report on
 stderr for parsing. The parser (`targets/asan.py`) is defensive: symbolication
@@ -90,6 +133,24 @@ varies by OS build, so every field is optional and an unrecognized report still
 yields a usable `Diagnostics` with a stable `asan_…` signature keyed on the
 classification and top frames (so dedup groups matching crashes despite jittering
 addresses).
+
+## Throughput
+
+The batch driver amortizes process spawn + `dlopen` over many inputs. Measured on
+`mac:imageio` (Xcode 26.6): **~16 exec/s** one-process-per-input vs **~1300
+exec/s** at `--batch 100` — roughly an 80× improvement. When a crash occurs
+mid-batch the target re-runs that batch input-by-input so each crash is precisely
+attributed.
+
+## Relationship to experiment-loop
+
+`tools/experiment_loop/` optimizes fuzzing *strategy knobs* against deterministic
+**mock** metrics — it climbs a knob→metric gradient. Native fuzzing has no honest
+such gradient (real crashes are non-deterministic), so there is intentionally
+**no `mac_*` experiment-loop environment** (that would violate the repo's
+"no gameable knobs" principle). Mac-fuzzing is instead a real-signal **campaign**
+run via `tools/mac_campaign/run.py`; a zero-crash run against a hardened
+framework is a legitimate negative result to record.
 
 ## Determinism
 

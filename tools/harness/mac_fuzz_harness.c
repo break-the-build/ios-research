@@ -17,6 +17,24 @@
  *   -DHARNESS_TARGET_AUDIOTOOLBOX   AudioToolbox / AudioFileOpenWithCallbacks
  *   -DHARNESS_TARGET_COREGRAPHICS   CoreGraphics / CGDataProviderCreateWithData
  *
+ * Two build modes (selected by build.sh):
+ *   default            -DHARNESS_STANDALONE + -fsanitize=address,undefined.
+ *                      A built-in main() reads one or more input files and
+ *                      drives them through LLVMFuzzerTestOneInput. This mode
+ *                      works on the STOCK APPLE TOOLCHAIN (Apple clang ships
+ *                      ASan/UBSan but NOT the libFuzzer runtime).
+ *   --libfuzzer        -fsanitize=fuzzer,address,undefined (no HARNESS_STANDALONE).
+ *                      libFuzzer supplies main(); requires an LLVM/clang that
+ *                      ships libclang_rt.fuzzer_osx.a (e.g. `brew install llvm`).
+ *
+ * The standalone driver speaks a tiny stdout protocol so the Python target can
+ * recover per-input outcome and attribute a crash within a batch:
+ *   "RUN <i>\n"                 emitted (and flushed) before input i is run
+ *   "DONE <i> decoded\n"        input i decoded to an object (ACCEPTED)
+ *   "DONE <i> rejected\n"       the entry point rejected input i (REJECTED)
+ * A crash aborts the process after its "RUN <i>" with no matching "DONE",
+ * pinpointing the offending input; the ASan report goes to stderr as usual.
+ *
  * We dlopen the framework and dlsym the entry point so the harness builds
  * without private framework headers and tolerates symbol availability across
  * OS builds.
@@ -78,12 +96,15 @@ static int resolve_target(void) {
     return p_CGImageSourceCreateWithData && p_CGImageSourceCreateImageAtIndex;
 }
 
-static void run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
+/* Returns 1 if the input decoded to an image, 0 if the framework rejected it. */
+static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     CGImageSourceRef src = p_CGImageSourceCreateWithData(cfdata, NULL);
-    if (!src) return;
+    if (!src) return 0;
     CGImageRef img = p_CGImageSourceCreateImageAtIndex(src, 0, NULL);
+    int decoded = img != NULL;
     if (img) p_CFRelease(img);
     p_CFRelease(src);
+    return decoded;
 }
 
 #elif defined(HARNESS_TARGET_COREGRAPHICS)
@@ -103,9 +124,11 @@ static int resolve_target(void) {
     return p_CGDataProviderCreateWithCFData && p_CGDataProviderRelease;
 }
 
-static void run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
+static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     CGDataProviderRef prov = p_CGDataProviderCreateWithCFData(cfdata);
-    if (prov) p_CGDataProviderRelease(prov);
+    if (!prov) return 0;
+    p_CGDataProviderRelease(prov);
+    return 1;
 }
 
 #elif defined(HARNESS_TARGET_AUDIOTOOLBOX)
@@ -155,13 +178,14 @@ static int resolve_target(void) {
     return p_AudioFileOpenWithCallbacks && p_AudioFileClose;
 }
 
-static void run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
+static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     (void)cfdata;
     MemFile mf = { data, size };
     AudioFileID af = NULL;
     OSStatus st = p_AudioFileOpenWithCallbacks(&mf, mem_read, NULL,
                                                mem_size, NULL, 0, &af);
-    if (st == 0 && af) p_AudioFileClose(af);
+    if (st == 0 && af) { p_AudioFileClose(af); return 1; }
+    return 0;
 }
 
 #else
@@ -169,6 +193,9 @@ static void run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
 #endif
 
 static int g_ready = 0;
+/* Decode status of the most recent LLVMFuzzerTestOneInput call:
+ * 1 = the entry point produced an object, 0 = it rejected the input. */
+int g_last_decoded = 0;
 
 int LLVMFuzzerInitialize(int *argc, char ***argv) {
     (void)argc; (void)argv;
@@ -182,10 +209,54 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    g_last_decoded = 0;
     if (!g_ready && !resolve_target()) return 0;
     CFDataRef cfdata = p_CFDataCreate(NULL, data, (CFIndex)size);
     if (!cfdata) return 0;
-    run_target(data, size, cfdata);
+    g_last_decoded = run_target(data, size, cfdata);
     p_CFRelease(cfdata);
     return 0;
 }
+
+#ifdef HARNESS_STANDALONE
+/*
+ * Standalone driver: builds on the stock Apple toolchain (no libFuzzer runtime
+ * required). Runs one or more input files through LLVMFuzzerTestOneInput and
+ * emits the stdout protocol documented at the top of this file. Batching many
+ * files into one process amortizes the dlopen + process-spawn cost.
+ */
+static int run_one_file(const char *path, int index) {
+    printf("RUN %d\n", index);
+    fflush(stdout);
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        printf("DONE %d rejected\n", index);
+        fflush(stdout);
+        return 0;
+    }
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    if (n < 0) n = 0;
+    fseek(f, 0, SEEK_SET);
+    uint8_t *buf = (uint8_t *)malloc((size_t)n ? (size_t)n : 1);
+    size_t rd = buf ? fread(buf, 1, (size_t)n, f) : 0;
+    fclose(f);
+    LLVMFuzzerTestOneInput(buf, rd);  /* may abort here on a sanitizer finding */
+    printf("DONE %d %s\n", index, g_last_decoded ? "decoded" : "rejected");
+    fflush(stdout);
+    free(buf);
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    LLVMFuzzerInitialize(&argc, &argv);
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <input-file> [<input-file> ...]\n", argv[0]);
+        return 2;
+    }
+    for (int i = 1; i < argc; i++) {
+        run_one_file(argv[i], i - 1);
+    }
+    return 0;
+}
+#endif /* HARNESS_STANDALONE */
