@@ -314,7 +314,8 @@ def test_lint_and_scan_agree_on_malformed_rules(workspace, tmp_path):
                       "--rules", str(path)])
     assert lint_code != ExitCode.OK
     assert scan_code != ExitCode.OK
-=======
+
+
 class TestScanFileCap:
     def test_oversized_sample_rejected_cleanly(self, tmp_path):
         import os
