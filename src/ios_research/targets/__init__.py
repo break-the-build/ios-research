@@ -123,3 +123,9 @@ __all__ = [
 from .netip import NETIP_TARGETS  # noqa: E402
 for _tid, _cls in NETIP_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock Wi-Fi Aware frame-parser targets (mock = True). CI-safe by construction:
+# bytes-only parsing; no RF transmission or association.
+from .wifiaware import WIFIAWARE_TARGETS  # noqa: E402
+for _tid, _cls in WIFIAWARE_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
