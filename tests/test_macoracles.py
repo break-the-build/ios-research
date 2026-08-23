@@ -137,3 +137,27 @@ def test_engine_rejects_malformed_evidence(workspace, tmp_path):
     bad.write_text("[]", encoding="utf-8")
     with pytest.raises(ValidationError, match="JSON object"):
         MacOracleEngine(workspace).run(name="tcc", evidence_path=str(bad))
+
+
+# --- CLI wiring (#132) -----------------------------------------------------------
+
+def test_mac_oracles_reachable_via_cli(workspace, tmp_path, capsys):
+    from ios_research.cli import main
+    evidence = _evidence_file(tmp_path, {
+        "resource": "Photos", "access_event": {"consent": "none"}})
+    ws = ["--workspace", str(workspace.root)]
+
+    code = main([*ws, "--json", "oracle", "mac", "run", "tcc", evidence])
+    env = json.loads(capsys.readouterr().out)
+    assert code == 0 and env["ok"] is True
+    assert env["data"]["classification"] == "capture-evidence"
+
+    code = main([*ws, "--json", "oracle", "mac", "oracles"])
+    env = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert {"gatekeeper", "sandbox-escape", "tcc"} <= set(env["data"]["oracles"])
+
+    # Unknown oracle names fail with a validation error, not a crash.
+    code = main([*ws, "--json", "oracle", "mac", "run", "nope", evidence])
+    env = json.loads(capsys.readouterr().out)
+    assert code != 0 and env["ok"] is False

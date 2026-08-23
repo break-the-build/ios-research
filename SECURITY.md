@@ -17,6 +17,12 @@ issues, differential testing, and producing responsible-disclosure reports.
   (`detect` commands; analytical scanning of samples the researcher supplies)
 - Patch-regression validation of already-public CVEs in an authorized lab
   (`cve` commands; published inputs re-run against registered targets only)
+- Paired-run differential classification across researcher-declared
+  standard/Lockdown configurations (`lockdown` commands; observations over
+  registered targets, with timeouts kept explicitly inconclusive)
+- macOS reward-category verification oracles (`oracle mac` commands; pure
+  classifiers over evidence records the researcher supplies — they never
+  assert a bypass or perform privileged operations)
 
 ## Forbidden capabilities (never implemented)
 
