@@ -135,3 +135,15 @@ for _tid, _cls in WIFIAWARE_TARGETS.items():
 from .pq3 import PQ3_TARGETS  # noqa: E402
 for _tid, _cls in PQ3_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock Continuity beacon record targets (mock = True). Synthetic records only;
+# no tracking of third-party devices, no real-radio advertising.
+from .continuity import CONTINUITY_TARGETS  # noqa: E402
+for _tid, _cls in CONTINUITY_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock trust-boundary payload-envelope targets (mock = True). Decode modeling only;
+# no permission/TCC mechanics; templates intended for authorized owned apps.
+from .ipc import IPC_TARGETS  # noqa: E402
+for _tid, _cls in IPC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))

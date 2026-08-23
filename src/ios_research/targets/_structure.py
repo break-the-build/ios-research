@@ -291,3 +291,64 @@ def pq3(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + epoch.to_bytes(2, "big") + \
         bytes([msg_type & 0xFF])
     return magic + header + payload
+def continuity(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock Continuity beacon record.
+
+    Record layout after ``magic``::
+
+        [declared_length u16 BE][rec_type u8][rec_flags u8][payload...]
+
+    Edits steer the header toward the shared Continuity defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    rec_type = 1
+    rec_flags = 0
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        # kept below the 0xF000 timeout gate so this path stays reachable
+        declared = 0xFFFF
+    elif choice == 1:    # null record type -> NULL_DEREFERENCE
+        rec_type = 0x00
+    elif choice == 2:    # scaling flag bit -> integer overflow in offsets
+        rec_flags |= 0x02
+    elif choice == 3:    # reclaimed-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # assertion path record type
+        rec_type = 0x7E
+    header = declared.to_bytes(2, "big") + bytes([rec_type & 0xFF,
+                                                  rec_flags & 0xFF])
+    return magic + header + payload
+def ipc(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock IPC envelope (#107).
+
+    Envelope layout after ``magic``::
+
+        [declared_length u16 BE][item_type u8][item_count u8][payload...]
+
+    Edits steer the header toward the shared trust-boundary decode paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    item_type = 1
+    item_count = 2
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # null extension endpoint -> NULL_DEREFERENCE
+        item_type = 0x00
+    elif choice == 2:    # oversized item count -> fixed-table OOB write
+        item_count = 9
+    elif choice == 3:    # released-attachment marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # incompatible schema reinterpretation
+        item_type = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([item_type & 0xFF,
+                                                  item_count & 0xFF])
+    return magic + header + payload
