@@ -30,6 +30,7 @@ from .commands import (
     netip_cmd,
     wifiaware_cmd,
     pq3_cmd,
+    continuity_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -45,6 +46,7 @@ _REGISTRARS: list[Callable] = [
     netip_cmd.register,   # must precede target_cmd (installs 'target netip')
     wifiaware_cmd.register,   # must precede target_cmd (installs 'target wifiaware')
     pq3_cmd.register,   # must precede target_cmd (installs 'target pq3')
+    continuity_cmd.register,   # must precede target_cmd (installs 'target continuity')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,
