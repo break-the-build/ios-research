@@ -27,6 +27,14 @@ def register(target_id: str, factory: Callable[[], Target]) -> None:
 
 def create(target_id: str) -> Target:
     from ..errors import NotFoundError
+    # Composite network-transport family: "net:<inner-target-id>" delivers
+    # inputs to the wrapped target over a loopback TCP socket (#57).
+    if target_id.startswith("net:"):
+        from ..nettransport import LoopbackTcpTarget
+        inner_id = target_id[len("net:"):]
+        if not inner_id or inner_id.startswith("net:"):
+            raise NotFoundError(f"invalid transport target '{target_id}'")
+        return LoopbackTcpTarget(create(inner_id))
     if target_id not in _REGISTRY:
         raise NotFoundError(
             f"unknown target '{target_id}'; known: {', '.join(sorted(_REGISTRY))}")
@@ -42,6 +50,10 @@ def list_targets() -> list[dict]:
 
 
 def is_registered(target_id: str) -> bool:
+    if target_id.startswith("net:"):
+        inner = target_id[len("net:"):]
+        return bool(inner) and not inner.startswith("net:") \
+            and inner in _REGISTRY
     return target_id in _REGISTRY
 
 
