@@ -51,9 +51,10 @@ _FRAMEWORKS = {
     },
     "coregraphics": {
         "framework": "CoreGraphics",
-        "entry": "CGDataProviderCreateWithData",
+        "entry": "CGPDFDocumentCreateWithProvider",
         "formats": ("pdf", "raw"),
-        "description": "CoreGraphics data-decode fuzzing (CGDataProvider)",
+        "description": ("CoreGraphics PDF-decode fuzzing "
+                        "(CGPDFDocumentCreateWithProvider + page render)"),
     },
     "selftest": {
         "framework": "SelfTest",

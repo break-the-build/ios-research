@@ -246,6 +246,15 @@ def test_mac_target_is_not_mock():
     assert "available" in d
 
 
+def test_coregraphics_entry_point_drives_a_real_parser():
+    """#27: the entry point must open the full PDF parser (and render), not
+    merely wrap bytes — CGDataProviderCreateWithCFData accepted 100% of inputs
+    because it never decodes anything."""
+    d = create("mac:coregraphics").describe()
+    assert d["entry_point"] == "CGPDFDocumentCreateWithProvider"
+    assert "PDF" in d["description"]
+
+
 def test_mac_target_missing_harness_is_abnormal(monkeypatch):
     monkeypatch.delenv("IOS_RESEARCH_MAC_HARNESS", raising=False)
     t = MacFuzzTarget("imageio", harness="/nonexistent/harness/binary")
@@ -674,6 +683,33 @@ def test_native_libfuzzer_finds_real_crashes(tmp_path):
     for _data, res in unique:
         assert res.outcome == Outcome.CRASH
         assert res.diagnostics.signature.startswith("asan_")
+
+
+@pytest.mark.skipif(_asan_clang() is None,
+                    reason="requires macOS with a full-Xcode/Homebrew ASan clang")
+def test_native_coregraphics_rejects_junk(tmp_path):
+    """#27 end-to-end: the rebuilt CoreGraphics driver must *reject* non-PDF
+    bytes (real parser signal) instead of accepting every input."""
+    build = REPO / "tools" / "harness" / "build.sh"
+    env = dict(os.environ)
+    env["CC"] = _asan_clang()
+    env["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
+    r = subprocess.run(["bash", str(build), "coregraphics"],
+                       capture_output=True, env=env, timeout=180)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    binary = REPO / "tools" / "harness" / "build" / "coregraphics_fuzzer"
+    assert binary.is_file()
+
+    t = MacFuzzTarget("coregraphics", harness=str(binary), timeout_s=30)
+    junk = t.execute(b"definitely-not-a-pdf")
+    if junk.outcome == Outcome.ABNORMAL and "CHECK failed" in junk.detail:
+        pytest.skip("toolchain ASan runtime aborts on dlopen (init CHECK)")
+    assert junk.outcome == Outcome.REJECTED
+
+    # A well-formed minimal PDF still parses (accepted) or is rejected cleanly;
+    # either way it must not be reported as a sanitizer finding.
+    pdf = t.execute(t.seeds()[1])
+    assert pdf.outcome in (Outcome.ACCEPTED, Outcome.REJECTED)
 
 
 @pytest.mark.skipif(_asan_clang() is None,
