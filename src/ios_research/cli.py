@@ -34,6 +34,7 @@ from .commands import (
     ipc_cmd,
     xpc_cmd,
     docimp_cmd,
+    signeddoc_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -53,6 +54,7 @@ _REGISTRARS: list[Callable] = [
     ipc_cmd.register,   # must precede target_cmd (installs 'target ipc')
     xpc_cmd.register,   # must precede target_cmd (installs 'target xpc')
     docimp_cmd.register,   # must precede target_cmd (installs 'target docimp')
+    signeddoc_cmd.register,   # must precede target_cmd (installs 'target signeddoc')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,
