@@ -19,7 +19,7 @@ from typing import Any
 from .errors import ValidationError
 from .hashing import canonical_json, sha256_text
 
-TAXONOMY_VERSION = 1
+TAXONOMY_VERSION = 2
 OVERRIDE_RELPATH = "config/target-flags.json"
 
 # Analysis indicator levels that can support a memory-corruption outcome.
@@ -37,6 +37,7 @@ _EVIDENCE = (
     "matrix_confirmation",     # device/OS/build matrix run attached (#37)
     "primitive_indicator",     # analysis indicator supports the outcome class
     "demonstration_refs",      # researcher-supplied demonstration references
+    "target_flag_capture",     # commpage/TCC flag capture recorded (#84)
 )
 
 DEFAULT_TAXONOMY: list[dict[str, Any]] = [
@@ -63,7 +64,8 @@ DEFAULT_TAXONOMY: list[dict[str, Any]] = [
                            "matrix_confirmation", "primitive_indicator"]},
     {"id": "physical-access-sensitive-data", "label": "Sensitive user data access from a locked device",
      "entry_point": "physical-access", "outcome": "sensitive-data-access", "reward_hint": 500000,
-     "keywords": ["lockscreen", "keychain", "data-protection"],
+     "keywords": ["lockscreen", "keychain", "data-protection", "lockdownd",
+                  "usb", "iap2", "notification"],
      "indicators": set(), "evidence_required":
          ["reproducible_crash", "minimized_input", "build_provenance", "demonstration_refs"]},
     {"id": "app-sandbox-escape-kernel", "label": "Kernel control from a sandboxed app",
@@ -115,6 +117,27 @@ DEFAULT_TAXONOMY: list[dict[str, Any]] = [
      "indicators": _CORRUPTION_INDICATORS,
      "evidence_required": ["reproducible_crash", "minimized_input", "build_provenance",
                            "matrix_confirmation", "primitive_indicator"]},
+    {"id": "pcc-request-data-access", "label": "Access to a user's PCC request data outside the trust boundary",
+     "entry_point": "pcc-network", "outcome": "pcc-request-data-access", "reward_hint": 250000,
+     "keywords": ["pcc", "private-cloud-compute"],
+     "indicators": set(),
+     "evidence_required": ["build_provenance", "demonstration_refs"]},
+    {"id": "pcc-privileged-network-request-data", "label": "PCC request-data access from a privileged network position",
+     "entry_point": "pcc-network", "outcome": "pcc-request-data-access", "reward_hint": 150000,
+     "keywords": ["pcc", "private-cloud-compute"],
+     "indicators": set(),
+     "evidence_required": ["build_provenance", "demonstration_refs"]},
+    {"id": "pcc-unattested-code-execution", "label": "Unattested code execution in the Apple PCC software stack",
+     "entry_point": "pcc-network", "outcome": "pcc-code-execution", "reward_hint": 100000,
+     "keywords": ["pcc", "private-cloud-compute"],
+     "indicators": _CORRUPTION_INDICATORS,
+     "evidence_required": ["reproducible_crash", "minimized_input",
+                           "build_provenance", "primitive_indicator"]},
+    {"id": "pcc-config-disclosure", "label": "Accidental PCC data disclosure from deployment or configuration issues",
+     "entry_point": "pcc-network", "outcome": "pcc-config-disclosure", "reward_hint": 50000,
+     "keywords": ["pcc", "private-cloud-compute"],
+     "indicators": set(),
+     "evidence_required": ["build_provenance", "demonstration_refs"]},
 ]
 
 

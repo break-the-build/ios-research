@@ -65,7 +65,8 @@ class BountyReadiness:
                 "crash id must be a single path component inside the workspace")
         return crash_id
 
-    def validate(self, report: Report, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    def validate(self, report: Report, metadata: dict[str, Any] | None = None,
+                 *, tccutil_output: str | None = None) -> dict[str, Any]:
         metadata = metadata or {}
         report_validation = self.reports.validate(report)
         crash = self.reports.crashes.get(self._validated_crash_id(report))
@@ -106,6 +107,37 @@ class BountyReadiness:
         analysis = self._analysis_for(crash)
         candidates = (candidates_for(crash.to_dict(), analysis, taxonomy)
                       if analysis else [])
+
+        # Target Flag capture evidence (#84): recorded only when detection
+        # actually fired; supplying tccutil output makes the check binding.
+        from .flagcapture import detect_commpage, parse_tccutil_output
+        capture = (analysis or {}).get("target_flag_capture") \
+            if isinstance(analysis, dict) else None
+        if capture is None:
+            # Researcher may supply the boot-random commpage contents captured
+            # during the PoC run for exact-match (HIGH confidence) checks.
+            supplied = metadata.get("commpage_values")
+            if isinstance(supplied, dict):
+                capture = detect_commpage(
+                    getattr(crash, "diagnostics", {}) or {},
+                    supplied=supplied)
+        tcc = parse_tccutil_output(tccutil_output) \
+            if tccutil_output is not None else None
+        if capture is not None:
+            from .flagcapture import describe as _describe
+            checks.append(_check(
+                "target_flag_capture", True,
+                f"Commpage Target Flag pattern detected in stored "
+                f"diagnostics: {_describe(capture)}."))
+        elif tcc is not None:
+            checks.append(_check(
+                "target_flag_capture", bool(tcc["captured"]),
+                "tccutil flag check output "
+                + ("reports 'modified': TCC Target Flag demonstration "
+                   "captured." if tcc["captured"]
+                   else "reports no modification; the TCC flag was not "
+                        "captured.")))
+
         claimed = self._claimed_flags(report, metadata, taxonomy)
         check_by_id = {c["id"]: c["passed"] for c in checks}
         for claim in claimed:
@@ -137,6 +169,8 @@ class BountyReadiness:
                 "candidates": [
                     {"flag_id": c["flag_id"], "confidence": c["confidence"]}
                     for c in candidates],
+                "capture": capture,
+                "tccutil": tcc,
                 "note": ("Candidates are hypotheses from stored evidence; "
                          "claims are researcher-declared and checked against "
                          "their required evidence elements only. This is not "
@@ -314,6 +348,19 @@ def _flag_element_check(element: str, crash, report: Report,
                            "CODE_EXECUTION_INDICATOR")
         return (ok, "The stored analysis indicator supports the outcome "
                     "class claimed by this flag.")
+    if element == "target_flag_capture":
+        # Satisfied by a stored commpage capture detection or captured
+        # tccutil output passed via the CLI (#84).
+        analysis = None
+        try:
+            analysis = report.sections.get("exploitability_assessment", {})
+        except Exception:  # pragma: no cover - sections are always a dict
+            analysis = {}
+        stored = (analysis or {}).get("capture")
+        ok = bool(stored) or bool(metadata.get("tccutil_captured"))
+        return (ok, "A Commpage/TCC Target Flag capture is recorded "
+                    "('target_flag_capture' detection or 'tccutil_captured' "
+                    "in researcher metadata).")
     if element == "demonstration_refs":
         refs = metadata.get("demonstration_refs")
         ok = isinstance(refs, list) and bool(

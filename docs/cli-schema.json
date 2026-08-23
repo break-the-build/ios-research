@@ -1177,6 +1177,14 @@
                 ],
                 "help": "optional local JSON metadata/attestations",
                 "required": false
+              },
+              {
+                "dest": "tccutil_output",
+                "flags": [
+                  "--tccutil-output"
+                ],
+                "help": "captured 'tccutil flag check' text file (#84); makes the TCC flag check binding",
+                "required": false
               }
             ],
             "positionals": [
