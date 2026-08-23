@@ -51,6 +51,7 @@ Every command supports `--json` for a stable, machine-readable envelope.
 | `bluetooth:{btle-adv,l2cap,gatt}` | Mock Bluetooth frame parsers sharing a defect model (bytes-only; no radio access) |
 | `wifi:{beacon,probe-resp,action}` | Mock 802.11 management-frame parsers sharing a defect model (bytes-only; no radio access) |
 | `nfc:{ndef,isodep,tagcmd}` | Mock NFC/NDEF record parsers sharing a defect model (bytes-only; no tag hardware access) |
+| `messaging:{sms,mime,link-preview}` | Mock communication-message parsers (network zero-click profiles #85); shared defect model (bytes-only; no messaging transport or network access) |
 | `mac:{imageio,audiotoolbox,coregraphics}` | **Real** macOS in-process libFuzzer/ASan targets (`mock = False`); opt-in, require a built harness — see [docs/MAC-FUZZING.md](docs/MAC-FUZZING.md) |
 | `ios-device:{file,imageio,audiotoolbox,coregraphics}` | **Real** black-box on-device targets (`mock = False`); stage an input to a USB-attached, *authorized* iPhone and harvest the resulting `.ips` crash log — **confirmation, not analysis**. Opt-in, require a connected device + `libimobiledevice` — see [docs/ON-DEVICE-TARGET.md](docs/ON-DEVICE-TARGET.md) |
 
@@ -75,6 +76,30 @@ This is an evidence-completeness check, not an eligibility or reward decision.
 It remains local-only: it does not access Apple systems or Target Flags. See
 [docs/APPLE-BOUNTY-READINESS.md](docs/APPLE-BOUNTY-READINESS.md).
 
+### Defensive detection signatures
+
+Scan samples the researcher supplies for known malware capability sets
+(spyware-like surveillance/exfiltration combos, launchd persistence abuse,
+keychain harvesting, TCC probing) with a deterministic YARA-style engine:
+
+```bash
+ios-research detect lint                 # validate rules (default: built-in)
+ios-research detect scan <file>
+ios-research detect list-rules
+```
+
+### Known-CVE patch-regression validation
+
+Re-run already-public regression inputs against registered targets to confirm
+fixes and catch regressions:
+
+```bash
+ios-research cve install-catalog         # register built-in mock analogs
+ios-research cve validate                # exit 0 = all expectations hold
+```
+
+See [docs/CVE-REGRESSION.md](docs/CVE-REGRESSION.md).
+
 ## For LLM agents
 
 The full CLI is described in a machine-readable schema
@@ -86,7 +111,8 @@ See [AGENTS.md](AGENTS.md) for the operating contract and recommended workflow.
 - [ARCHITECTURE.md](ARCHITECTURE.md) / [FINAL_ARCHITECTURE.md](FINAL_ARCHITECTURE.md)
 - [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) — full command reference
 - [SECURITY.md](SECURITY.md) / [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
-- [TEST_REPORT.md](TEST_REPORT.md) — 122 tests, 88% branch coverage
+- [docs/CVE-REGRESSION.md](docs/CVE-REGRESSION.md) — patch-regression validation
+- [TEST_REPORT.md](TEST_REPORT.md) — test counts and branch coverage
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/PHASE-STATUS.md](docs/PHASE-STATUS.md)
 
 ## Development

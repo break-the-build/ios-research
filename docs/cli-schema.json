@@ -528,7 +528,16 @@
         },
         "minimize": {
           "arguments": {
-            "options": [],
+            "options": [
+              {
+                "dest": "max_executions",
+                "flags": [
+                  "--max-executions"
+                ],
+                "help": "bound total target executions during minimization",
+                "required": false
+              }
+            ],
             "positionals": [
               {
                 "help": "",
@@ -557,6 +566,196 @@
               {
                 "help": "",
                 "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "cve": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "add": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "title",
+                "flags": [
+                  "--title"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "input_hex",
+                "flags": [
+                  "--input-hex"
+                ],
+                "help": "hex-encoded input (mutually exclusive with --input-file)",
+                "required": false
+              },
+              {
+                "dest": "input_file",
+                "flags": [
+                  "--input-file"
+                ],
+                "help": "read the input from this file instead",
+                "required": false
+              },
+              {
+                "dest": "vulnerable",
+                "flags": [
+                  "--vulnerable"
+                ],
+                "help": "comma-separated targets that must crash",
+                "required": false
+              },
+              {
+                "dest": "fixed",
+                "flags": [
+                  "--fixed"
+                ],
+                "help": "comma-separated targets that must stay clean",
+                "required": false
+              },
+              {
+                "dest": "reference",
+                "flags": [
+                  "--reference"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "note",
+                "flags": [
+                  "--note"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "cve_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "catalog": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "install-catalog": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "remove": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "cve_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "validate": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "cve_id",
+                "required": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    "detect": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "lint": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "rules",
+                "flags": [
+                  "--rules"
+                ],
+                "help": "rules JSON (default: built-in signatures)",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list-rules": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "rules",
+                "flags": [
+                  "--rules"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "scan": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "rules",
+                "flags": [
+                  "--rules"
+                ],
+                "help": "rules JSON (default: built-in signatures)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "path",
                 "required": true
               }
             ]
@@ -1091,6 +1290,14 @@
                   "--mutator-plugin"
                 ],
                 "help": "path to a grammar-aware mutator plugin (#41)",
+                "required": false
+              },
+              {
+                "dest": "max_input_bytes",
+                "flags": [
+                  "--max-input-bytes"
+                ],
+                "help": "skip mutated inputs larger than this many bytes (default 1048576; 0 disables the bound)",
                 "required": false
               }
             ],
@@ -1962,6 +2169,38 @@
             "positionals": []
           }
         },
+        "messaging": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "messaging_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "sms|mime|link-preview or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "nfc": {
           "arguments": {
             "options": [],
@@ -2155,7 +2394,9 @@
       "differential_testing",
       "exploitability_indicators",
       "research_device_instrumentation",
-      "responsible_reporting"
+      "responsible_reporting",
+      "malware_detection_signatures",
+      "known_cve_regression_validation"
     ],
     "authorized_research_only": true,
     "forbidden": [

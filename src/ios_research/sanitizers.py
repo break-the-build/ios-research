@@ -106,6 +106,19 @@ PROFILES: dict[str, SanitizerProfile] = {
                            "-fsanitize-coverage=trace-pc-guard"),
             platforms=("linux",),
         ),
+        SanitizerProfile(
+            id="mte",
+            description=("ARM memory tagging (MTE/EMTE) via HWAddressSanitizer: "
+                         "hardware tag checks catch spatial + temporal safety "
+                         "violations with near-zero instrumentation on "
+                         "MTE-capable hardware or emulation"),
+            compile_flags=(
+                "-fsanitize=hwaddress",
+                "-fsanitize-coverage=trace-pc-guard,trace-cmp",
+            ),
+            runtime_env={"HWASAN_OPTIONS": "halt_on_error=1"},
+            requires=("ARMv9 MTE-capable hardware (or EMTE/TCO emulation)",),
+        ),
     )
 }
 
@@ -114,6 +127,20 @@ _INCOMPATIBLE = {
     frozenset({"address", "thread"}),
     frozenset({"memory", "thread"}),
     frozenset({"memory", "address"}),
+}
+
+# Profile-specific triage notes surfaced with validation results. These are
+# documentation, not enforcement: they record known detection deltas so
+# multi-sanitizer comparisons stay honest.
+PROFILE_NOTES: dict[str, tuple[str, ...]] = {
+    "mte": (
+        "tag checks cover heap allocations; stack tagging requires "
+        "-fsanitize-hwaddress-abi=platform support in the toolchain",
+        "probabilistic detection: 16-bit tags may alias across allocations "
+        "unless quarantine is enabled",
+        "speculative-execution side channels can leak tag state (see TikTag, "
+        "IEEE S&P 2025); treat as detection-aid, not a security boundary",
+    ),
 }
 
 
@@ -126,6 +153,12 @@ def get_profile(profile_id: str) -> SanitizerProfile:
             f"known: {', '.join(sorted(PROFILES))}") from None
 
 
+def notes_for(profile_id: str) -> tuple[str, ...]:
+    """Triage caveats documented for a profile (empty when none)."""
+    get_profile(profile_id)  # unknown ids still fail closed
+    return PROFILE_NOTES.get(profile_id, ())
+
+
 def validate_profile(profile_id: str, *, platform: str = "darwin") -> dict:
     """Validate a profile for ``platform``; fail closed with actionable detail.
 
@@ -133,18 +166,16 @@ def validate_profile(profile_id: str, *, platform: str = "darwin") -> dict:
     Raises :class:`ValidationError` only for unknown profile IDs.
     """
     profile = get_profile(profile_id)
+    result = {"notes": list(notes_for(profile_id))}
     if platform not in SUPPORTED_PLATFORMS:
-        return {"supported": False, "profile": profile.to_dict(),
-                "reason": f"unsupported platform '{platform}'"}
+        return dict(result, supported=False, profile=profile.to_dict(),
+                    reason=f"unsupported platform '{platform}'")
     if platform not in profile.platforms:
-        return {
-            "supported": False,
-            "profile": profile.to_dict(),
-            "reason": (f"profile '{profile_id}' is not supported on "
-                       f"'{platform}' (supported: "
-                       f"{', '.join(profile.platforms)})"),
-        }
-    return {"supported": True, "profile": profile.to_dict(), "reason": ""}
+        return dict(result, supported=False, profile=profile.to_dict(),
+                    reason=(f"profile '{profile_id}' is not supported on "
+                            f"'{platform}' (supported: "
+                            f"{', '.join(profile.platforms)})"))
+    return dict(result, supported=True, profile=profile.to_dict(), reason="")
 
 
 def check_combination(profile_ids: list[str]) -> dict:
@@ -181,6 +212,11 @@ _UNINIT_RE = re.compile(r"use-of-uninitialized-value")
 _LEAK_RE = re.compile(r"(detected memory leaks|\d+ byte\(s\) leaked)")
 _FRAME_RE = re.compile(
     r"^\s*#\d+\s+0x[0-9a-fA-F]+\s+in\s+(?P<rest>.+?)\s*$")
+# Allocation-history sections in ASan/HWASan/tag-mismatch reports:
+#   "allocated by thread T0 here:"  /  "freed by thread T1 here:"
+_ALLOC_SECTION_RE = re.compile(
+    r"^\s*(?P<kind>allocated|freed)(?P<rest>[^\n]*?)\s*:\s*$",
+    re.IGNORECASE)
 
 
 def detect_sanitizers(text: str) -> list[str]:
@@ -193,6 +229,12 @@ def detect_sanitizers(text: str) -> list[str]:
 def violation_class(text: str) -> str:
     """Normalized violation class, comparable across sanitizer profiles."""
     blob = (text or "").lower()
+    # Hardware memory-tag faults report as "tag-mismatch"; the temporal vs
+    # spatial split follows the surrounding report wording.
+    if "tag-mismatch" in blob or "tag mismatch" in blob:
+        if "freed" in blob or "use-after-free" in blob or "after free" in blob:
+            return "USE_AFTER_FREE"
+        return "BUFFER_OVERFLOW"
     if "heap-buffer-overflow" in blob or "stack-buffer-overflow" in blob \
             or "global-buffer-overflow" in blob:
         return "BUFFER_OVERFLOW"
@@ -225,19 +267,53 @@ def _top_frames(text: str, limit: int = 3) -> tuple[str, ...]:
     return tuple(frames[:limit])
 
 
+def allocation_attribution(text: str, *, limit: int = 2) -> dict:
+    """Trace a faulting tagged access back to its allocation sites.
+
+    Parses ``allocated by thread T.. here:`` / ``freed by thread T.. here:``
+    sections and returns the first frames of each as attribution evidence
+    (TagASan-style allocation-site tracing over report text).
+    """
+    import ios_research.targets.asan as asan
+    attribution: dict[str, Any] = {}
+    current = None
+    for line in (text or "").splitlines():
+        section = _ALLOC_SECTION_RE.match(line)
+        if section:
+            kind = section.group("kind").lower()
+            thread_m = re.search(r"T(\d+)", section.group("rest"))
+            current = {"thread": int(thread_m.group(1))
+                       if thread_m else None,
+                       "frames": []}
+            attribution[kind] = current
+            continue
+        frame = _FRAME_RE.match(line)
+        if frame and current is not None and \
+                len(current["frames"]) < limit:
+            current["frames"].append(
+                asan._extract_symbol(frame.group("rest")))
+    return {k: v for k, v in attribution.items() if v["frames"]}
+
+
 def dedup_signature(text: str, *, module: str = "") -> str:
     """Dedup-safe signature namespaced by sanitizer kind + violation class.
 
     Equivalent findings from different profiles stay distinct unless both the
     sanitizer class and top frames agree, so unrelated sanitizer violations are
-    never collapsed together.
+    never collapsed together. When allocation-site attribution is present it is
+    folded into the digest so two faults hitting the same code but originating
+    from different allocations remain distinct.
     """
     kinds = detect_sanitizers(text)
     kind = ",".join(kinds) if kinds else "none"
     vclass = violation_class(text)
     top = "|".join(_top_frames(text))
+    attribution = allocation_attribution(text)
+    alloc_site = ""
+    if "allocated" in attribution and attribution["allocated"]["frames"]:
+        alloc_site = "|alloc:" + "|".join(attribution["allocated"]["frames"])
     digest = hashlib.sha256(
-        f"{vclass}|{module}|{top}".encode()).hexdigest()[:16]
+        f"{vclass}|{module}|{top}{alloc_site}".encode()).hexdigest()[:16]
     return f"{kind}_{vclass}_{digest}"
 
 
@@ -251,6 +327,7 @@ def triage_report(text: str, *, module: str = "") -> dict:
         "classification": diag.classification_hint,
         "dedup_signature": dedup_signature(text, module=module),
         "top_frames": list(_top_frames(text)),
+        "allocation": allocation_attribution(text),
     }
 
 

@@ -34,7 +34,13 @@ class Triage:
 
     def reproduce(self, crash: CrashRecord) -> dict:
         """Re-run the stored input and check the signature still matches."""
-        data = self.crashes.input_bytes(crash)
+        try:
+            data = self.crashes.input_bytes(crash)
+        except FileNotFoundError:
+            from .errors import NotFoundError
+            raise NotFoundError(
+                f"crash '{crash.id}' input artifact "
+                f"'{crash.input_sha256}' is missing from the workspace")
         result = self._target(crash).execute(data)
         sig = result.diagnostics.signature if result.diagnostics else ""
         reproduced = (result.outcome in (Outcome.CRASH, Outcome.ABNORMAL)
@@ -69,14 +75,24 @@ class Triage:
 
         return still_crashes
 
-    def minimize(self, crash: CrashRecord, *, add_regression: bool = True) -> dict:
+    def minimize(self, crash: CrashRecord, *, add_regression: bool = True,
+                 max_executions: int | None = None) -> dict:
         original = self.crashes.input_bytes(crash)
         predicate = self._predicate(crash)
-        if not predicate(original):
+        executions = {"count": 0}
+
+        def counted(candidate: bytes) -> bool:
+            if max_executions is not None and \
+                    executions["count"] >= max_executions:
+                return False
+            executions["count"] += 1
+            return predicate(candidate)
+
+        if not counted(original):
             # Cannot minimize what does not reproduce.
             return {"minimized": False, "reason": "input does not reproduce",
                     "original_size": len(original)}
-        minimized = ddmin(original, predicate)
+        minimized = ddmin(original, counted, max_executions=max_executions)
         sha = self.crashes.write_minimized(crash, minimized)
 
         regression_added = False
@@ -90,7 +106,8 @@ class Triage:
         return {"minimized": True, "original_size": len(original),
                 "minimized_size": len(minimized), "minimized_sha256": sha,
                 "regression_added": regression_added,
-                "signature_preserved": True}
+                "signature_preserved": True,
+                "executions": executions["count"]}
 
     def _regression_corpus(self, store: CorpusStore):
         for corpus in store.list():
@@ -116,19 +133,29 @@ class Triage:
         }
 
 
-def ddmin(data: bytes, predicate: Callable[[bytes], bool]) -> bytes:
+def ddmin(data: bytes, predicate: Callable[[bytes], bool],
+          max_executions: int | None = None) -> bytes:
     """Classic delta-debugging minimization.
 
     Returns the smallest byte string found for which ``predicate`` still holds.
+    ``max_executions`` optionally bounds total predicate invocations; when the
+    bound is hit, the best reduction found so far is returned. This keeps
+    minimization of very large inputs against slow targets bounded.
     """
     n = 2
+    executed = 0
     while len(data) >= 2:
         chunk = max(1, len(data) // n)
         subsets = [data[i:i + chunk] for i in range(0, len(data), chunk)]
         reduced = False
         for j in range(len(subsets)):
             complement = b"".join(subsets[:j] + subsets[j + 1:])
-            if complement and predicate(complement):
+            if not complement:
+                continue
+            if max_executions is not None and executed >= max_executions:
+                return data
+            executed += 1
+            if predicate(complement):
                 data = complement
                 n = max(n - 1, 2)
                 reduced = True

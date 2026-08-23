@@ -133,3 +133,37 @@ def nfc(magic: bytes, data: bytes, rng) -> bytes:
         pass
     header = declared.to_bytes(2, "big") + bytes([tnf & 0xFF, id_length & 0xFF])
     return magic + header + payload
+
+
+def messaging(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock message envelope (#85).
+
+    Envelope layout after ``magic``::
+
+        [declared_length u16 BE][part_count u8][encoding u8][payload...]
+
+    Edits steer the header toward the shared messaging defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    part_count = 1
+    encoding = 1
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        # kept below the 0xF000 timeout gate so this path stays reachable
+        # (unlike earlier modules' 0xFFFF choice, which times out first)
+        declared = 0x00FF
+    elif choice == 1:    # zero part count -> integer/divide error
+        part_count = 0
+    elif choice == 2:    # released-buffer marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 3:    # decoder-state type confusion
+        encoding = 0xC0
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # assertion path encoding
+        encoding = 0x7E
+    header = declared.to_bytes(2, "big") + bytes([part_count & 0xFF,
+                                                  encoding & 0xFF])
+    return magic + header + payload
