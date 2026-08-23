@@ -82,3 +82,22 @@ export. No data is transmitted. The command does not access Apple accounts, secu
 systems, Target Flags, privileged device capabilities, or generate exploits or
 payloads. The exported pack contains local artifact references and hashes, not
 raw exploit material.
+
+## Mitigation-generation provenance (#87)
+
+Since the 2025 Memory Integrity Enforcement devices, exploitability evidence
+does not automatically transfer between mitigation generations. Matrix
+reproduction results (#37) therefore record a per-cell
+`mitigation_profile` (`mie-emte` / `pre-mie` / `unknown`), derived only from
+the declared model/OS strings via the optional workspace table
+`.ios-research/config/mitigation-models.json`:
+
+```json
+{"mie-emte": ["iPhone17,*"], "pre-mie": ["iPhone14,*", "iPhone15,*"]}
+```
+
+Unmatched devices record `unknown` (fail-closed; the framework ships no
+authoritative hardware-identifier data). When reproducing cells or the
+researcher-supplied `matrix_evidence` span multiple generations,
+`bounty-validate` reports a **non-binding warning** — readiness is unaffected,
+and no new device capabilities are introduced.

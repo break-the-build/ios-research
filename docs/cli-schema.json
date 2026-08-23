@@ -1492,6 +1492,120 @@
         "positionals": []
       }
     },
+<<<<<<< HEAD
+    "kernel": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "msg-build": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "bits",
+                "flags": [
+                  "--bits"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "remote",
+                "flags": [
+                  "--remote"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "local",
+                "flags": [
+                  "--local"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "voucher",
+                "flags": [
+                  "--voucher"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "msg_id",
+                "flags": [
+                  "--id"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "port",
+                "flags": [
+                  "--port"
+                ],
+                "help": "port right name (repeatable)",
+                "required": false
+              },
+              {
+                "dest": "ool_size",
+                "flags": [
+                  "--ool-size"
+                ],
+                "help": "OOL region size (repeatable)",
+                "required": false
+              },
+              {
+                "dest": "payload",
+                "flags": [
+                  "--payload"
+                ],
+                "help": "hex payload bytes",
+                "required": false
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "write the packed message here",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "msg-unpack": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "input",
+                "required": true
+              }
+            ]
+          }
+        },
+        "surface": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        }
+      }
+    },
+=======
+>>>>>>> origin/main
     "lockdown": {
       "arguments": {
         "options": [],
