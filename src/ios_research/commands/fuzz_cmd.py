@@ -52,6 +52,8 @@ def register(subparsers, parent) -> None:
                          help="record value-profile guidance in campaign metadata (#30)")
     p_start.add_argument("--sanitizer-profile", default=None, dest="sanitizer_profile",
                          help="named sanitizer build profile recorded as provenance (#31)")
+    p_start.add_argument("--mutator-plugin", default=None, dest="mutator_plugin",
+                         help="path to a grammar-aware mutator plugin (#41)")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -136,7 +138,9 @@ def cmd_start(ctx, args) -> Result:
                             value_profile=bool(getattr(args, "value_profile",
                                                        False)),
                             sanitizer_profile=getattr(
-                                args, "sanitizer_profile", None))
+                                args, "sanitizer_profile", None),
+                            mutator_plugin_path=getattr(
+                                args, "mutator_plugin", None))
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

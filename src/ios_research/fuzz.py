@@ -67,6 +67,8 @@ class FuzzSession:
     token_uses: int = 0
     sanitizer_profile: str = ""
     cases_since_new_feature: int = 0
+    mutator_plugin_path: str = ""
+    grammar_uses: int = 0
     started_at: str = ""
     updated_at: str = ""
 
@@ -101,6 +103,10 @@ class FuzzSession:
                 "token_uses": self.token_uses,
             },
             "sanitizer_profile": self.sanitizer_profile,
+            "mutator_plugin": {
+                "path": self.mutator_plugin_path,
+                "grammar_uses": self.grammar_uses,
+            },
         }
 
 
@@ -152,7 +158,8 @@ class FuzzEngine:
                dictionary_path: str | None = None,
                dictionary_tokens: list[DictionaryToken] | None = None,
                value_profile: bool = False,
-               sanitizer_profile: str | None = None) -> FuzzSession:
+               sanitizer_profile: str | None = None,
+               mutator_plugin_path: str | None = None) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -192,6 +199,7 @@ class FuzzEngine:
                                or (tokens[0].source if tokens else "")),
             value_profile=bool(value_profile),
             sanitizer_profile=profile,
+            mutator_plugin_path=str(mutator_plugin_path or ""),
         )
         if tokens:
             self.ws.write_json(self._dict_rel(session.id), {
@@ -258,6 +266,12 @@ class FuzzEngine:
         # Precompute the weighted strategy pool once (invariant for the run).
         pool = mutation.weighted_strategies(session.strategy_weights or None,
                                             strategies)
+        # Grammar-aware mutator plugin (#41): loaded from a user-declared
+        # path; every call is isolated and falls back to generic mutation.
+        plugin_host = None
+        if session.mutator_plugin_path:
+            from .grammar import PluginHost
+            plugin_host = PluginHost().discover([session.mutator_plugin_path])
         unique = set(session.crash_ids)
         executed_this = 0
 
@@ -279,9 +293,25 @@ class FuzzEngine:
 
             i = session.cursor
             base = self._select_base(session, corpus, bases, i)
-            mutated, strategy = mutation.mutate(
-                base, session.seed, i, struct_fn=struct_fn, strategies=pool,
-                tokens=tokens)
+            mutated = None
+            strategy = ""
+            if plugin_host is not None and plugin_host.plugins:
+                rng = mutation.rng_for(session.seed, i)
+                if len(bases) > 1 and i % 4 == 3:
+                    outcome = plugin_host.crossover_bytes(
+                        base, bases[(i + 1) % len(bases)], rng)
+                else:
+                    outcome = plugin_host.mutate_bytes(base, rng)
+                if outcome is not None:
+                    mutated, strategy = outcome
+                    session.grammar_uses += 1
+            if mutated is None:
+                mutated, strategy = mutation.mutate(
+                    base, session.seed, i, struct_fn=struct_fn,
+                    strategies=pool, tokens=tokens)
+                if plugin_host is not None and plugin_host.plugins \
+                        and strategy.startswith("grammar"):
+                    session.grammar_uses += 1
             if strategy.startswith("dict_"):
                 session.token_uses += 1
             result = target.execute(mutated)
