@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -232,7 +233,10 @@ class LibimobiledeviceBackend:
                     continue
                 if process:
                     meta = ips.parse_metadata(text)
-                    if meta.get("process") and process not in meta["process"]:
+                    # A substring match can turn a report from e.g.
+                    # ``MediaServer`` into a false confirmation for ``Media``.
+                    # A pinned process is a precision guard, so it must be exact.
+                    if meta.get("process") != process:
                         continue
                 out.append((path.name, text))
             return out
@@ -364,14 +368,41 @@ class IosDeviceTarget(Target):
             new = self._backend.collect_new_reports(
                 udid, self._baseline, self.expected_process)
             if new:
-                # Newest report last after sort by identifier; prefer it.
-                return new[-1]
+                return max(new, key=self._report_recency)
             if time.monotonic() >= deadline:
                 return None
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
             time.sleep(min(self.poll_s, remaining))
+
+    @staticmethod
+    def _report_recency(report: tuple[str, str]) -> tuple[bool, float, str]:
+        """Sort a report by parsed capture time, then stable identifier.
+
+        iOS crash filenames begin with the process name, so lexical filename
+        order is not chronological.  A missing/unparseable timestamp is still
+        deterministic, but only wins the tie-break against another such report.
+        """
+        identifier, text = report
+        raw = ips.parse_metadata(text).get("timestamp", "")
+        try:
+            # ``.ips`` commonly uses a space before a compact numeric offset
+            # (``... 10:15:00.00 -0700``), which older supported Python
+            # versions do not accept in ``fromisoformat``.
+            for pattern in (
+                "%Y-%m-%d %H:%M:%S.%f %z",
+                "%Y-%m-%d %H:%M:%S %z",
+            ):
+                try:
+                    return (True, datetime.strptime(raw, pattern).timestamp(),
+                            identifier)
+                except ValueError:
+                    pass
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return (True, parsed.timestamp(), identifier)
+        except (TypeError, ValueError, OverflowError):
+            return (False, float("-inf"), identifier)
 
     # --- stamping --------------------------------------------------------
     @staticmethod
