@@ -1801,6 +1801,43 @@
             "positionals": []
           }
         },
+        "mac": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "mac_subcommand",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "oracles": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            },
+            "run": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "oracle name (see 'oracle mac oracles')",
+                    "name": "name",
+                    "required": true
+                  },
+                  {
+                    "help": "path to the evidence JSON record",
+                    "name": "evidence",
+                    "required": true
+                  }
+                ]
+              }
+            }
+          }
+        },
         "run": {
           "arguments": {
             "options": [
