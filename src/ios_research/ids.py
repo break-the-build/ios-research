@@ -24,6 +24,7 @@ _PREFIXES = {
     "matrix": "mtx",
     "harness": "har",
     "spoints": "spt",
+    "finding": "fin",
 }
 
 

@@ -31,6 +31,7 @@ SUBDIRS = (
     "research",
     "harnesses",
     "spoints",
+    "findings",
     "matrices",
     "advisories",
     "logs",

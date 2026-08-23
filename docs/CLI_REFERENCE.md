@@ -300,6 +300,56 @@ Options:
 
 - `--force` — re-initialize even if a workspace exists
 
+### `ios-research findings`
+
+### `ios-research findings adjudicate`
+
+Positional arguments:
+
+- `finding_id` (optional)
+
+### `ios-research findings confirm`
+
+Positional arguments:
+
+- `finding_id` (required)
+
+Options:
+
+- `--reason`
+
+### `ios-research findings dismiss`
+
+Positional arguments:
+
+- `finding_id` (required)
+
+Options:
+
+- `--reason`
+
+### `ios-research findings import`
+
+Options:
+
+- `--sarif` (required) — path to the SARIF JSON file
+- `--tool` — override tool name for all imported findings
+
+### `ios-research findings list`
+
+Options:
+
+- `--status`
+- `--cwe`
+
+### `ios-research findings objectives`
+
+### `ios-research findings show`
+
+Positional arguments:
+
+- `finding_id` (required)
+
 ### `ios-research harness`
 
 ### `ios-research harness accept`
