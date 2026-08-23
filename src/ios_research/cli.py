@@ -23,7 +23,7 @@ from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
     corpus_cmd, fuzz_cmd, audio_cmd, crash_cmd, analyze_cmd, diff_cmd,
     report_cmd, research_cmd, matrix_cmd, oracle_cmd, evidence_cmd,
-    sequence_cmd, agent_cmd,
+    sequence_cmd, suite_cmd, agent_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -44,6 +44,7 @@ _REGISTRARS: list[Callable] = [
     oracle_cmd.register,
     evidence_cmd.register,
     sequence_cmd.register,
+    suite_cmd.register,
     agent_cmd.register,
 ]
 

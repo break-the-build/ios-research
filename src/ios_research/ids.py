@@ -28,6 +28,7 @@ _PREFIXES = {
     "obstrace": "obs",
     "campaign": "camp",
     "vdevice": "vdv",
+    "suite": "sui",
 }
 
 
