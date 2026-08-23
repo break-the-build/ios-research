@@ -30,6 +30,7 @@ SUBDIRS = (
     "diffs",
     "research",
     "matrices",
+    "advisories",
     "logs",
 )
 
