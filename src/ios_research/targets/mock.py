@@ -40,6 +40,37 @@ class MockParserTarget(Target):
         from . import _structure  # lazy import to avoid cycle
         return _structure.mock_record(data, rng)
 
+    def coverage_features(self, data: bytes, result: ExecResult):
+        """Deterministic mock branch features used only for framework CI.
+
+        These are not instrumentation coverage and are deliberately namespaced
+        so reports cannot mistake them for measurements from a real target.
+        """
+        prefix = "mock-parser:v1"
+        if len(data) < 8 or data[:4] != MAGIC:
+            return (f"{prefix}:reject-header",)
+        version, rtype = data[4], data[5]
+        declared = int.from_bytes(data[6:8], "big")
+        payload = data[8:]
+        features = [f"{prefix}:valid-header"]
+        if declared > len(payload):
+            features.append(f"{prefix}:declared-length-oob")
+        elif rtype == 0xFF:
+            features.append(f"{prefix}:null-dispatch")
+        elif b"\xde\xad" in payload:
+            features.append(f"{prefix}:use-after-free-marker")
+        elif version == 0 and payload:
+            features.append(f"{prefix}:version-underflow")
+        elif payload[:2] == b"\x7fT":
+            features.append(f"{prefix}:type-confusion-marker")
+        elif declared >= 0xF000:
+            features.append(f"{prefix}:slow-path")
+        elif rtype == 0x7E:
+            features.append(f"{prefix}:assertion")
+        else:
+            features.append(f"{prefix}:accepted")
+        return tuple(features)
+
     def _crash(self, data: bytes, classification: str,
                symbols: list[str], detail: str) -> ExecResult:
         diag = diagnostics.build(data, classification, _MODULE, symbols)
