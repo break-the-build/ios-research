@@ -171,3 +171,9 @@ for _tid, _cls in SIGNEDDOC_TARGETS.items():
 from .proxapp import PROXAPP_TARGETS  # noqa: E402
 for _tid, _cls in PROXAPP_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock filesystem-client parser targets (mock = True). Bytes-only;
+# loopback templates only; nothing mounts against unowned hosts.
+from .fsclient import FSCLIENT_TARGETS  # noqa: E402
+for _tid, _cls in FSCLIENT_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))

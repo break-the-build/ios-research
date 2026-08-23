@@ -55,6 +55,7 @@ Every command supports `--json` for a stable, machine-readable envelope.
 | `lockeddevice:{lockdownd,mfi-auth,notification}` | Mock locked-device surface parsers (physical-access profiles #86); shared defect model (bytes-only; no device, accessory, or data access) |
 | `mac:{imageio,audiotoolbox,coregraphics}` | **Real** macOS in-process libFuzzer/ASan targets (`mock = False`); opt-in, require a built harness — see [docs/MAC-FUZZING.md](docs/MAC-FUZZING.md) |
 | `ios-device:{file,imageio,audiotoolbox,coregraphics}` | **Real** black-box on-device targets (`mock = False`); stage an input to a USB-attached, *authorized* iPhone and harvest the resulting `.ips` crash log — **confirmation, not analysis**. Opt-in, require a connected device + `libimobiledevice` — see [docs/ON-DEVICE-TARGET.md](docs/ON-DEVICE-TARGET.md) |
+| `fsclient:{exfat-vol,smb2-resp}` | Mock exFAT/SMB2 client-side structure parsers (bytes-only) |
 | `proxapp:{hap-tlv,airplay-nego,mpc-frame,pbap-vcard}` | Mock proximity application-protocol parsers sharing a defect model |
 | `signeddoc:{profile,provision,receipt,pkpass}` | Mock ASN.1/CMS signed-document structure parsers (verify-only) |
 | `docimp:{zip-archive,ooxml-part,font,pdfform}` | Mock document-importer structure parsers sharing a defect model |
