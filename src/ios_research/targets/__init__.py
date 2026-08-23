@@ -183,3 +183,9 @@ for _tid, _cls in FSCLIENT_TARGETS.items():
 from .geo import GEO_TARGETS  # noqa: E402
 for _tid, _cls in GEO_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock lockscreen voice-assistant record targets (mock = True). Text/intent
+# records only; never activates microphone or audio capture (SECURITY.md).
+from .voiceassist import VOICEASSIST_TARGETS  # noqa: E402
+for _tid, _cls in VOICEASSIST_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
