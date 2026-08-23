@@ -404,9 +404,24 @@ def scan_bytes(data: bytes, rules: list[Rule]) -> dict[str, Any]:
     }
 
 
-def scan_file(path: str, rules: list[Rule]) -> dict[str, Any]:
+# Refuse to buffer samples larger than this by default: scanning is an
+# analytical operation and must not become a memory-exhaustion vector.
+DEFAULT_MAX_SAMPLE_BYTES = 64 * 1024 * 1024
+
+
+def scan_file(path: str, rules: list[Rule], *,
+              max_sample_bytes: int = DEFAULT_MAX_SAMPLE_BYTES) -> dict[str, Any]:
+    if max_sample_bytes < 0:
+        raise ValidationError("max_sample_bytes must be non-negative")
     with open(path, "rb") as fh:
-        data = fh.read()
+        # Read one byte past the cap so oversize inputs are detected exactly,
+        # without ever buffering more than cap+1 bytes.
+        data = fh.read(max_sample_bytes + 1)
+    if len(data) > max_sample_bytes:
+        raise ValidationError(
+            f"sample exceeds the {max_sample_bytes}-byte scan cap "
+            f"({max_sample_bytes + 1}+ bytes); split it or raise "
+            f"max_sample_bytes explicitly")
     result = scan_bytes(data, rules)
     result["path"] = path
     return result
