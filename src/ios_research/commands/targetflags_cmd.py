@@ -23,6 +23,7 @@ def register(subparsers, parent) -> None:
 
 
 def cmd_list(ctx, args) -> Result:
+    from ..flagcapture import commpage_info
     from ..targetflags import load_taxonomy
     taxonomy = load_taxonomy(ctx.workspace(required=False))
     flags = [{"id": f["id"], "label": f["label"],
@@ -31,7 +32,8 @@ def cmd_list(ctx, args) -> Result:
              for f in taxonomy["flags"]]
     data = {"taxonomy_version": taxonomy["taxonomy_version"],
             "source": taxonomy["source"], "sha256": taxonomy["sha256"],
-            "flags": flags, "count": len(flags)}
+            "flags": flags, "count": len(flags),
+            "commpage": commpage_info()}
     return Result(command="targetflags list", data=data,
                   human=lambda d: "\n".join(
                       f"{f['id']:34} {f['entry_point']} -> {f['outcome']}"
