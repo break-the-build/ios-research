@@ -7,6 +7,7 @@
     "crashes": ".ios-research/crashes/<crash_id>/",
     "diffs": ".ios-research/diffs/<diff_id>/",
     "experiments": ".ios-research/experiments/<experiment_id>.json",
+    "findings": ".ios-research/findings/<finding_id>.json",
     "fuzz_sessions": ".ios-research/fuzz/<session_id>.json",
     "harnesses": ".ios-research/harnesses/<candidate_id>.json",
     "reports": ".ios-research/reports/<report_id>/",
@@ -801,6 +802,138 @@
               {
                 "help": "",
                 "name": "experiment_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "findings": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "adjudicate": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "finding_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "confirm": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reason",
+                "flags": [
+                  "--reason"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "finding_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "dismiss": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reason",
+                "flags": [
+                  "--reason"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "finding_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "sarif",
+                "flags": [
+                  "--sarif"
+                ],
+                "help": "path to the SARIF JSON file",
+                "required": true
+              },
+              {
+                "dest": "tool",
+                "flags": [
+                  "--tool"
+                ],
+                "help": "override tool name for all imported findings",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "status",
+                "flags": [
+                  "--status"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "cwe",
+                "flags": [
+                  "--cwe"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "objectives": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "finding_id",
                 "required": true
               }
             ]
