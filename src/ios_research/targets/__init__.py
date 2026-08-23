@@ -99,6 +99,11 @@ for _surface in DEVICE_SURFACES:
     register(f"ios-device:{_surface}",
              (lambda s: (lambda: IosDeviceTarget(s)))(_surface))
 
+# Kernel-boundary simulation target (mock = True). CI-safe: models XNU
+# mach_msg descriptor/bounds logic in-process; never touches a kernel (#68).
+from .machsim import MachMessageSimTarget  # noqa: E402
+register("mach:sim", lambda: MachMessageSimTarget())
+
 __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",

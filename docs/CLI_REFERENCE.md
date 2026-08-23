@@ -391,6 +391,30 @@ Positional arguments:
 
 - `candidate_id` (required)
 
+### `ios-research kernel`
+
+### `ios-research kernel msg-build`
+
+Options:
+
+- `--bits`
+- `--remote`
+- `--local`
+- `--voucher`
+- `--id` — id
+- `--port` — port right name (repeatable)
+- `--ool-size` — OOL region size (repeatable)
+- `--payload` — hex payload bytes
+- `--out` (required) — write the packed message here
+
+### `ios-research kernel msg-unpack`
+
+Positional arguments:
+
+- `input` (required)
+
+### `ios-research kernel surface`
+
 ### `ios-research report`
 
 ### `ios-research report bounty-export`
