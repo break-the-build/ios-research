@@ -147,3 +147,9 @@ for _tid, _cls in CONTINUITY_TARGETS.items():
 from .ipc import IPC_TARGETS  # noqa: E402
 for _tid, _cls in IPC_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock XPC/Mach message-schema targets (mock = True). Local chain-tail tooling;
+# v1 sends nothing to system daemons (offline schema harvest only).
+from .xpc import XPC_TARGETS  # noqa: E402
+for _tid, _cls in XPC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))

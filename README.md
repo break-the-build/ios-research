@@ -55,6 +55,7 @@ Every command supports `--json` for a stable, machine-readable envelope.
 | `lockeddevice:{lockdownd,mfi-auth,notification}` | Mock locked-device surface parsers (physical-access profiles #86); shared defect model (bytes-only; no device, accessory, or data access) |
 | `mac:{imageio,audiotoolbox,coregraphics}` | **Real** macOS in-process libFuzzer/ASan targets (`mock = False`); opt-in, require a built harness — see [docs/MAC-FUZZING.md](docs/MAC-FUZZING.md) |
 | `ios-device:{file,imageio,audiotoolbox,coregraphics}` | **Real** black-box on-device targets (`mock = False`); stage an input to a USB-attached, *authorized* iPhone and harvest the resulting `.ips` crash log — **confirmation, not analysis**. Opt-in, require a connected device + `libimobiledevice` — see [docs/ON-DEVICE-TARGET.md](docs/ON-DEVICE-TARGET.md) |
+| `xpc:{dict,array,endpoint}` | Mock XPC/Mach message-schema parsers + offline schema-seed harvester (no daemon messages sent) |
 | `ipc:{share-payload,docprovider-item,intent-donation}` | Mock trust-boundary payload-envelope parsers (authorized-app decode modeling) |
 | `continuity:{handoff,findmy-adv,hotspot-tlv}` | Mock Continuity beacon-record parsers sharing a defect model (synthetic; no tracking) |
 | `pq3:{handshake,rekey}` | Mock ratchet session-transcript parsers with epoch-ordering oracles (synthetic vectors only) |

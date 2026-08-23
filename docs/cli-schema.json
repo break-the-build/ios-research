@@ -2721,6 +2721,50 @@
               }
             }
           }
+        },
+        "xpc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "xpc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "harvest": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "",
+                    "name": "schema_file",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "dict|array|endpoint or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
         }
       }
     },

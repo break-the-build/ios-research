@@ -352,3 +352,33 @@ def ipc(magic: bytes, data: bytes, rng) -> bytes:
     header = declared.to_bytes(2, "big") + bytes([item_type & 0xFF,
                                                   item_count & 0xFF])
     return magic + header + payload
+def xpc(magic: bytes, data: bytes, rng) -> bytes:
+    """Format-aware mutation of the normalized mock XPC/Mach message.
+
+    Message layout after ``magic``::
+
+        [declared_length u16 BE][entry_type u8][entry_count u8][payload...]
+
+    Edits steer the header toward the shared XPC defect paths.
+    """
+    payload = data[len(magic) + 4:] if len(data) > len(magic) + 4 else b"data"
+    declared = len(payload)
+    entry_type = 1
+    entry_count = 2
+    choice = rng.randrange(6)
+    if choice == 0:      # oversized declared length -> OOB read
+        declared = 0xFFFF
+    elif choice == 1:    # entry type 0 -> null connection-context dereference
+        entry_type = 0x00
+    elif choice == 2:    # zero entry count -> divide-by-zero table scaling
+        entry_count = 0
+    elif choice == 3:    # released-dictionary marker -> use-after-free
+        payload = b"\xde\xad" + payload
+        declared = len(payload)
+    elif choice == 4:    # oversized -> timeout path
+        declared = 0xF100
+    elif choice == 5:    # typed-slot value confusion
+        entry_type = 0xC0
+    header = declared.to_bytes(2, "big") + bytes([entry_type & 0xFF,
+                                                  entry_count & 0xFF])
+    return magic + header + payload
