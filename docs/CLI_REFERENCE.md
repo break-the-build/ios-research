@@ -311,7 +311,7 @@ Positional arguments:
 Options:
 
 - `--metadata` — local JSON researcher metadata/attestations
-- `--out` — output path for the redacted evidence-reference pack
+- `--out` — output directory for the redacted evidence pack and local artifacts
 
 ### `ios-research report bounty-validate`
 

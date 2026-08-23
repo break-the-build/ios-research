@@ -841,7 +841,7 @@
                 "flags": [
                   "--out"
                 ],
-                "help": "output path (default: report evidence directory)",
+                "help": "output directory (default: report evidence directory)",
                 "required": false
               }
             ],

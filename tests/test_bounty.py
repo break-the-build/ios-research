@@ -61,6 +61,25 @@ def test_evidence_pack_is_deterministic_and_redacts_researcher_secrets(workspace
     saved = json.loads(out.read_text())
     assert saved == first
     assert "do-not-export" not in out.read_text()
+    archive_paths = [item["archive_path"] for item in saved["artifacts"]]
+    assert "evidence/crashes/%s/original-input.bin" % report.crash_id in archive_paths
+    assert "evidence/crashes/%s/diagnostics/diagnostics.json" % report.crash_id in archive_paths
+    assert (out.parent / "evidence" / "crashes" / report.crash_id / "original-input.bin").is_file()
+
+
+def test_evidence_pack_rejects_missing_or_escaped_workspace_artifacts(workspace):
+    readiness, report = _report(workspace)
+    diagnostic = workspace.path(report.evidence["diagnostic_reference"])
+    diagnostic.unlink()
+    from ios_research.errors import ValidationError
+    import pytest
+    with pytest.raises(ValidationError, match="required evidence artifact is missing"):
+        readiness.write_pack(report)
+
+    # A crafted report ID cannot turn the fixed evidence paths into a traversal.
+    report.crash_id = "../outside"
+    with pytest.raises(ValidationError, match="workspace"):
+        readiness.pack(report)
 
 
 def test_bounty_metadata_must_be_a_json_object(tmp_path):

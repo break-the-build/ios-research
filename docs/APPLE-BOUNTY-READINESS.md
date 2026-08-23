@@ -20,7 +20,11 @@ authorization/contact attestations. A failed check means the evidence is
 incomplete; it does **not** determine Apple Security Bounty eligibility,
 severity, or reward.
 
-No data is transmitted. The command does not access Apple accounts, security
+`bounty-export` creates a deterministic local directory containing
+`manifest.json` and hash-verified copies of the retained original/minimized
+inputs, crash record, and diagnostics. Only fixed workspace-relative paths are
+accepted; missing files, hash mismatches, symlinks, and path escapes fail the
+export. No data is transmitted. The command does not access Apple accounts, security
 systems, Target Flags, privileged device capabilities, or generate exploits or
 payloads. The exported pack contains local artifact references and hashes, not
 raw exploit material.

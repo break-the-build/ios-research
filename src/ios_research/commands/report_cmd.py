@@ -50,7 +50,7 @@ def register(subparsers, parent) -> None:
     p_bounty_export.add_argument("--metadata", default=None,
                                  help="optional local JSON metadata/attestations")
     p_bounty_export.add_argument("--out", default=None,
-                                 help="output path (default: report evidence directory)")
+                                 help="output directory (default: report evidence directory)")
     p_bounty_export.set_defaults(func=cmd_bounty_export)
 
     p.set_defaults(func=cmd_list)
@@ -127,5 +127,6 @@ def cmd_bounty_export(ctx, args) -> Result:
     path = readiness.write_pack(report, metadata, args.out)
     result = readiness.validate(report, metadata)
     return Result(command="report bounty-export",
-                  data={"path": str(path), "ready": result["ready"],
-                        "safety": "local evidence references only; no data transmitted"})
+                  data={"manifest": str(path), "directory": str(path.parent),
+                        "ready": result["ready"],
+                        "safety": "local validated evidence copies only; no data transmitted"})
