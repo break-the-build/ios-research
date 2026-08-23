@@ -11,9 +11,69 @@
     "harnesses": ".ios-research/harnesses/<candidate_id>.json",
     "reports": ".ios-research/reports/<report_id>/",
     "research": ".ios-research/research/<research_id>.json",
+    "spoints": ".ios-research/spoints/<report_id>.json",
     "workspace_marker": ".ios-research/workspace.json"
   },
   "commands": {
+    "advisory": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "import": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "JSON file with an 'advisories' array",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "match": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "scan": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "experiment_id",
+                "flags": [
+                  "--experiment-id"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
     "agent": {
       "arguments": {
         "options": [],
@@ -750,6 +810,38 @@
                 ],
                 "help": "cases to execute this invocation (for resumable runs)",
                 "required": false
+              },
+              {
+                "dest": "dictionary",
+                "flags": [
+                  "--dictionary"
+                ],
+                "help": "path to a token dictionary (constraint-guided mutation, #30)",
+                "required": false
+              },
+              {
+                "dest": "value_profile",
+                "flags": [
+                  "--value-profile"
+                ],
+                "help": "record value-profile guidance in campaign metadata (#30)",
+                "required": false
+              },
+              {
+                "dest": "sanitizer_profile",
+                "flags": [
+                  "--sanitizer-profile"
+                ],
+                "help": "named sanitizer build profile recorded as provenance (#31)",
+                "required": false
+              },
+              {
+                "dest": "mutator_plugin",
+                "flags": [
+                  "--mutator-plugin"
+                ],
+                "help": "path to a grammar-aware mutator plugin (#41)",
+                "required": false
               }
             ],
             "positionals": []
@@ -943,6 +1035,97 @@
         "positionals": []
       }
     },
+    "matrix": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "input",
+                "flags": [
+                  "--input"
+                ],
+                "help": "path to the input to confirm",
+                "required": true
+              },
+              {
+                "dest": "trials",
+                "flags": [
+                  "--trials"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "cells",
+                "flags": [
+                  "--cells"
+                ],
+                "help": "JSON file with an array of cell specs (device_id, model, os_name, os_version, build)",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "matrix_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "matrix_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "report": {
       "arguments": {
         "options": [],
@@ -1005,6 +1188,44 @@
             ]
           }
         },
+        "coverage": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "as_markdown",
+                "flags": [
+                  "--markdown"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "coverage-compare": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "base_session_id",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "head_session_id",
+                "required": true
+              }
+            ]
+          }
+        },
         "create": {
           "arguments": {
             "options": [],
@@ -1050,6 +1271,27 @@
           "arguments": {
             "options": [],
             "positionals": []
+          }
+        },
+        "reachability": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "inventory",
+                "flags": [
+                  "--inventory"
+                ],
+                "help": "JSON file with a list of statically reachable feature/function IDs",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "session_id",
+                "required": false
+              }
+            ]
           }
         },
         "show": {
@@ -1225,6 +1467,78 @@
         }
       }
     },
+    "spoints": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "points": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "experiment",
+                "flags": [
+                  "--experiment"
+                ],
+                "help": "restrict to one experiment",
+                "required": false
+              },
+              {
+                "dest": "limit",
+                "flags": [
+                  "--limit"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "target": {
       "arguments": {
         "options": [],
@@ -1349,6 +1663,38 @@
                 "positionals": []
               }
             }
+          }
+        }
+      }
+    },
+    "targetflags": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "flag_id",
+                "required": true
+              }
+            ]
           }
         }
       }

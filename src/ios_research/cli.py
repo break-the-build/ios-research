@@ -22,8 +22,9 @@ from .output import Result, render
 from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
     corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, wifi_cmd, crash_cmd,
-    analyze_cmd, diff_cmd, harness_cmd, agent_cmd, report_cmd, research_cmd,
-    targetflags_cmd, advisory_cmd, surface_cmd, beta_cmd,
+    analyze_cmd, diff_cmd, report_cmd, research_cmd, matrix_cmd,
+    harness_cmd, spoints_cmd, surface_cmd, targetflags_cmd, advisory_cmd,
+    beta_cmd, agent_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -41,8 +42,10 @@ _REGISTRARS: list[Callable] = [
     analyze_cmd.register,
     diff_cmd.register,
     harness_cmd.register,
+    spoints_cmd.register,
     report_cmd.register,
     research_cmd.register,
+    matrix_cmd.register,
     agent_cmd.register,
     targetflags_cmd.register,
     advisory_cmd.register,
@@ -52,18 +55,27 @@ _REGISTRARS: list[Callable] = [
 
 
 def _global_parent() -> argparse.ArgumentParser:
+    # SUPPRESS defaults: every subparser re-inherits this parent, and plain
+    # defaults would clobber values parsed *before* the subcommand (argparse
+    # applies subparser defaults over the existing namespace).
     parent = argparse.ArgumentParser(add_help=False)
     parent.add_argument("--json", action="store_true", dest="as_json",
+                        default=argparse.SUPPRESS,
                         help="emit stable machine-readable JSON")
     parent.add_argument("--verbose", action="store_true",
+                        default=argparse.SUPPRESS,
                         help="verbose logging")
     parent.add_argument("--quiet", action="store_true",
+                        default=argparse.SUPPRESS,
                         help="suppress non-error human output")
-    parent.add_argument("--workspace", dest="workspace_path", default=None,
+    parent.add_argument("--workspace", dest="workspace_path",
+                        default=argparse.SUPPRESS,
                         help="path to the .ios-research workspace")
-    parent.add_argument("--config", dest="config_path", default=None,
+    parent.add_argument("--config", dest="config_path",
+                        default=argparse.SUPPRESS,
                         help="path to a config file override")
     parent.add_argument("--yes", action="store_true", dest="assume_yes",
+                        default=argparse.SUPPRESS,
                         help="assume yes; confirm destructive operations")
     return parent
 

@@ -26,6 +26,13 @@ STRATEGIES = (
     "structure_aware",
 )
 
+# Constraint-guided strategies (#30). They are appended to the strategy pool
+# only when a dictionary is supplied, so default behavior is unchanged.
+DICT_STRATEGIES = (
+    "dict_overwrite",
+    "dict_insert",
+)
+
 
 def rng_for(seed: int, iteration: int) -> random.Random:
     """Return a deterministic RNG for a specific fuzzing iteration."""
@@ -113,6 +120,27 @@ def mutate_structure_aware(data: bytes, rng: random.Random) -> bytes:
     return bytes(out)
 
 
+def mutate_dict_overwrite(data: bytes, rng: random.Random,
+                          tokens) -> bytes:
+    """Overwrite a span with a dictionary token (#30)."""
+    out = _b(data)
+    token = tokens[rng.randrange(len(tokens))].value
+    if len(out) < len(token):
+        out.extend(b"\x00" * (len(token) - len(out)))
+    pos = rng.randrange(0, len(out) - len(token) + 1)
+    out[pos:pos + len(token)] = token
+    return bytes(out)
+
+
+def mutate_dict_insert(data: bytes, rng: random.Random,
+                       tokens) -> bytes:
+    """Insert a dictionary token at an offset (#30)."""
+    out = _b(data)
+    token = tokens[rng.randrange(len(tokens))].value
+    pos = rng.randint(0, len(out))
+    return bytes(out[:pos]) + token + bytes(out[pos:])
+
+
 _DISPATCH = {
     "byte": mutate_byte,
     "truncation": mutate_truncation,
@@ -121,6 +149,11 @@ _DISPATCH = {
     "boundary": mutate_boundary,
     "integer": mutate_integer,
     "structure_aware": mutate_structure_aware,
+}
+
+_DICT_DISPATCH = {
+    "dict_overwrite": mutate_dict_overwrite,
+    "dict_insert": mutate_dict_insert,
 }
 
 
@@ -154,7 +187,8 @@ def weighted_strategies(weights: dict[str, int] | None,
 
 def mutate(data: bytes, seed: int, iteration: int,
            strategies: tuple[str, ...] = STRATEGIES,
-           struct_fn=None, weights: dict[str, int] | None = None) -> tuple[bytes, str]:
+           struct_fn=None, weights: dict[str, int] | None = None,
+           tokens=None) -> tuple[bytes, str]:
     """Deterministically mutate ``data`` for ``(seed, iteration)``.
 
     Returns ``(mutated_bytes, strategy_name)``. When the chosen strategy is
@@ -163,7 +197,9 @@ def mutate(data: bytes, seed: int, iteration: int,
 
     ``weights`` optionally biases strategy selection (see
     :func:`weighted_strategies`); ``None`` preserves uniform selection so the
-    default behavior is unchanged.
+    default behavior is unchanged. ``tokens`` supplies dictionary entries for
+    the constraint-guided strategies; if a dict strategy is drawn without any,
+    the call falls back to generic byte mutation.
     """
     rng = rng_for(seed, iteration)
     pool = weighted_strategies(weights, strategies)
@@ -172,4 +208,9 @@ def mutate(data: bytes, seed: int, iteration: int,
         mutated = struct_fn(data, rng)
         if mutated is not None:
             return mutated, strategy
+    if strategy in _DICT_DISPATCH:
+        if tokens:
+            return _DICT_DISPATCH[strategy](data, rng, tokens), strategy
+        # No dictionary available: deterministic fallback to byte mutation.
+        return mutate_byte(data, rng), "byte"
     return _DISPATCH[strategy](data, rng), strategy

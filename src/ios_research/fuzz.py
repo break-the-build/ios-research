@@ -21,6 +21,8 @@ from .clock import now_iso
 from .coverage import normalize_features
 from .corpus import CorpusStore, Corpus
 from .crashes import CrashStore
+from .dictionary import (DictionaryToken, load_dictionary, tokens_from_records,
+                         tokens_to_records)
 from .errors import NotFoundError, StateError
 from .hashing import sha256_bytes
 from .ids import make_id
@@ -60,6 +62,13 @@ class FuzzSession:
     coverage_adapter_errors: int = 0
     abnormal_events: int = 0
     last_abnormal_detail: str = ""
+    dictionary_source: str = ""
+    value_profile: bool = False
+    token_uses: int = 0
+    sanitizer_profile: str = ""
+    cases_since_new_feature: int = 0
+    mutator_plugin_path: str = ""
+    grammar_uses: int = 0
     started_at: str = ""
     updated_at: str = ""
 
@@ -88,6 +97,16 @@ class FuzzSession:
             },
             "abnormal_events": self.abnormal_events,
             "last_abnormal_detail": self.last_abnormal_detail,
+            "guidance": {
+                "dictionary_source": self.dictionary_source,
+                "value_profile": self.value_profile,
+                "token_uses": self.token_uses,
+            },
+            "sanitizer_profile": self.sanitizer_profile,
+            "mutator_plugin": {
+                "path": self.mutator_plugin_path,
+                "grammar_uses": self.grammar_uses,
+            },
         }
 
 
@@ -100,6 +119,9 @@ class FuzzEngine:
     def _rel(self, session_id: str) -> str:
         return f"fuzz/{session_id}.json"
 
+    def _dict_rel(self, session_id: str) -> str:
+        return f"fuzz/{session_id}.dict.json"
+
     # persistence ---------------------------------------------------------
     def save(self, session: FuzzSession) -> None:
         session.updated_at = now_iso()
@@ -110,6 +132,14 @@ class FuzzEngine:
         if not self.ws.path(rel).exists():
             raise NotFoundError(f"fuzz session '{session_id}' not found")
         return FuzzSession(**self.ws.read_json(rel))
+
+    def tokens_for(self, session: FuzzSession) -> list[DictionaryToken] | None:
+        """Load the persisted dictionary for a session, if it has one."""
+        rel = self._dict_rel(session.id)
+        if not self.ws.path(rel).exists():
+            return None
+        records = self.ws.read_json(rel).get("tokens", [])
+        return tokens_from_records(records) or None
 
     def list(self) -> list[FuzzSession]:
         return [FuzzSession(**d) for d in self.ws.list_json("fuzz")]
@@ -124,7 +154,12 @@ class FuzzEngine:
     def create(self, *, experiment_id: str, target: str, corpus_id: str,
                seed: int, workers: int, max_cases: int,
                duration_s: float | None,
-               strategy_weights: dict[str, int] | None = None) -> FuzzSession:
+               strategy_weights: dict[str, int] | None = None,
+               dictionary_path: str | None = None,
+               dictionary_tokens: list[DictionaryToken] | None = None,
+               value_profile: bool = False,
+               sanitizer_profile: str | None = None,
+               mutator_plugin_path: str | None = None) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -133,6 +168,25 @@ class FuzzEngine:
         # resume-invariant: crashing inputs added mid-run do not change bases.
         corpus = self.corpus_store.get(corpus_id)
         base_shas = [tc["sha256"] for tc in corpus.testcases]
+        tokens = list(dictionary_tokens or [])
+        if dictionary_path and tokens:
+            raise StateError(
+                "pass either dictionary_path or dictionary_tokens, not both")
+        if dictionary_path:
+            tokens = load_dictionary(dictionary_path)  # validated eagerly
+        profile = ""
+        if sanitizer_profile:
+            from .sanitizers import validate_profile
+            import sys
+            check = validate_profile(
+                sanitizer_profile,
+                platform="darwin" if sys.platform == "darwin" else "linux")
+            if not check["supported"]:
+                raise StateError(
+                    f"sanitizer profile '{sanitizer_profile}' is not usable: "
+                    f"{check['reason']}",
+                    details={"profile": sanitizer_profile})
+            profile = sanitizer_profile
         session = FuzzSession(
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
@@ -141,7 +195,17 @@ class FuzzEngine:
             strategy_weights=dict(strategy_weights or {}),
             status=RUNNING, started_at=now, updated_at=now,
             outcomes={o: 0 for o in Outcome.ALL},
+            dictionary_source=(dictionary_path
+                               or (tokens[0].source if tokens else "")),
+            value_profile=bool(value_profile),
+            sanitizer_profile=profile,
+            mutator_plugin_path=str(mutator_plugin_path or ""),
         )
+        if tokens:
+            self.ws.write_json(self._dict_rel(session.id), {
+                "schema": 1,
+                "tokens": tokens_to_records(tokens),
+            })
         self.save(session)
         return session
 
@@ -195,8 +259,19 @@ class FuzzEngine:
         target = targets.create(session.target)
         fmt = target.formats[0] if target.formats else target.kind
         struct_fn = target.structure_mutate
+        tokens = self.tokens_for(session)
+        strategies: tuple[str, ...] = mutation.STRATEGIES
+        if tokens:
+            strategies = mutation.STRATEGIES + mutation.DICT_STRATEGIES
         # Precompute the weighted strategy pool once (invariant for the run).
-        pool = mutation.weighted_strategies(session.strategy_weights or None)
+        pool = mutation.weighted_strategies(session.strategy_weights or None,
+                                            strategies)
+        # Grammar-aware mutator plugin (#41): loaded from a user-declared
+        # path; every call is isolated and falls back to generic mutation.
+        plugin_host = None
+        if session.mutator_plugin_path:
+            from .grammar import PluginHost
+            plugin_host = PluginHost().discover([session.mutator_plugin_path])
         unique = set(session.crash_ids)
         executed_this = 0
 
@@ -218,8 +293,24 @@ class FuzzEngine:
 
             i = session.cursor
             base = self._select_base(session, corpus, bases, i)
-            mutated, strategy = mutation.mutate(
-                base, session.seed, i, struct_fn=struct_fn, strategies=pool)
+            mutated = None
+            strategy = ""
+            if plugin_host is not None and plugin_host.plugins:
+                rng = mutation.rng_for(session.seed, i)
+                if len(bases) > 1 and i % 4 == 3:
+                    outcome = plugin_host.crossover_bytes(
+                        base, bases[(i + 1) % len(bases)], rng)
+                else:
+                    outcome = plugin_host.mutate_bytes(base, rng)
+                if outcome is not None:
+                    mutated, strategy = outcome
+                    session.grammar_uses += 1
+            if mutated is None:
+                mutated, strategy = mutation.mutate(
+                    base, session.seed, i, struct_fn=struct_fn,
+                    strategies=pool, tokens=tokens)
+            if strategy.startswith("dict_"):
+                session.token_uses += 1
             result = target.execute(mutated)
             session.outcomes[result.outcome] = \
                 session.outcomes.get(result.outcome, 0) + 1
@@ -230,6 +321,7 @@ class FuzzEngine:
                                  if feature not in known_features)
             if new_features:
                 session.coverage_features = sorted(known_features | set(new_features))
+                session.cases_since_new_feature = 0
                 sha = sha256_bytes(mutated)
                 if sha not in session.coverage_retained_shas:
                     session.coverage_retained_shas.append(sha)
@@ -272,6 +364,8 @@ class FuzzEngine:
                     corpus_dirty = True
 
             session.cursor += 1
+            if features is not None:
+                session.cases_since_new_feature += 1
             executed_this += 1
 
         # Flush batched corpus + crash state.

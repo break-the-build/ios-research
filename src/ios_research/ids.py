@@ -21,7 +21,9 @@ _PREFIXES = {
     "diff": "diff",
     "research": "res",
     "artifact": "art",
+    "matrix": "mtx",
     "harness": "har",
+    "spoints": "spt",
 }
 
 
