@@ -75,6 +75,15 @@ for _surface in DEVICE_SURFACES:
 from .jsc import JSCSemanticTarget  # noqa: E402
 register("jsc:semantic", lambda: JSCSemanticTarget())
 
+# Apple Security Research Device targets (#40). Strictly opt-in: the real
+# target runs only against an explicitly configured, approved SRD (config dict
+# or IOS_RESEARCH_SRD_CONFIG JSON file) and fails closed otherwise; registering
+# the factory is cheap and approves nothing. ``srd:fake`` is a deterministic
+# mock backend so provenance/lifecycle/redaction behavior is covered in CI.
+from .srd import SRDTarget, FakeSRDBackend  # noqa: E402
+register("srd:device", lambda: SRDTarget())
+register("srd:fake", lambda: FakeSRDBackend())
+
 __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",
