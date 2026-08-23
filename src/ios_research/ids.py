@@ -27,6 +27,7 @@ _PREFIXES = {
     "seqrun": "seq",
     "obstrace": "obs",
     "campaign": "camp",
+    "vdevice": "vdv",
 }
 
 
