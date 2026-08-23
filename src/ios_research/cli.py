@@ -21,8 +21,8 @@ from .output import Result, render
 # Groups are added phase by phase; later phases extend this list.
 from .commands import (
     core, config_cmd, device_cmd, target_cmd, experiment_cmd,
-    corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, crash_cmd, analyze_cmd,
-    diff_cmd, agent_cmd, report_cmd, research_cmd,
+    corpus_cmd, fuzz_cmd, audio_cmd, bluetooth_cmd, wifi_cmd, crash_cmd,
+    analyze_cmd, diff_cmd, agent_cmd, report_cmd, research_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -31,6 +31,7 @@ _REGISTRARS: list[Callable] = [
     device_cmd.register,
     audio_cmd.register,       # must precede target_cmd (installs 'target audio')
     bluetooth_cmd.register,   # must precede target_cmd (installs 'target bluetooth')
+    wifi_cmd.register,        # must precede target_cmd (installs 'target wifi')
     target_cmd.register,
     experiment_cmd.register,
     corpus_cmd.register,
