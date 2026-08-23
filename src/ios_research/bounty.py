@@ -165,12 +165,24 @@ class BountyReadiness:
                     f"[{claim['flag_id']}] {description}"))
 
         missing = [item["id"] for item in checks if not item["passed"]]
+
+        # Mitigation-generation mismatch (#87): a non-binding warning over the
+        # researcher-supplied matrix evidence; never affects readiness.
+        from .mitigation import mismatch_warning
+        warnings = []
+        matrix_items = metadata.get("matrix_evidence")
+        if isinstance(matrix_items, list):
+            warning = mismatch_warning(matrix_items)
+            if warning:
+                warnings.append(warning)
+
         return {
             "ready": not missing,
             "checklist_version": 1,
             "report_id": report.id,
             "checks": checks,
             "missing": missing,
+            "warnings": warnings,
             "target_flags": {
                 "taxonomy_version": taxonomy["taxonomy_version"],
                 "taxonomy_sha256": taxonomy["sha256"],
