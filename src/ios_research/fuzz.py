@@ -66,6 +66,7 @@ class FuzzSession:
     value_profile: bool = False
     token_uses: int = 0
     sanitizer_profile: str = ""
+    cases_since_new_feature: int = 0
     started_at: str = ""
     updated_at: str = ""
 
@@ -293,6 +294,7 @@ class FuzzEngine:
                                  if feature not in known_features)
             if new_features:
                 session.coverage_features = sorted(known_features | set(new_features))
+                session.cases_since_new_feature = 0
                 sha = sha256_bytes(mutated)
                 if sha not in session.coverage_retained_shas:
                     session.coverage_retained_shas.append(sha)
@@ -335,6 +337,8 @@ class FuzzEngine:
                     corpus_dirty = True
 
             session.cursor += 1
+            if features is not None:
+                session.cases_since_new_feature += 1
             executed_this += 1
 
         # Flush batched corpus + crash state.
