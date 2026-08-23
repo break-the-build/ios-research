@@ -221,7 +221,7 @@ class FakeBackend:
         self._info = info or {"model": "iPhone14,2", "os_name": "iOS",
                               "os_version": "17.0", "os_build": "21A329"}
         self._existing = set(existing or ())
-        self._new_report = new_report          # (identifier, text) or None
+        self._new_report = new_report          # (identifier, text), list, or None
         self._new_process = new_process
         self.delivered: list[tuple[str, str, str]] = []
 
@@ -246,12 +246,16 @@ class FakeBackend:
     def collect_new_reports(self, udid, since, process):
         if self._new_report is None:
             return []
-        ident, text = self._new_report
-        if ident in since:
-            return []
-        if process and process not in self._new_process:
-            return []
-        return [(ident, text)]
+        reports = (self._new_report if isinstance(self._new_report, list)
+                   else [self._new_report])
+        out = []
+        for ident, text in reports:
+            if ident in since:
+                continue
+            if process and ips.parse_metadata(text).get("process") != process:
+                continue
+            out.append((ident, text))
+        return out
 
 
 def _target(backend, surface="file", **kw):
@@ -309,6 +313,27 @@ def test_process_filter_excludes_unrelated_crash():
     backend = FakeBackend(new_report=report, new_process="SpringBoard")
     res = _target(backend, surface="file", process="MediaPlaybackd").execute(b"d")
     assert res.outcome == Outcome.ACCEPTED
+
+
+def test_process_filter_is_exact_not_a_substring():
+    report = ("other.ips", _json_ips(proc="MediaServer"))
+    backend = FakeBackend(new_report=report, new_process="MediaServer")
+    res = _target(backend, surface="file", process="Media").execute(b"d")
+    assert res.outcome == Outcome.ACCEPTED
+
+
+def test_newest_report_is_ranked_by_parsed_timestamp_not_identifier():
+    # Identifiers sort by process name first, so lexical order would pick the
+    # older SpringBoard report. Both are scoped to the same pinned target
+    # process to exercise the target's recency tie-break.
+    older = ("SpringBoard-2026-08-23-090000.ips",
+             _json_ips(proc="Target", ts="2026-08-23 09:00:00 -0700"))
+    newer = ("MediaPlaybackd-2026-08-23-101500.ips",
+             _json_ips(proc="Target", ts="2026-08-23 10:15:00 -0700"))
+    backend = FakeBackend(new_report=[older, newer])
+    res = _target(backend, surface="file", process="Target").execute(b"d")
+    assert res.outcome == Outcome.CRASH
+    assert res.diagnostics.thread["report"] == newer[0]
 
 
 def test_crash_routes_through_ips_parser_module_tag():
@@ -392,6 +417,18 @@ def test_real_backend_collect_new_reports_filters(monkeypatch, tmp_path):
     reports = backend.collect_new_reports("udid", {"old.ips"}, "Target")
     names = {ident for ident, _ in reports}
     assert names == {"new.ips"}      # old filtered by baseline; others by process/parse
+
+
+def test_real_backend_process_filter_is_exact(monkeypatch, tmp_path):
+    import ios_research.targets.device as devmod
+    monkeypatch.setattr(devmod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    crash_dir = tmp_path / "crashes"
+    crash_dir.mkdir()
+    (crash_dir / "near.ips").write_text(_json_ips(proc="TargetHelper"))
+    monkeypatch.setattr(devmod.tempfile, "mkdtemp", lambda prefix="": str(crash_dir))
+    monkeypatch.setattr(devmod.shutil, "rmtree", lambda *a, **k: None)
+    monkeypatch.setattr(devmod.subprocess, "run", lambda *a, **k: _Proc(""))
+    assert LibimobiledeviceBackend().collect_new_reports("udid", set(), "Target") == []
 
 
 # --- CLI: fuzz start against an unavailable device is a clean blocker --------
