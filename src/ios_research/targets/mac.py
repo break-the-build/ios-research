@@ -315,6 +315,133 @@ class MacFuzzTarget(Target):
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
 
+    # --- in-process persistent-mode libFuzzer (#20) ----------------------
+    def is_libfuzzer(self) -> bool:
+        """True if the resolved harness is a libFuzzer build (vs. the driver).
+
+        Probed by asking the binary for its help: libFuzzer prints its flag list
+        (``-runs``/``-max_total_time``); the standalone driver treats ``-help=1``
+        as a filename and prints its ``RUN``/``DONE`` protocol instead.
+        """
+        harness = self._harness_path or self.resolve_harness()
+        if harness is None:
+            return False
+        try:
+            proc = subprocess.run([str(harness), "-help=1"],
+                                  capture_output=True, timeout=self.timeout_s)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        blob = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+        return ("libFuzzer" in blob or "-runs=" in blob
+                or "-max_total_time" in blob)
+
+    def fuzz_corpus(self, seeds: list[bytes], *, runs: int = 100_000,
+                    max_total_time: float | None = None, workers: int = 1,
+                    artifact_dir: str | None = None
+                    ) -> tuple[list[tuple[bytes, ExecResult]], dict]:
+        """Run libFuzzer's in-process persistent loop over a seeded corpus.
+
+        This is the high-throughput path (#20): libFuzzer mutates and executes
+        in-process (no per-input process/dlopen cost), forks workers to run in
+        parallel, and writes each crashing input to ``artifact_prefix``. We then
+        re-run each unique crash artifact once through the same binary to capture
+        a clean ASan report and normalize it via :mod:`asan`.
+
+        Returns ``(unique_crashes, stats)`` where ``unique_crashes`` is a list of
+        ``(crashing_input, ExecResult)`` deduped by signature. Requires a
+        libFuzzer build (see :meth:`is_libfuzzer`).
+        """
+        import glob
+        import shutil
+        import tempfile
+        import time
+
+        self.prepare()
+        try:
+            harness = self._harness_path
+            if harness is None:
+                return [], {"error": "harness not built", "runs": 0}
+            if not self.is_libfuzzer():
+                return [], {"error": "harness is not a libFuzzer build "
+                            "(rebuild with: build.sh --libfuzzer)", "runs": 0}
+
+            owns_art = artifact_dir is None
+            artifact_dir = artifact_dir or tempfile.mkdtemp(
+                prefix="ios-research-lf-art-")
+            corpus_dir = tempfile.mkdtemp(prefix="ios-research-lf-corpus-")
+            try:
+                for i, s in enumerate(seeds or [b"\x00"]):
+                    with open(os.path.join(corpus_dir, f"seed_{i:06d}"), "wb") as fh:
+                        fh.write(s)
+
+                cmd = [str(harness), corpus_dir,
+                       f"-artifact_prefix={artifact_dir}/",
+                       f"-runs={runs}",
+                       # -fork enables -ignore_crashes so the run collects MANY
+                       # crash artifacts instead of stopping at the first.
+                       f"-fork={max(1, workers)}", "-ignore_crashes=1",
+                       "-print_final_stats=1"]
+                if max_total_time is not None:
+                    cmd.append(f"-max_total_time={int(max_total_time)}")
+
+                env = dict(os.environ)
+                env.setdefault("ASAN_OPTIONS", "detect_leaks=0")
+                start = time.monotonic()
+                budget = (max_total_time or self.timeout_s) + self.timeout_s
+                try:
+                    proc = subprocess.run(cmd, capture_output=True, env=env,
+                                          timeout=budget)
+                    blob = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+                except subprocess.TimeoutExpired:
+                    blob = ""
+                elapsed = time.monotonic() - start
+
+                # Collect crash artifacts and normalize each unique one.
+                unique: list[tuple[bytes, ExecResult]] = []
+                seen: set[str] = set()
+                arts = sorted(glob.glob(os.path.join(artifact_dir, "crash-*"))
+                              + glob.glob(os.path.join(artifact_dir, "oom-*"))
+                              + glob.glob(os.path.join(artifact_dir, "timeout-*")))
+                for art in arts:
+                    try:
+                        with open(art, "rb") as fh:
+                            data = fh.read()
+                    except OSError:
+                        continue
+                    res = self._run(data)  # single-input re-run -> ASan report
+                    if res.outcome == Outcome.CRASH and res.diagnostics:
+                        sig = res.diagnostics.signature
+                        if sig not in seen:
+                            seen.add(sig)
+                            unique.append((data, res))
+
+                executed = _parse_lf_runs(blob)
+                stats = {
+                    "runs": executed if executed is not None else runs,
+                    "elapsed_s": round(elapsed, 2),
+                    "exec_per_s": (round(executed / elapsed, 1)
+                                   if executed and elapsed else None),
+                    "artifacts": len(arts),
+                    "unique_crashes": len(unique),
+                }
+                return unique, stats
+            finally:
+                shutil.rmtree(corpus_dir, ignore_errors=True)
+                if owns_art:
+                    shutil.rmtree(artifact_dir, ignore_errors=True)
+        finally:
+            self.cleanup()
+
+
+def _parse_lf_runs(blob: str) -> "int | None":
+    """Extract the executed-run count from libFuzzer's final stats, if present."""
+    import re
+    m = re.search(r"stat::number_of_executed_units:\s*(\d+)", blob)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"\bDone\s+(\d+)\s+runs\b", blob)
+    return int(m.group(1)) if m else None
+
 
 def build_targets() -> dict[str, type]:
     """Return the ``{target_id: factory}`` mapping for registration."""

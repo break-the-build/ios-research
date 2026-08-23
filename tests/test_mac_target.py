@@ -433,6 +433,85 @@ def test_campaign_runner_parallel_workers(tmp_path, monkeypatch):
     assert parallel[0]["cases"] == 40
 
 
+# --- in-process libFuzzer engine (#20) -------------------------------------
+
+def _write_libfuzzer_stub(path):
+    """A stub that emulates a libFuzzer binary across its three invocations:
+    -help, a corpus/fork run (writes crash artifacts), and single-input re-run.
+    """
+    path.write_text(r'''#!/usr/bin/env bash
+case "$1" in
+  -help=1) echo "libFuzzer flags: -runs= -max_total_time= -fork="; exit 0 ;;
+esac
+prefix=""; corpus=""; is_run=0
+for a in "$@"; do
+  case "$a" in
+    -artifact_prefix=*) prefix="${a#-artifact_prefix=}"; is_run=1 ;;
+    -*) ;;
+    *) corpus="$a" ;;
+  esac
+done
+if [ "$is_run" = "1" ]; then
+  printf 'OOBcrashinput' > "${prefix}crash-aaaa"
+  printf 'UAFcrashinput' > "${prefix}crash-bbbb"
+  echo "stat::number_of_executed_units: 54321"
+  exit 0
+fi
+data=$(cat "$corpus" 2>/dev/null)
+case "$data" in
+  *OOB*) printf '%b' "==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000010 at pc 0x1 bp 0x2 sp 0x3\nREAD of size 1 at 0x602000000010 thread T0\n    #0 0x1 in decode a.c:1\n" >&2; exit 99 ;;
+  *UAF*) printf '%b' "==1==ERROR: AddressSanitizer: heap-use-after-free on address 0x602000000020 at pc 0x1 bp 0x2 sp 0x3\nREAD of size 4 at 0x602000000020 thread T0\n    #0 0x1 in use b.c:2\n" >&2; exit 99 ;;
+  *) exit 0 ;;
+esac
+''')
+    path.chmod(0o755)
+
+
+def test_is_libfuzzer_detection(tmp_path):
+    lf = tmp_path / "imageio_fuzzer"
+    _write_libfuzzer_stub(lf)
+    assert MacFuzzTarget("imageio", harness=str(lf)).is_libfuzzer() is True
+
+    drv = tmp_path / "driver_fuzzer"
+    _write_stub(drv, stdout="RUN 0\nDONE 0 rejected\n", code=0)
+    t = MacFuzzTarget("imageio", harness=str(drv))
+    t.prepare()
+    assert t.is_libfuzzer() is False
+
+
+def test_fuzz_corpus_collects_and_dedups(tmp_path):
+    lf = tmp_path / "imageio_fuzzer"
+    _write_libfuzzer_stub(lf)
+    t = MacFuzzTarget("imageio", harness=str(lf))
+    unique, stats = t.fuzz_corpus([b"seed"], runs=1000, workers=2)
+    classes = sorted(res.diagnostics.classification_hint for _d, res in unique)
+    assert classes == ["OUT_OF_BOUNDS_READ", "USE_AFTER_FREE"]
+    assert stats["runs"] == 54321
+    assert stats["unique_crashes"] == 2
+    assert all(res.outcome == Outcome.CRASH for _d, res in unique)
+
+
+def test_fuzz_corpus_rejects_non_libfuzzer(tmp_path):
+    drv = tmp_path / "imageio_fuzzer"
+    _write_stub(drv, stdout="RUN 0\nDONE 0 rejected\n", code=0)
+    t = MacFuzzTarget("imageio", harness=str(drv))
+    unique, stats = t.fuzz_corpus([b"seed"], runs=10)
+    assert unique == []
+    assert "not a libFuzzer build" in stats["error"]
+
+
+def test_campaign_auto_selects_libfuzzer(tmp_path, monkeypatch):
+    lf = tmp_path / "imageio_fuzzer"
+    _write_libfuzzer_stub(lf)
+    monkeypatch.setenv("IOS_RESEARCH_MAC_HARNESS", str(lf))
+    run = _load_campaign()
+    summary, crash_inputs = run.run_campaign(
+        "mac:imageio", cases=0, seed=1, batch=8, workers=2, engine="auto")
+    assert summary["engine"] == "libfuzzer"
+    assert summary["unique_crashes"] == 2
+    assert len(crash_inputs) == 2
+
+
 # --- self-test target (real-crash pipeline validation) ---------------------
 
 def test_selftest_target_registered_and_seeds():
@@ -515,6 +594,49 @@ def test_mac_target_timeout(tmp_path):
 
 
 # --- opt-in native end-to-end (requires macOS with a working ASan clang) ----
+
+
+def _fuzzer_clang() -> str | None:
+    """A clang that links -fsanitize=fuzzer (Apple ships no fuzzer runtime)."""
+    cc = _asan_clang()
+    if cc is None:
+        return None
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "p.c"
+        src.write_text("#include <stdint.h>\n#include <stddef.h>\n"
+                       "int LLVMFuzzerTestOneInput(const uint8_t*x,size_t n){"
+                       "return 0;}\n")
+        try:
+            r = subprocess.run([cc, "-fsanitize=fuzzer,address",
+                                str(src), "-o", str(Path(d) / "p")],
+                               capture_output=True, timeout=90)
+            return cc if r.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+
+@pytest.mark.skipif(_fuzzer_clang() is None,
+                    reason="requires a clang with the libFuzzer runtime "
+                           "(e.g. Homebrew LLVM; Apple ships none)")
+def test_native_libfuzzer_finds_real_crashes(tmp_path):
+    """End-to-end libFuzzer engine (#20): build --libfuzzer selftest and let the
+    in-process persistent loop discover real ASan crashes, normalized via asan."""
+    build = REPO / "tools" / "harness" / "build.sh"
+    env = dict(os.environ)
+    env["CC"] = _fuzzer_clang()
+    r = subprocess.run(["bash", str(build), "--libfuzzer", "selftest"],
+                       capture_output=True, env=env, timeout=180)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    binary = REPO / "tools" / "harness" / "build" / "selftest_fuzzer"
+    t = MacFuzzTarget("selftest", harness=str(binary), timeout_s=30)
+    assert t.is_libfuzzer()
+    unique, stats = t.fuzz_corpus(t.seeds(), runs=200_000,
+                                  max_total_time=20, workers=2)
+    assert unique, "libFuzzer found no crashes on the self-test target"
+    for _data, res in unique:
+        assert res.outcome == Outcome.CRASH
+        assert res.diagnostics.signature.startswith("asan_")
 
 
 @pytest.mark.skipif(_asan_clang() is None,
