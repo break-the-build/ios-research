@@ -141,3 +141,9 @@ for _tid, _cls in PQ3_TARGETS.items():
 from .continuity import CONTINUITY_TARGETS  # noqa: E402
 for _tid, _cls in CONTINUITY_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock trust-boundary payload-envelope targets (mock = True). Decode modeling only;
+# no permission/TCC mechanics; templates intended for authorized owned apps.
+from .ipc import IPC_TARGETS  # noqa: E402
+for _tid, _cls in IPC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
