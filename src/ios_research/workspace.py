@@ -29,6 +29,7 @@ SUBDIRS = (
     "analysis",
     "diffs",
     "research",
+    "harnesses",
     "matrices",
     "advisories",
     "logs",

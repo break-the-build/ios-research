@@ -300,6 +300,47 @@ Options:
 
 - `--force` — re-initialize even if a workspace exists
 
+### `ios-research harness`
+
+### `ios-research harness accept`
+
+Positional arguments:
+
+- `candidate_id` (required)
+
+### `ios-research harness generate`
+
+Options:
+
+- `--provider` — harness proposal provider
+- `--proposals-path` — JSON file of proposals (provider 'file')
+- `--max-candidates` — max candidates
+- `--smoke` — execute validated candidates once (opt-in)
+- `--target` (required)
+
+### `ios-research harness list`
+
+Options:
+
+- `--status`
+- `--target`
+
+### `ios-research harness reject`
+
+Positional arguments:
+
+- `candidate_id` (required)
+
+Options:
+
+- `--reason`
+
+### `ios-research harness show`
+
+Positional arguments:
+
+- `candidate_id` (required)
+
 ### `ios-research report`
 
 ### `ios-research report bounty-export`
