@@ -27,18 +27,10 @@ from .commands import (
     harness_cmd, spoints_cmd, findings_cmd, surface_cmd, targetflags_cmd,
     advisory_cmd, engine_cmd, beta_cmd, agent_cmd,
     net_cmd, kernel_cmd, oracle_cmd, detect_cmd, cve_cmd, lockdown_cmd,
-    netip_cmd,
-    wifiaware_cmd,
-    pq3_cmd,
-    continuity_cmd,
-    ipc_cmd,
-    xpc_cmd,
-    docimp_cmd,
-    signeddoc_cmd,
-    proxapp_cmd,
-    fsclient_cmd,
-    geo_cmd,
-    voiceassist_cmd,
+    proximity_cmd,
+    netip_cmd, wifiaware_cmd, pq3_cmd, continuity_cmd, ipc_cmd, xpc_cmd,
+    docimp_cmd, signeddoc_cmd, proxapp_cmd, fsclient_cmd, geo_cmd,
+    voiceassist_cmd, nday_cmd,
     evidence_cmd,
     sequence_cmd,
 )
@@ -92,6 +84,8 @@ _REGISTRARS: list[Callable] = [
     net_cmd.register,
     lockdown_cmd.register,
     oracle_cmd.register,
+    proximity_cmd.register,
+    nday_cmd.register,
 ]
 
 
