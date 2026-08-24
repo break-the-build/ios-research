@@ -48,8 +48,25 @@ Every command supports `--json` for a stable, machine-readable envelope.
 |--------|-------------|
 | `mock:parser` / `mock:parser-v2` | Deterministic record parser; v2 adds fixes + one regression for differential testing |
 | `audio:{wav,mp3,aac,alac}` | Mock audio-format parsers sharing a defect model |
+| `bluetooth:{btle-adv,l2cap,gatt}` | Mock Bluetooth frame parsers sharing a defect model (bytes-only; no radio access) |
+| `wifi:{beacon,probe-resp,action}` | Mock 802.11 management-frame parsers sharing a defect model (bytes-only; no radio access) |
+| `nfc:{ndef,isodep,tagcmd}` | Mock NFC/NDEF record parsers sharing a defect model (bytes-only; no tag hardware access) |
+| `messaging:{sms,mime,link-preview}` | Mock communication-message parsers (network zero-click profiles #85); shared defect model (bytes-only; no messaging transport or network access) |
+| `lockeddevice:{lockdownd,mfi-auth,notification}` | Mock locked-device surface parsers (physical-access profiles #86); shared defect model (bytes-only; no device, accessory, or data access) |
 | `mac:{imageio,audiotoolbox,coregraphics}` | **Real** macOS in-process libFuzzer/ASan targets (`mock = False`); opt-in, require a built harness — see [docs/MAC-FUZZING.md](docs/MAC-FUZZING.md) |
 | `ios-device:{file,imageio,audiotoolbox,coregraphics}` | **Real** black-box on-device targets (`mock = False`); stage an input to a USB-attached, *authorized* iPhone and harvest the resulting `.ips` crash log — **confirmation, not analysis**. Opt-in, require a connected device + `libimobiledevice` — see [docs/ON-DEVICE-TARGET.md](docs/ON-DEVICE-TARGET.md) |
+| `voiceassist:{siri-suggestion,callkit-intent}` | Mock lockscreen intent-record parsers (text-only; never activates audio input) |
+| `geo:{gpx,fit,geojson,tile-proto}` | Mock geodata/workout import parsers with range oracles (synthetic coords) |
+| `fsclient:{exfat-vol,smb2-resp}` | Mock exFAT/SMB2 client-side structure parsers (bytes-only) |
+| `proxapp:{hap-tlv,airplay-nego,mpc-frame,pbap-vcard}` | Mock proximity application-protocol parsers sharing a defect model |
+| `signeddoc:{profile,provision,receipt,pkpass}` | Mock ASN.1/CMS signed-document structure parsers (verify-only) |
+| `docimp:{zip-archive,ooxml-part,font,pdfform}` | Mock document-importer structure parsers sharing a defect model |
+| `xpc:{dict,array,endpoint}` | Mock XPC/Mach message-schema parsers + offline schema-seed harvester (no daemon messages sent) |
+| `ipc:{share-payload,docprovider-item,intent-donation}` | Mock trust-boundary payload-envelope parsers (authorized-app decode modeling) |
+| `continuity:{handoff,findmy-adv,hotspot-tlv}` | Mock Continuity beacon-record parsers sharing a defect model (synthetic; no tracking) |
+| `pq3:{handshake,rekey}` | Mock ratchet session-transcript parsers with epoch-ordering oracles (synthetic vectors only) |
+| `wifiaware:{publish,subscribe,datapath}` | Mock Wi-Fi Aware frame parsers sharing a defect model (bytes-only; no radio access) |
+| `netip:{mdns-record,dhcpv6-opt,icmp6-info,edns}` | Mock IP-stack input-path parsers sharing a defect model (bytes-only; no sockets) |
 
 New authorized research-device targets plug in behind the same interface — see
 [docs/RESEARCH-DEVICE.md](docs/RESEARCH-DEVICE.md). For real crashes without a
@@ -72,6 +89,30 @@ This is an evidence-completeness check, not an eligibility or reward decision.
 It remains local-only: it does not access Apple systems or Target Flags. See
 [docs/APPLE-BOUNTY-READINESS.md](docs/APPLE-BOUNTY-READINESS.md).
 
+### Defensive detection signatures
+
+Scan samples the researcher supplies for known malware capability sets
+(spyware-like surveillance/exfiltration combos, launchd persistence abuse,
+keychain harvesting, TCC probing) with a deterministic YARA-style engine:
+
+```bash
+ios-research detect lint                 # validate rules (default: built-in)
+ios-research detect scan <file>
+ios-research detect list-rules
+```
+
+### Known-CVE patch-regression validation
+
+Re-run already-public regression inputs against registered targets to confirm
+fixes and catch regressions:
+
+```bash
+ios-research cve install-catalog         # register built-in mock analogs
+ios-research cve validate                # exit 0 = all expectations hold
+```
+
+See [docs/CVE-REGRESSION.md](docs/CVE-REGRESSION.md).
+
 ## For LLM agents
 
 The full CLI is described in a machine-readable schema
@@ -83,7 +124,8 @@ See [AGENTS.md](AGENTS.md) for the operating contract and recommended workflow.
 - [ARCHITECTURE.md](ARCHITECTURE.md) / [FINAL_ARCHITECTURE.md](FINAL_ARCHITECTURE.md)
 - [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) — full command reference
 - [SECURITY.md](SECURITY.md) / [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
-- [TEST_REPORT.md](TEST_REPORT.md) — 122 tests, 88% branch coverage
+- [docs/CVE-REGRESSION.md](docs/CVE-REGRESSION.md) — patch-regression validation
+- [TEST_REPORT.md](TEST_REPORT.md) — test counts and branch coverage
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/PHASE-STATUS.md](docs/PHASE-STATUS.md)
 
 ## Development

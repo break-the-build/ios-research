@@ -29,6 +29,8 @@ described in a machine-readable schema.
 | `agent experiment --target T` | Create a stamped experiment |
 | `agent run --target T --max-cases N` | Bounded end-to-end pipeline |
 | `agent analyze` | Analyze all crashes |
+| `detect scan/lint/list-rules` | Defensive detection signatures (samples you supply) |
+| `cve catalog/install-catalog/add/list/validate/remove` | Known-CVE patch-regression validation |
 
 ## Recommended workflow
 
@@ -40,11 +42,13 @@ create experiment     -> ios-research experiment create --json
 fuzz                  -> ios-research fuzz start --target T --json
 detect crashes        -> ios-research crash list --json
 deduplicate           -> (crashes are deduped by signature at record time)
-minimize              -> ios-research crash minimize <id> --json
+minimize              -> ios-research crash minimize <id> --json [--max-executions N]
 reproduce             -> ios-research crash reproduce <id> --json
 analyze               -> ios-research analyze <id> --json
 differential test     -> ios-research diff run --json
 generate report       -> ios-research report create <id> --json
+patch regression      -> ios-research cve validate --json
+sample triage         -> ios-research detect scan <file> --json
 ```
 
 `agent run` performs fuzz → reproduce → minimize → analyze in one call for a

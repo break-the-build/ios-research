@@ -11,7 +11,23 @@ campaign.  This document defines how their results may be used.
 | Release quality gate | 01-04, 16, 18-framework, 19, 20 | The checked invariant passed or failed. These are CI gates, not optimizer campaigns. |
 | Deterministic simulator | 05-15 and 17 | A configuration improved a defined local model. It is a hypothesis for external validation, not a product-performance claim. |
 | Device-matching simulation | 18-on-device | The attribution logic improved against seeded busy-device scenarios. It is not a measurement from physical hardware. |
+| Evidence-readiness simulation | 21, 23, 24 | The pipeline produced a more complete/deterministic evidence pack or faster stage profile against the framework's own validators. Not a claim of bounty eligibility. |
+| Self-consistency detection benchmark | 22 | Rule-engine behavior matches its own documented indicators; not a malware-zoo evaluation. |
 | Authorized target validation | Future environments enabled by issues #29, #30, #31, #33, #36-#39 and #49 | A result measured on a declared, authorized target matrix with retained artifacts. This is eligible for a product-performance claim. |
+
+## Bounty alignment
+
+The portfolio's ultimate purpose is submission-quality evidence for the
+**Apple Security Bounty** program via authorized research. Goal 21
+(`iosr-bounty-evidence-readiness-v1`) directly optimizes the local
+evidence chain (`report bounty-validate` checklist + deterministic export);
+goals 09/11/08/06 cover PoC minimization, classification, deduplication, and
+reproducible discovery; goal 24 profiles turnaround latency per stage. See
+[docs/GOALS-REVIEW.md](../docs/GOALS-REVIEW.md) for the full coverage matrix,
+the first product insight (missing `affected_versions` provenance), and the
+remaining gaps (real `mac:*` harness campaign goal is gated on harness
+availability). Readiness metrics measure evidence completeness — they never
+imply bounty eligibility.
 
 ## Promotion policy
 

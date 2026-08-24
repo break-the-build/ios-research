@@ -29,18 +29,51 @@ SUBDIRS = (
     "analysis",
     "diffs",
     "research",
-    "matrices",
+    "harnesses",
+    "spoints",
     "findings",
     "suites",
+    "ndays",
+    "matrices",
+    "advisories",
+    "races",
+    "supply",
     "logs",
 )
 
 MARKER_FILE = "workspace.json"
 
 
+def validate_component(name: str, *, what: str = "identifier") -> str:
+    """Reject strings that must be a single safe path component.
+
+    Store ``get()`` entry points take ids from CLI arguments; validating here
+    gives a stable early error before any path join. Containment in
+    :meth:`Workspace.path` remains the backstop.
+    """
+    if not name or "/" in name or "\\" in name or name in (".", "..") \
+            or name.startswith("."):
+        raise ValidationError(
+            f"{what} must be a non-empty single path component: {name!r}")
+    return name
+
+
 class Workspace:
     def __init__(self, root: Path):
         self.root = Path(root).resolve()
+
+    def _contained(self, dest: Path) -> Path:
+        """Ensure ``dest`` stays inside the workspace root.
+
+        Ids and other externally influenced segments are joined onto ``root``
+        throughout the framework; this is the single choke point that keeps
+        them from escaping it (including via pre-planted symlinks).
+        """
+        resolved = dest.resolve()
+        if resolved != self.root and self.root not in resolved.parents:
+            raise ValidationError(
+                f"path escapes the workspace: {dest}")
+        return dest
 
     # -- discovery ---------------------------------------------------------
     @classmethod
@@ -84,7 +117,7 @@ class Workspace:
 
     # -- paths -------------------------------------------------------------
     def path(self, *parts: str) -> Path:
-        return self.root.joinpath(*parts)
+        return self._contained(self.root.joinpath(*parts))
 
     def dir(self, name: str) -> Path:
         if name not in SUBDIRS:
@@ -93,30 +126,32 @@ class Workspace:
 
     # -- json helpers ------------------------------------------------------
     def write_json(self, rel: str, obj: Any) -> Path:
-        dest = self.root / rel
+        dest = self._contained(self.root / rel)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        tmp = self._contained(
+            dest.with_suffix(dest.suffix + ".tmp"))
         tmp.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n",
                        encoding="utf-8")
         os.replace(tmp, dest)  # atomic write to avoid artifact corruption
         return dest
 
     def read_json(self, rel: str) -> Any:
-        dest = self.root / rel
+        dest = self._contained(self.root / rel)
         if not dest.exists():
             raise NotFoundError(f"missing workspace file: {rel}")
         return json.loads(dest.read_text(encoding="utf-8"))
 
     def write_bytes(self, rel: str, data: bytes) -> Path:
-        dest = self.root / rel
+        dest = self._contained(self.root / rel)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        tmp = self._contained(
+            dest.with_suffix(dest.suffix + ".tmp"))
         tmp.write_bytes(data)
         os.replace(tmp, dest)
         return dest
 
     def read_bytes(self, rel: str) -> bytes:
-        dest = self.root / rel
+        dest = self._contained(self.root / rel)
         if not dest.exists():
             raise NotFoundError(f"missing workspace file: {rel}")
         return dest.read_bytes()

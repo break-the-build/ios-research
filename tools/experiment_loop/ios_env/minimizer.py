@@ -55,7 +55,7 @@ class IosResearchMinimizerEnvironment(BaseEnvironment):
     _PAD_BYTES = 48
 
     knob_list = (
-        Knob(name="start_n", kind=KNOB_INT, default=2, low=2, high=8, step=1,
+        Knob(name="start_n", kind=KNOB_INT, default=2, low=2, high=16, step=1,
              description="initial ddmin partition count"),
         Knob(name="min_chunk", kind=KNOB_INT, default=1, low=1, high=4, step=1,
              description="smallest chunk ddmin will remove"),

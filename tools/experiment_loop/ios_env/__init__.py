@@ -1,10 +1,24 @@
 """experiment-loop environments for ios-research.
 
 Importing this package registers every ios-research environment with the
-experiment-loop registry. Load it from the CLI with::
+experiment-loop registry. Load it from the CLI with a *dotted* import::
 
-    python -m experiment_loop run <goal.json> \
-        --load tools/experiment_loop/ios_research_env.py --samples 40
+    PYTHONPATH=src python -m experiment_loop run <goal.json> \
+        --load tools.experiment_loop.ios_env --samples 40
+
+Run from the repository root with ``src/`` on ``PYTHONPATH``: the environment
+modules import the real framework (``from ios_research import ...``), which
+lives under ``src/``.
+
+File-path loading does **not** work here::
+
+    --load tools/experiment_loop/ios_env/__init__.py   # BROKEN
+
+``--load`` with a path imports the file as a standalone module, so the
+package's relative imports (``from . import fuzzer`` and friends) fail with
+``ImportError: attempted relative import with no known parent package``. Use
+the dotted form above; ``tools`` and ``tools.experiment_loop`` resolve as
+(implicit/explicit) namespace packages on the repository root.
 
 Each environment binds the *real* ios-research code to the experiment-loop
 search engine via a ``run(config, samples, seed) -> Observation`` method, so the
@@ -30,6 +44,12 @@ from . import research        # ios_research                 (goal 13)
 from . import agent           # ios_research_agent           (goals 14, 15)
 from . import reporting       # ios_research_reporting       (goal 17)
 from . import device_matching  # ios_research_device_matching (goal 18, issue #11)
+from . import bounty_readiness  # ios_research_bounty_readiness (goal 21)
+from . import detection_quality  # ios_research_detection     (goal 22)
+from . import cve_regression    # ios_research_cve_regression (goal 23)
+from . import pipeline_latency  # ios_research_pipeline_latency (goal 24)
 
 __all__ = ["fuzzer", "fuzzer_engine", "minimizer", "corpus", "crash_analysis",
-           "differential", "research", "agent", "reporting", "device_matching"]
+           "differential", "research", "agent", "reporting", "device_matching",
+           "bounty_readiness", "detection_quality", "cve_regression",
+           "pipeline_latency"]

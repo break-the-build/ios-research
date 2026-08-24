@@ -40,7 +40,13 @@ ARTIFACT_LOCATIONS = {
     "diffs": ".ios-research/diffs/<diff_id>/",
     "reports": ".ios-research/reports/<report_id>/",
     "research": ".ios-research/research/<research_id>.json",
+    "harnesses": ".ios-research/harnesses/<candidate_id>.json",
+    "spoints": ".ios-research/spoints/<report_id>.json",
+    "findings": ".ios-research/findings/<finding_id>.json",
+    "races": ".ios-research/races/<race_id>.json",
+    "ndays": ".ios-research/ndays/<diff_id>.json",
     "artifacts": ".ios-research/artifacts/<sha2>/<sha256>.bin",
+    "supply": ".ios-research/supply/<record_id>.json",
 }
 
 EXPERIMENT_LIFECYCLE = [
