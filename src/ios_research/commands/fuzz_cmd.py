@@ -62,6 +62,10 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--max-input-bytes", type=int, default=None,
                          help="skip mutated inputs larger than this many bytes "
                               "(default 1048576; 0 disables the bound)")
+    p_start.add_argument("--sched-perturb", default=None, dest="sched_perturb",
+                         help="comma-separated scheduling-perturbation modes "
+                              "applied between cases (#70): "
+                              "yield,priority,affinity,random-delay")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -143,6 +147,12 @@ def cmd_start(ctx, args) -> Result:
     max_input_bytes = getattr(args, "max_input_bytes", None)
     if max_input_bytes is None:
         max_input_bytes = cfg.get("limits.max_input_bytes")
+    sched_modes = ()
+    raw_sched = getattr(args, "sched_perturb", None)
+    if raw_sched:
+        from ..races import validate_modes
+        sched_modes = validate_modes(
+            mode.strip() for mode in raw_sched.split(",") if mode.strip())
     session = engine.create(experiment_id=experiment.id, target=target_id,
                             corpus_id=corpus.id, seed=seed, workers=workers,
                             max_cases=max_cases, duration_s=args.duration,
@@ -154,7 +164,8 @@ def cmd_start(ctx, args) -> Result:
                                 args, "sanitizer_profile", None),
                             mutator_plugin_path=getattr(
                                 args, "mutator_plugin", None),
-                            max_input_bytes=max_input_bytes)
+                            max_input_bytes=max_input_bytes,
+                            sched_modes=sched_modes)
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

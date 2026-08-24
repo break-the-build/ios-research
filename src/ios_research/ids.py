@@ -25,7 +25,7 @@ _PREFIXES = {
     "harness": "har",
     "spoints": "spt",
     "finding": "fin",
-    "finding": "fin",
+    "race": "rac",
     "supply": "sup",
     "nday": "ndy",
 }

@@ -11,6 +11,7 @@
     "fuzz_sessions": ".ios-research/fuzz/<session_id>.json",
     "harnesses": ".ios-research/harnesses/<candidate_id>.json",
     "ndays": ".ios-research/ndays/<diff_id>.json",
+    "races": ".ios-research/races/<race_id>.json",
     "reports": ".ios-research/reports/<report_id>/",
     "research": ".ios-research/research/<research_id>.json",
     "spoints": ".ios-research/spoints/<report_id>.json",
@@ -1317,6 +1318,14 @@
                 ],
                 "help": "skip mutated inputs larger than this many bytes (default 1048576; 0 disables the bound)",
                 "required": false
+              },
+              {
+                "dest": "sched_perturb",
+                "flags": [
+                  "--sched-perturb"
+                ],
+                "help": "comma-separated scheduling-perturbation modes applied between cases (#70): yield,priority,affinity,random-delay",
+                "required": false
               }
             ],
             "positionals": []
@@ -2149,6 +2158,78 @@
               {
                 "help": "",
                 "name": "profile_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "races": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "report",
+                "flags": [
+                  "--report"
+                ],
+                "help": "path to a saved TSan report text file",
+                "required": true
+              },
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "target id the report came from",
+                "required": false
+              },
+              {
+                "dest": "input_sha",
+                "flags": [
+                  "--input-sha"
+                ],
+                "help": "sha256 of the triggering input, if known",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "kind",
+                "flags": [
+                  "--kind"
+                ],
+                "help": "filter by race kind (e.g. 'data race')",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "race_id",
                 "required": true
               }
             ]

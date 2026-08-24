@@ -35,6 +35,7 @@ SUBDIRS = (
     "ndays",
     "matrices",
     "advisories",
+    "races",
     "supply",
     "logs",
 )
