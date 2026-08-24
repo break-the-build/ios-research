@@ -316,6 +316,113 @@
         }
       }
     },
+    "campaign": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "export": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "worker",
+                "flags": [
+                  "--worker"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "campaign",
+                "flags": [
+                  "--campaign"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "from_dir",
+                "flags": [
+                  "--from"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "require_new_coverage",
+                "flags": [
+                  "--require-new-coverage"
+                ],
+                "help": "skip inputs that add no new coverage feature",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "status": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "campaign",
+                "flags": [
+                  "--campaign"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
     "config": {
       "arguments": {
         "options": [],
@@ -1429,6 +1536,30 @@
                   "--max-input-bytes"
                 ],
                 "help": "skip mutated inputs larger than this many bytes (default 1048576; 0 disables the bound)",
+                "required": false
+              },
+              {
+                "dest": "llm_proposals",
+                "flags": [
+                  "--llm-proposals"
+                ],
+                "help": "JSONL proposal file for LLM-in-the-loop mutation (#71); requires --llm-budget",
+                "required": false
+              },
+              {
+                "dest": "llm_budget",
+                "flags": [
+                  "--llm-budget"
+                ],
+                "help": "max proposals consumed per campaign",
+                "required": false
+              },
+              {
+                "dest": "focus_symbol",
+                "flags": [
+                  "--focus-symbol"
+                ],
+                "help": "directed scheduling toward this symbol (#73); requires a target with a callgraph() hook",
                 "required": false
               },
               {
@@ -3883,6 +4014,230 @@
       "arguments": {
         "options": [],
         "positionals": []
+      }
+    },
+    "xcode": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "plan": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "plan_subcommand",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "import": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "",
+                    "name": "path",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            },
+            "show": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "",
+                    "name": "plan_id",
+                    "required": true
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "repro": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "plan",
+                "flags": [
+                  "--plan"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "failure_index",
+                "flags": [
+                  "--failure-index"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "project",
+                "flags": [
+                  "--project"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "workspace_swift",
+                "flags": [
+                  "--xcode-workspace"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "record_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "test": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "project",
+                "flags": [
+                  "--project"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "workspace_swift",
+                "flags": [
+                  "--xcode-workspace"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "destination",
+                "flags": [
+                  "--destination"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "only_testing",
+                "flags": [
+                  "--only-testing"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "sanitizer",
+                "flags": [
+                  "--sanitizer"
+                ],
+                "help": "address|thread|undefined-behavior|main-thread-checker|zombies (repeatable)",
+                "required": false
+              },
+              {
+                "dest": "result_bundle_path",
+                "flags": [
+                  "--result-bundle-path"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "print the command without executing (default when xcodebuild is unavailable)",
+                "required": false
+              },
+              {
+                "dest": "timeout",
+                "flags": [
+                  "--timeout"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "plan_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "xcresult": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "xcr_subcommand",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            },
+            "parse": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "",
+                    "name": "path",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "show": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "",
+                    "name": "record_id",
+                    "required": true
+                  }
+                ]
+              }
+            }
+          }
+        }
       }
     }
   },

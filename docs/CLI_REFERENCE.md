@@ -109,6 +109,36 @@ Options:
 - `--batch` — analyze all crashes (default when no id is given)
 
 
+### `ios-research campaign`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research campaign export`
+
+Options:
+
+- `--corpus`
+- `--out`
+- `--worker`
+- `--campaign`
+
+### `ios-research campaign import`
+
+Options:
+
+- `--from`
+- `--corpus`
+- `--dry-run`
+- `--require-new-coverage`
+
+### `ios-research campaign status`
+
+Options:
+
+- `--campaign`
+
 ### `ios-research beta`
 
 Positional arguments:
@@ -416,6 +446,9 @@ Options:
 - `--duration` — wall-clock budget in seconds
 - `--workers`
 - `--chunk` — cases to execute this invocation (for resumable runs)
+- `--llm-proposals` — JSONL proposal file for LLM-in-the-loop mutation (#71); requires --llm-budget
+- `--llm-budget` — max proposals consumed per campaign
+- `--focus-symbol` — directed scheduling toward this symbol (#73); requires a target with a callgraph() hook
 
 ### `ios-research fuzz stats`
 
@@ -934,3 +967,79 @@ Positional arguments:
 
 - `flag_id` (required)
 ### `ios-research version`
+
+### `ios-research xcode`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research xcode plan`
+
+Positional arguments:
+
+- `plan_subcommand` (required)
+
+### `ios-research xcode plan import`
+
+Positional arguments:
+
+- `path` (required)
+
+### `ios-research xcode plan list`
+
+### `ios-research xcode plan show`
+
+Positional arguments:
+
+- `plan_id` (required)
+
+### `ios-research xcode repro`
+
+Positional arguments:
+
+- `record_id` (required)
+
+Options:
+
+- `--plan`
+- `--failure-index`
+- `--project`
+- `--xcode-workspace`
+
+### `ios-research xcode test`
+
+Positional arguments:
+
+- `plan_id` (required)
+
+Options:
+
+- `--project`
+- `--xcode-workspace`
+- `--destination`
+- `--only-testing`
+- `--sanitizer`
+- `--result-bundle-path`
+- `--dry-run`
+- `--timeout`
+
+### `ios-research xcode xcresult`
+
+Positional arguments:
+
+- `xcr_subcommand` (required)
+
+### `ios-research xcode xcresult list`
+
+### `ios-research xcode xcresult parse`
+
+Positional arguments:
+
+- `path` (required)
+
+### `ios-research xcode xcresult show`
+
+Positional arguments:
+
+- `record_id` (required)
