@@ -36,6 +36,7 @@ from .commands import (
     xcode_cmd,
     campaign_cmd,
     suite_cmd,
+    srd_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -93,6 +94,7 @@ _REGISTRARS: list[Callable] = [
     supply_cmd.register,
     nday_cmd.register,
     xcode_cmd.register,
+    srd_cmd.register,
     campaign_cmd.register,
 ]
 

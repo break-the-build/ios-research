@@ -332,8 +332,87 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     return 1;
 }
 
+#elif defined(HARNESS_TARGET_CORETEXT)
+
+/* CoreText path: parse untrusted font data. CTFontManagerCreateFontDescriptorsFromData
+ * forces full sfnt table parsing (head/maxp/cmap/...); we then map characters to
+ * glyphs and extract an outline path, exercising glyf/CFF shape decoding under
+ * ASan/UBSan. Fonts are a classic untrusted-input surface shared by iOS/macOS. */
+typedef CFTypeRef CTFontDescriptorRef;
+typedef CFTypeRef CTFontRef;
+typedef CFTypeRef CFArrayRef;
+typedef CFTypeRef CGPathRef;
+typedef struct { float a, b, c, d, tx, ty; } IOSR_CGAffineTransform;
+
+static CFArrayRef (*p_CTFontManagerCreateFontDescriptorsFromData)(CFDataRef) = NULL;
+static CTFontRef (*p_CTFontCreateWithFontDescriptor)(CTFontDescriptorRef,
+                                                     double, void *) = NULL;
+static int (*p_CTFontGetGlyphsForCharacters)(CTFontRef, const uint16_t *,
+                                             uint16_t *, CFIndex) = NULL;
+static CGPathRef (*p_CTFontCreatePathForGlyph)(CTFontRef, uint16_t,
+                                               const IOSR_CGAffineTransform *) = NULL;
+static CFIndex (*p_CFArrayGetCount)(CFArrayRef) = NULL;
+static CFTypeRef (*p_CFArrayGetValueAtIndex)(CFArrayRef, CFIndex) = NULL;
+static void (*p_CGPathRelease)(CGPathRef) = NULL;
+
+static int resolve_target(void) {
+    if (!resolve_common()) return 0;
+    fw_handle = dlopen(
+        "/System/Library/Frameworks/CoreText.framework/CoreText",
+        RTLD_LAZY | RTLD_GLOBAL);
+    if (!fw_handle) { fprintf(stderr, "harness: dlopen CoreText: %s\n", dlerror()); return 0; }
+    void *cg = dlopen(
+        "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
+        RTLD_LAZY | RTLD_GLOBAL);
+    if (!cg) { fprintf(stderr, "harness: dlopen CoreGraphics: %s\n", dlerror()); return 0; }
+    p_CTFontManagerCreateFontDescriptorsFromData =
+        dlsym(fw_handle, "CTFontManagerCreateFontDescriptorsFromData");
+    p_CTFontCreateWithFontDescriptor =
+        dlsym(fw_handle, "CTFontCreateWithFontDescriptor");
+    p_CTFontGetGlyphsForCharacters =
+        dlsym(fw_handle, "CTFontGetGlyphsForCharacters");
+    p_CTFontCreatePathForGlyph = dlsym(fw_handle, "CTFontCreatePathForGlyph");
+    p_CFArrayGetCount = dlsym(cf_handle, "CFArrayGetCount");
+    p_CFArrayGetValueAtIndex = dlsym(cf_handle, "CFArrayGetValueAtIndex");
+    p_CGPathRelease = dlsym(cg, "CGPathRelease");
+    return p_CTFontManagerCreateFontDescriptorsFromData
+        && p_CTFontCreateWithFontDescriptor && p_CTFontGetGlyphsForCharacters
+        && p_CTFontCreatePathForGlyph && p_CFArrayGetCount
+        && p_CFArrayGetValueAtIndex && p_CGPathRelease;
+}
+
+static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
+    (void)data; (void)size;
+    CFArrayRef descs = p_CTFontManagerCreateFontDescriptorsFromData(cfdata);
+    if (!descs) return 0;
+    int decoded = 0;
+    if (p_CFArrayGetCount(descs) > 0) {
+        CTFontDescriptorRef desc =
+            (CTFontDescriptorRef)p_CFArrayGetValueAtIndex(descs, 0);
+        if (desc) {
+            CTFontRef font = p_CTFontCreateWithFontDescriptor(desc, 12.0, NULL);
+            if (font) {
+                uint16_t chars[4] = {'A', 'g', 'Q', 'y'};
+                uint16_t glyphs[4] = {0, 0, 0, 0};
+                if (p_CTFontGetGlyphsForCharacters(font, chars, glyphs, 4)) {
+                    for (int i = 0; i < 4; i++) {
+                        if (!glyphs[i]) continue;
+                        IOSR_CGAffineTransform xf = {1, 0, 0, 1, 0, 0};
+                        CGPathRef path =
+                            p_CTFontCreatePathForGlyph(font, glyphs[i], &xf);
+                        if (path) { p_CGPathRelease(path); decoded = 1; }
+                    }
+                }
+                p_CFRelease(font);
+            }
+        }
+    }
+    p_CFRelease(descs);
+    return decoded;
+}
+
 #else
-#error "Define one of HARNESS_TARGET_IMAGEIO / _AUDIOTOOLBOX / _COREGRAPHICS / _SELFTEST"
+#error "Define one of HARNESS_TARGET_IMAGEIO / _AUDIOTOOLBOX / _COREGRAPHICS / _CORETEXT / _SELFTEST"
 #endif
 
 static int g_ready = 0;

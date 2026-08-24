@@ -95,6 +95,7 @@ define_for() {
     imageio)      echo "-DHARNESS_TARGET_IMAGEIO" ;;
     audiotoolbox) echo "-DHARNESS_TARGET_AUDIOTOOLBOX" ;;
     coregraphics) echo "-DHARNESS_TARGET_COREGRAPHICS" ;;
+    coretext)     echo "-DHARNESS_TARGET_CORETEXT" ;;
     selftest)     echo "-DHARNESS_TARGET_SELFTEST" ;;
     *) return 1 ;;
   esac
