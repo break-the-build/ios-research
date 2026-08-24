@@ -109,6 +109,36 @@ Options:
 - `--batch` — analyze all crashes (default when no id is given)
 
 
+### `ios-research campaign`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research campaign export`
+
+Options:
+
+- `--corpus`
+- `--out`
+- `--worker`
+- `--campaign`
+
+### `ios-research campaign import`
+
+Options:
+
+- `--from`
+- `--corpus`
+- `--dry-run`
+- `--require-new-coverage`
+
+### `ios-research campaign status`
+
+Options:
+
+- `--campaign`
+
 ### `ios-research beta`
 
 Positional arguments:
