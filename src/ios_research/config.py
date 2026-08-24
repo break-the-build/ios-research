@@ -19,17 +19,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "timeout_ms": 1000,
         "seed": 0,
         # Mutation-strategy selection weights. Tuned via the experiment-loop
-        # 'ios_research_fuzzer' environment (goal 06-fuzz-effectiveness): keeping
-        # every strategy active while emphasizing the empirically strongest ones
-        # improves unique-crash yield +9-16% across mock and audio targets.
+        # 'ios_research_fuzzer' environment across TWO tuning generations:
+        #   (1) 2026-08-13, goal 06-fuzz-effectiveness: keeping every strategy
+        #       active while emphasizing the empirically strongest ones improved
+        #       unique-crash yield +9-16% across mock and audio targets.
+        #   (2) 2026-08-23, goal 05-engine-throughput: re-weighting toward
+        #       deletion/integer/structure_aware gives +27.05% end-to-end
+        #       executions_per_second through the real FuzzEngine with the hard
+        #       guardrail crash_detection_rate >= 0.99 held
+        #       (baseline 1f25151, seed 20260823, Welch t-test).
         "strategy_weights": {
             "byte": 1,
             "truncation": 1,
             "insertion": 1,
-            "deletion": 1,
+            "deletion": 4,
             "boundary": 2,
-            "integer": 1,
-            "structure_aware": 3,
+            "integer": 2,
+            "structure_aware": 4,
         },
     },
     "limits": {
