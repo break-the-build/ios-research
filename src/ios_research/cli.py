@@ -34,6 +34,7 @@ from .commands import (
     evidence_cmd,
     sequence_cmd,
     suite_cmd,
+    campaign_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -90,6 +91,7 @@ _REGISTRARS: list[Callable] = [
     proximity_cmd.register,
     supply_cmd.register,
     nday_cmd.register,
+    campaign_cmd.register,
 ]
 
 
