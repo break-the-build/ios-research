@@ -49,7 +49,9 @@ jobs:
         # 'native' tests build/run real ASan harnesses against a locally
         # controlled toolchain and are opt-in (see pyproject markers); hosted
         # runners cannot reproduce that environment deterministically.
+        # -n auto fans out across xdist workers; pytest-cov combines per-worker
+        # coverage data automatically before applying --cov-fail-under.
         run: >-
-          python -m pytest tests/ -m "not native"
+          python -m pytest tests/ -m "not native" -n auto
           --cov=ios_research --cov-report=term-missing
           --cov-fail-under=85

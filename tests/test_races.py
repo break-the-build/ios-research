@@ -180,10 +180,6 @@ class BrokenPerturbTarget(RaceHookTarget):
         raise RuntimeError("scheduler unavailable")
 
 
-targets.register("test:racehook", lambda: RaceHookTarget())
-targets.register("test:racehook-broken", lambda: BrokenPerturbTarget())
-
-
 @pytest.fixture(autouse=True)
 def _stub_targets():
     """Register stubs only while a test here runs; the global target
