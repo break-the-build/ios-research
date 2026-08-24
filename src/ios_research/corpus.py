@@ -156,9 +156,19 @@ class CorpusStore:
     def minimize(self, corpus: Corpus, target) -> dict:
         """Distill the corpus to one representative per distinct behavior.
 
-        Runs each testcase through ``target`` and keeps the first testcase for
-        each unique ``(outcome, signature)`` behavior key.
+        Each testcase is executed at most once (#197): results are memoized
+        per sha256 and shared between the coverage-feature backfill and the
+        behavior-key passes below.
         """
+        exec_results: dict[str, Any] = {}
+
+        def exec_once(sha256: str):
+            res = exec_results.get(sha256)
+            if res is None:
+                res = target.execute(self.read_bytes(corpus, sha256))
+                exec_results[sha256] = res
+            return res
+
         # Coverage-aware greedy set cover comes first.  Feature metadata is
         # preferred because it is the evidence captured at discovery time;
         # otherwise an optional target adapter is queried.  This preserves one
@@ -169,7 +179,7 @@ class CorpusStore:
             features = set(tc.get("coverage_features", ()))
             if not features:
                 data = self.read_bytes(corpus, tc["sha256"])
-                provided = target.coverage_features(data, target.execute(data))
+                provided = target.coverage_features(data, exec_once(tc["sha256"]))
                 if provided is not None:
                     features = set(provided)
             feature_sets[tc["sha256"]] = features
@@ -194,8 +204,7 @@ class CorpusStore:
                             if tc["sha256"] in kept_shas]
         behaviors: set[str] = set()
         for tc in corpus.testcases:
-            data = self.read_bytes(corpus, tc["sha256"])
-            res = target.execute(data)
+            res = exec_once(tc["sha256"])
             sig = res.diagnostics.signature if res.diagnostics else ""
             key = f"{res.outcome}:{sig}"
             if key in behaviors:

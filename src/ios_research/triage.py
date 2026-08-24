@@ -8,6 +8,7 @@ is rejected.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 from . import targets
@@ -76,7 +77,7 @@ class Triage:
         return still_crashes
 
     def minimize(self, crash: CrashRecord, *, add_regression: bool = True,
-                 max_executions: int | None = None) -> dict:
+                 max_executions: int | None = None, workers: int = 1) -> dict:
         original = self.crashes.input_bytes(crash)
         predicate = self._predicate(crash)
         executions = {"count": 0}
@@ -92,7 +93,8 @@ class Triage:
             # Cannot minimize what does not reproduce.
             return {"minimized": False, "reason": "input does not reproduce",
                     "original_size": len(original)}
-        minimized = ddmin(original, counted, max_executions=max_executions)
+        minimized = ddmin(original, counted, max_executions=max_executions,
+                          workers=workers)
         sha = self.crashes.write_minimized(crash, minimized)
 
         regression_added = False
@@ -134,14 +136,48 @@ class Triage:
 
 
 def ddmin(data: bytes, predicate: Callable[[bytes], bool],
-          max_executions: int | None = None) -> bytes:
+          max_executions: int | None = None, workers: int = 1) -> bytes:
     """Classic delta-debugging minimization.
 
     Returns the smallest byte string found for which ``predicate`` still holds.
     ``max_executions`` optionally bounds total predicate invocations; when the
     bound is hit, the best reduction found so far is returned. This keeps
     minimization of very large inputs against slow targets bounded.
+
+    ``workers`` controls how complements *within one round* are evaluated.
+    Complements of a single round are mutually independent — only the
+    acceptance decision must be sequential. With ``workers=1`` (default) the
+    original serial loop runs unchanged. With ``workers > 1`` the complements
+    of each round are dispatched to a thread pool in waves of at most
+    ``workers`` candidates (each candidate is typically a full target
+    execution; the subprocess wait releases the GIL, so threads scale), and
+    results are then applied STRICTLY IN INDEX ORDER: the first passing
+    complement is accepted exactly as the serial loop would accept it. The
+    minimized output is therefore identical for any ``workers`` value on the
+    same input.
+
+    Budget semantics: ``max_executions`` gates dispatches. The counter is
+    checked BEFORE each candidate is dispatched; once exhausted no new
+    dispatches happen and the round aborts to the best-so-far return, exactly
+    like serial exhaustion. Candidates already dispatched when the budget trips
+    may complete in the background and count toward ``executed``. As a result,
+    within a speculative wave that contains a passing complement the execution
+    count may exceed the serial run's by at most ``workers - 1`` (speculated
+    evaluations the serial loop would never have reached); the returned bytes
+    never differ.
+
+    Thread safety: the predicate closes over ONE shared target instance and
+    calls ``Target.execute`` per candidate. This is safe for concurrent use:
+    ``execute`` wraps each call in prepare/_run/cleanup with no cross-call
+    mutable state on the base class; ``MacFuzzTarget._run`` creates uniquely
+    named temp files per call (``NamedTemporaryFile(delete=False)``) and its
+    only shared field (``_harness_path``) is idempotently re-resolvable, now
+    guarded by a lock plus a resilient fallback read in ``_run`` (see
+    ``targets/mac.py``). ``tools/mac_campaign/run.py`` already threads
+    ``execute_batch`` on a shared instance as precedent.
     """
+    if workers > 1:
+        return _ddmin_parallel(data, predicate, max_executions, workers)
     n = 2
     executed = 0
     while len(data) >= 2:
@@ -164,4 +200,56 @@ def ddmin(data: bytes, predicate: Callable[[bytes], bool],
             if n >= len(data):
                 break
             n = min(len(data), n * 2)
+    return data
+
+
+def _ddmin_parallel(data: bytes, predicate: Callable[[bytes], bool],
+                    max_executions: int | None, workers: int) -> bytes:
+    """Concrete parallel path of :func:`ddmin` (``workers > 1``).
+
+    Same round structure as the serial loop; complements are evaluated in
+    budget-gated waves of at most ``workers`` candidates and accepted strictly
+    in index order, which makes the result identical to ``workers=1``.
+    """
+    n = 2
+    executed = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        while len(data) >= 2:
+            chunk = max(1, len(data) // n)
+            subsets = [data[i:i + chunk] for i in range(0, len(data), chunk)]
+            # Empty complements are skipped without counting, like serial.
+            complements = [c for c in
+                           (b"".join(subsets[:j] + subsets[j + 1:])
+                            for j in range(len(subsets)))
+                           if c]
+            reduced = False
+            start = 0
+            while start < len(complements):
+                # Budget is checked before EACH dispatch; a candidate whose
+                # check passed may still be in flight when the budget trips,
+                # and it counts toward `executed` like a serial attempt.
+                wave: list[bytes] = []
+                while (start < len(complements) and len(wave) < workers
+                       and (max_executions is None
+                            or executed < max_executions)):
+                    executed += 1
+                    wave.append(complements[start])
+                    start += 1
+                if not wave:
+                    # Budget exhausted before any dispatch: best-so-far
+                    # return, exactly like serial exhaustion.
+                    return data
+                results = list(pool.map(predicate, wave))
+                for offset, ok in enumerate(results):
+                    if ok:
+                        data = wave[offset]
+                        n = max(n - 1, 2)
+                        reduced = True
+                        break
+                if reduced:
+                    break
+            if not reduced:
+                if n >= len(data):
+                    break
+                n = min(len(data), n * 2)
     return data
