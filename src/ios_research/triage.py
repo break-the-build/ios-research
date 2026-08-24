@@ -28,6 +28,11 @@ class Triage:
     def __init__(self, workspace: Workspace):
         self.ws = workspace
         self.crashes = CrashStore(workspace)
+        # Custom-target SDK (#33): rehydrate persisted custom:<name>
+        # registrations so reproduce/minimize resolve in any later process
+        # (no-op when the workspace holds no registration records).
+        from .targetsdk import hydrate_manifests
+        hydrate_manifests(workspace)
 
     def _target(self, crash: CrashRecord):
         return targets.create(crash.target)

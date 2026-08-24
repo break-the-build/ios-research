@@ -44,10 +44,14 @@ a stable `STATE` error.
 
 ## Templates and markers
 
-Templates are byte-input harnesses with deliberately triggerable ASan bugs
-keyed on byte markers (`OOB` → OOB read, `WRT` → OOB write, `UAF` →
-use-after-free), modeled on the `mac:selftest` harness, so `target validate`
-can prove real crash parsing end to end. C/C++ also expose a
+Templates ship as plain-text package assets under
+`src/ios_research/target_templates/<language>/` — one byte-input harness
+source, a default `target-manifest.json`, and a README snippet that `target
+init` materializes into your project directory (`{name}` placeholders are
+substituted at init time). Templates are byte-input harnesses with deliberately
+triggerable ASan bugs keyed on byte markers (`OOB` → OOB read, `WRT` → OOB
+write, `UAF` → use-after-free), modeled on the `mac:selftest` harness, so
+`target validate` can prove real crash parsing end to end. C/C++ also expose a
 libFuzzer-compatible `LLVMFuzzerTestOneInput`; Swift/Obj-C use an argv-based
 driver because Apple clang ships no libFuzzer runtime (supported-platform
 fallback: validate/build them wherever the declared toolchain supports the

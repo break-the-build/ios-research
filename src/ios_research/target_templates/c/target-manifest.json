@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "{name}",
+  "language": "c",
+  "source": "harness.c",
+  "build_cmd": ["cc", "-g", "-O1", "-fno-omit-frame-pointer", "-DHARNESS_SDK_STANDALONE", "harness.c", "-o", "{out}"],
+  "output_path": "build/harness",
+  "seeds": ["seeds"],
+  "dictionary": null,
+  "sanitizer_profile": "asan-ubsan",
+  "timeout_s": 10.0,
+  "authorization": {"ack": false}
+}
