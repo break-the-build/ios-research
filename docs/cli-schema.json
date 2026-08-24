@@ -159,6 +159,14 @@
                 ],
                 "help": "",
                 "required": false
+              },
+              {
+                "dest": "workers",
+                "flags": [
+                  "--workers"
+                ],
+                "help": "thread pool width for post-fuzz crash triage (default 1 = serial)",
+                "required": false
               }
             ],
             "positionals": []
@@ -2950,6 +2958,61 @@
                 "required": true
               }
             ]
+          }
+        }
+      }
+    },
+    "srd": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "collect": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "timeout_s",
+                "flags": [
+                  "--timeout"
+                ],
+                "help": "override the adapter timeout in seconds",
+                "required": false
+              },
+              {
+                "dest": "note",
+                "flags": [
+                  "--note"
+                ],
+                "help": "free-text researcher note stored with the run",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "adapter",
+                "required": true
+              }
+            ]
+          }
+        },
+        "status": {
+          "arguments": {
+            "options": [],
+            "positionals": []
           }
         }
       }
