@@ -1,388 +1,370 @@
-"""Metamorphic and property-based oracles for non-crash findings (#42).
+"""Declarative metamorphic and property-based oracles for non-crash findings (#42).
 
-Many security-relevant faults never crash: inconsistent parse results,
-non-idempotent canonicalization, unbounded resource growth. This module defines
-a declarative, local-only oracle interface:
+An oracle declares, for one authorized target, a set of deterministic input
+transformations and the relations expected to hold between the observations of
+the original and transformed inputs (e.g. "appending accepted content to an
+accepted input must not introduce a crash", "parsing stays under a time
+budget").  Runs are seed-free and order-stable, so identical oracle specs and
+corpora reproduce byte-identical observation data.
 
-    relation(transform(input)) must relate to reference(input) in a declared way.
-
-* **Transformations** are deterministic, seeded rewrites of an authorized
-  target's own input (line reorder/dedupe/trim, byte-chunk shuffle).
-* **Relations** compare *observations* (normalized outcome/classification/
-  timing) of reference vs. transformed runs — never internal state.
-* Confirmed violations persist as findings with their transformed input,
-  minimized counterexample, observation data, oracle version, and an explicit
-  severity rationale that is **separated from any exploitability claim**.
-
-Timeouts and nondeterministic observations are recorded explicitly and are
-never silently promoted to findings: every candidate violation is re-checked;
-inconsistent re-checks are marked ``nondeterministic`` instead.
+Honesty rules enforced here:
+- Observations are behavioral evidence only; nothing in this module assigns or
+  implies exploitability.
+- Timeouts and nondeterministic observations are tracked explicitly as
+  *inconclusive* and can never become findings.
 """
 
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass, field, asdict
+import base64
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import targets
-from .clock import now_iso
-from .errors import NotFoundError, ValidationError
-from .hashing import sha256_bytes, sha256_text
+from .errors import ValidationError
+from .hashing import sha256_bytes
 from .ids import make_id
-from .targets.base import Outcome
-from .workspace import Workspace
 
 ORACLE_SCHEMA_VERSION = 1
-MAX_INPUT_BYTES = 256 * 1024
-MINIMIZE_ITERATIONS = 64
+ORACLE_VERSION = "oracles/1"
+
+MAX_BASES = 10_000
+MAX_COUNTEREXAMPLE_BYTES = 1 << 20
 
 
-# --- observations -------------------------------------------------------------
+# -- transformations -----------------------------------------------------------
 
-@dataclass
-class Observation:
-    """What we can legitimately see about one execution."""
-
-    outcome: str
-    classification: str = ""
-    signature: str = ""
-    duration_ms: int = 0
-
-    @property
-    def key(self) -> str:
-        return f"{self.outcome}:{self.classification}"
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-def observe(target, data: bytes, *, deadline_s: float | None = None) -> Observation:
-    result = target.execute(data)
-    diag = result.diagnostics
-    if deadline_s is not None and result.duration_ms > deadline_s * 1000:
-        raise TimeoutError(f"observation exceeded {deadline_s}s budget")
-    return Observation(
-        outcome=result.outcome,
-        classification=diag.classification_hint if diag else "",
-        signature=diag.signature if diag else "",
-        duration_ms=result.duration_ms,
-    )
-
-
-# --- transformations ----------------------------------------------------------
-
-def _t_identity(data: bytes, rng) -> bytes:
+def _t_identity(data: bytes) -> bytes:
     return data
 
 
-def _t_sort_lines(data: bytes, rng) -> bytes:
-    lines = data.split(b"\n")
-    return b"\n".join(sorted(lines))
+def _t_append_self(data: bytes) -> bytes:
+    return data + data
 
 
-def _t_dedupe_lines(data: bytes, rng) -> bytes:
-    seen: set[bytes] = set()
-    out = []
-    for line in data.split(b"\n"):
-        if line not in seen:
-            seen.add(line)
-            out.append(line)
-    return b"\n".join(out)
+def _t_truncate_half(data: bytes) -> bytes:
+    return data[: len(data) // 2]
 
 
-def _t_trim_lines(data: bytes, rng) -> bytes:
-    return b"\n".join(line.strip() for line in data.split(b"\n"))
-
-
-def _t_shuffle_chunks(data: bytes, rng) -> bytes:
-    if len(data) < 8:
+def _t_flip_first_bit(data: bytes) -> bytes:
+    if not data:
         return data
-    size = max(2, len(data) // 4)
-    chunks = [data[i:i + size] for i in range(0, len(data), size)]
-    rng.shuffle(chunks)
-    return b"".join(chunks)
+    out = bytearray(data)
+    out[0] ^= 0x01
+    return bytes(out)
 
 
-TRANSFORMS: dict[str, Callable[[bytes, Any], bytes]] = {
+def _t_zero_first_byte(data: bytes) -> bytes:
+    if not data:
+        return data
+    return b"\x00" + data[1:]
+
+
+TRANSFORMATIONS: dict[str, Callable[[bytes], bytes]] = {
     "identity": _t_identity,
-    "sort_lines": _t_sort_lines,
-    "dedupe_lines": _t_dedupe_lines,
-    "trim_lines": _t_trim_lines,
-    "shuffle_chunks": _t_shuffle_chunks,
+    "append-self": _t_append_self,
+    "truncate-half": _t_truncate_half,
+    "flip-first-bit": _t_flip_first_bit,
+    "zero-first-byte": _t_zero_first_byte,
+}
+
+RELATIONS = ("not_crash", "same_outcome", "bounded_time")
+
+_SEVERITY = {
+    "NORMAL->CRASH": "high",
+    "outcome-change": "medium",
+    "bounded_time": "low",
 }
 
 
-def get_transform(name: str):
-    try:
-        return TRANSFORMS[name]
-    except KeyError:
+def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    """Validate a declarative oracle spec; returns it unchanged on success."""
+    if not isinstance(spec, dict):
+        raise ValidationError("oracle spec must be a JSON object")
+    if spec.get("schema_version") != ORACLE_SCHEMA_VERSION:
         raise ValidationError(
-            f"unknown transform '{name}'; known: {', '.join(sorted(TRANSFORMS))}"
-        ) from None
-
-
-# --- relations ------------------------------------------------------------------
-
-def _r_outcome_invariant(ref: Observation, other: Observation) -> str | None:
-    """A semantically neutral rewrite must not change the parsed verdict."""
-    if ref.key != other.key:
-        return (f"observation changed under neutral rewrite: "
-                f"{ref.key} -> {other.key}")
-    return None
-
-
-def _r_crash_signature_stable(ref: Observation, other: Observation) -> str | None:
-    """When both executions crash, they must be the *same* defect."""
-    if ref.outcome == Outcome.CRASH and other.outcome == Outcome.CRASH \
-            and ref.signature != other.signature:
-        return f"crash signature changed: {ref.signature} != {other.signature}"
-    return None
-
-
-def _r_time_bounded(bound_ms: int):
-    def check(ref: Observation, other: Observation) -> str | None:
-        if other.duration_ms > bound_ms:
-            return (f"transformed execution took {other.duration_ms}ms "
-                    f"(bound {bound_ms}ms)")
-        return None
-    return check
-
-
-RELATIONS: dict[str, Callable[[Observation, Observation], str | None]] = {
-    "outcome_invariant": _r_outcome_invariant,
-    "crash_signature_stable": _r_crash_signature_stable,
-}
-RELATIONS["time_bounded_1000"] = _r_time_bounded(1000)
-
-SEVERITY_RATIONALE = {
-    "outcome_invariant":
-        "inconsistent parsing of equivalent inputs can bypass validation",
-    "crash_signature_stable":
-        "transform-sensitive crash signatures complicate triage and dedup",
-    "time_bounded_1000":
-        "unbounded time growth on rewritten-but-equivalent input",
-}
-
-
-def get_relation(name: str):
-    try:
-        return RELATIONS[name]
-    except KeyError:
+            f"oracle schema_version must be {ORACLE_SCHEMA_VERSION}")
+    target = spec.get("target")
+    if not isinstance(target, str) or not target.strip():
+        raise ValidationError("oracle spec requires a 'target'")
+    transforms = spec.get("transformations")
+    if not isinstance(transforms, list) or not transforms:
         raise ValidationError(
-            f"unknown relation '{name}'; known: {', '.join(sorted(RELATIONS))}"
-        ) from None
+            "oracle spec requires a non-empty 'transformations' array")
+    unknown = [t for t in transforms if t not in TRANSFORMATIONS]
+    if unknown:
+        raise ValidationError(
+            f"unknown transformations: {', '.join(sorted(set(unknown)))} "
+            f"(known: {', '.join(TRANSFORMATIONS)})")
+    relations = spec.get("relations")
+    if not isinstance(relations, list) or not relations:
+        raise ValidationError(
+            "oracle spec requires a non-empty 'relations' array")
+    unknown = [r for r in relations if r not in RELATIONS]
+    if unknown:
+        raise ValidationError(f"unknown relations: {', '.join(unknown)}")
+    max_ms = spec.get("max_duration_ms", 1000)
+    if not isinstance(max_ms, int) or isinstance(max_ms, bool) or max_ms <= 0:
+        raise ValidationError("'max_duration_ms' must be a positive integer")
+    seeds = spec.get("seeds_b64", [])
+    if not isinstance(seeds, list) or any(not isinstance(s, str) for s in seeds):
+        raise ValidationError("'seeds_b64' must be an array of strings")
+    return spec
 
-
-# --- engine ---------------------------------------------------------------------
 
 @dataclass
-class OracleRunRecord:
-    id: str
-    target: str
-    relations: list[str]
-    transforms: list[str]
-    created_at: str
-    status: str = "created"
-    summary: dict[str, Any] = field(default_factory=dict)
+class Observation:
+    """One recorded target observation (behavioral evidence only)."""
+
+    outcome: str
+    detail: str
+    duration_ms: int
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {"outcome": self.outcome, "detail": self.detail[:200],
+                "duration_ms": self.duration_ms}
+
+
+@dataclass
+class OracleRun:
+    """Result of evaluating an oracle spec against a set of base inputs."""
+
+    id: str
+    spec: dict[str, Any]
+    bases_evaluated: int = 0
+    cases_evaluated: int = 0
+    violations: list[dict[str, Any]] = field(default_factory=list)
+    inconclusive_timeouts: int = 0
+    inconclusive_nondeterministic: int = 0
+    transitions: list[dict[str, str]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": ORACLE_SCHEMA_VERSION,
+            "kind": "oracle-run",
+            "oracle_version": ORACLE_VERSION,
+            "id": self.id,
+            "spec": self.spec,
+            "bases_evaluated": self.bases_evaluated,
+            "cases_evaluated": self.cases_evaluated,
+            "violation_count": len(self.violations),
+            "violations": self.violations,
+            "inconclusive": {
+                "timeouts": self.inconclusive_timeouts,
+                "nondeterministic": self.inconclusive_nondeterministic,
+            },
+            # Differential-vocabulary summary for cross-reporting.
+            "transitions": self.transitions,
+        }
 
 
 class OracleEngine:
-    def __init__(self, workspace: Workspace):
+    """Evaluate declarative oracles against an authorized target."""
+
+    def __init__(self, workspace):
         self.ws = workspace
 
-    def _rel(self, run_id: str) -> str:
-        return f"findings/{run_id}/oracle.json"
-
-    # persistence ----------------------------------------------------------
-    def save(self, record: OracleRunRecord) -> None:
-        self.ws.write_json(self._rel(record.id), record.to_dict())
-
-    def get(self, run_id: str) -> OracleRunRecord:
-        rel = self._rel(run_id)
-        if not self.ws.path(rel).exists():
-            raise NotFoundError(f"oracle run '{run_id}' not found")
-        return OracleRunRecord(**self.ws.read_json(rel))
-
-    def list(self) -> list[OracleRunRecord]:
-        base = self.ws.dir("findings")
-        out = []
-        for manifest in sorted(base.glob("*/oracle.json")):
-            out.append(OracleRunRecord(**self.ws.read_json(
-                str(manifest.relative_to(self.ws.root)))))
-        return out
-
-    # execution --------------------------------------------------------------
-    def run(self, *, target_id: str, inputs: list[bytes],
-            relations: list[str] | None = None,
-            transforms: list[str] | None = None,
-            trials: int = 2,
-            stage_deadline_s: float = 5.0) -> dict[str, Any]:
-        if not targets.is_registered(target_id):
-            raise NotFoundError(f"unknown target '{target_id}'")
-        relations = list(relations or ["outcome_invariant"])
-        transforms = list(transforms or ["sort_lines", "dedupe_lines",
-                                         "trim_lines"])
-        if trials < 2:
-            raise ValidationError("trials must be >= 2 to detect "
-                                  "nondeterminism")
-        for blob in inputs:
-            if len(blob) > MAX_INPUT_BYTES:
-                raise ValidationError("input exceeds oracle size bound")
-
-        target = targets.create(target_id)
-        findings: list[dict[str, Any]] = []
-        checked = 0
-
-        for blob in inputs:
-            ref_sha = sha256_bytes(blob)
-            ref_obs = observe(target, blob)
-            for t_name in transforms:
-                transform = get_transform(t_name)
-                seed = int(sha256_text(f"{t_name}|{ref_sha}"), 16) % (2 ** 31)
-                transformed = transform(blob, _Rng(seed))
-                if transformed == blob or not transformed:
-                    continue
-                new_obs = observe(target, transformed,
-                                  deadline_s=stage_deadline_s)
-                checked += 1
-                for r_name in relations:
-                    reason = get_relation(r_name)(ref_obs, new_obs)
-                    if reason is None:
-                        continue
-                    findings.append(self._confirm_or_mark_nondeterministic(
-                        target=target, target_id=target_id,
-                        relation=r_name, transform=t_name,
-                        reference=blob, first_reason=reason, trials=trials))
-
-        record_id = make_id("oracle", target_id, str(len(inputs)),
-                            ",".join(relations), ",".join(transforms),
-                            now_iso())
-        record = OracleRunRecord(
-            id=record_id, target=target_id,
-            relations=relations, transforms=transforms, created_at=now_iso())
-        summary = {
-            "schema_version": ORACLE_SCHEMA_VERSION,
-            "inputs_checked": len(inputs),
-            "pairs_evaluated": checked,
-            "violations_confirmed": sum(
-                1 for f in findings if f["status"] == "confirmed"),
-            "nondeterministic": sum(
-                1 for f in findings if f["status"] == "nondeterministic"),
-            "findings": findings,
-            "note": ("observations describe target behavior only; they carry "
-                     "no exploitability claim"),
-        }
-        record.summary = summary
-        record.status = "run"
-        self.save(record)
-        return {"run_id": record.id, **summary}
-
-    def _confirm_or_mark_nondeterministic(
-            self, *, target, target_id: str, relation: str, transform: str,
-            reference: bytes, first_reason: str,
-            trials: int) -> dict[str, Any]:
-        """Re-check the violation; instability downgrades to nondeterministic."""
-        statuses = []
-        reasons = [first_reason]
-        for trial in range(trials - 1):
-            rng_seed = int(sha256_text(f"{relation}|{trial}"), 16) % (2 ** 31)
-            again = get_transform(transform)(reference, _Rng(rng_seed))
-            obs = observe(target, again)
-            reason = get_relation(relation)(
-                observe(target, reference), obs)
-            statuses.append(reason is not None)
-            if reason:
-                reasons.append(reason)
-        stable = all(statuses) and len(statuses) == trials - 1
-        minimized, minimize_stats = self._minimize(
-            target, reference, relation, transform)
-        finding_id = make_id(
-            "oraclefinding", target_id, relation, transform,
-            sha256_bytes(reference))
-        finding = {
-            "id": finding_id,
-            "schema_version": ORACLE_SCHEMA_VERSION,
-            "target": target_id,
-            "relation": relation,
-            "transform": transform,
-            "oracle_version": ORACLE_SCHEMA_VERSION,
-            "status": "confirmed" if stable else "nondeterministic",
-            "reasons": reasons[:4],
-            "severity_rationale": SEVERITY_RATIONALE.get(
-                relation, "declared relation violated"),
-            "exploitability_claim": None,   # explicitly out of scope
-            "reference_sha256": sha256_bytes(reference),
-            "minimized": minimize_stats,
-        }
-        # Retain evidence locally: minimized counterexample when found.
-        if minimized is not None:
-            self.ws.write_bytes(f"findings/{finding_id}/minimized.bin",
-                                minimized)
-        return finding
+    # -- observation ---------------------------------------------------------
 
     @staticmethod
-    def _minimize(target, reference: bytes, relation: str, transform: str,
-                  max_iterations: int = MINIMIZE_ITERATIONS
-                  ) -> tuple["bytes | None", dict[str, Any]]:
-        """Greedy line/chunk delta-debug preserving the violation.
+    def _observe(target, data: bytes) -> Observation:
+        result = target.execute(data)
+        return Observation(outcome=result.outcome,
+                           detail=result.detail[:200],
+                           duration_ms=result.duration_ms)
 
-        Returns ``(minimized_bytes_or_None, stats)``.
-        """
-        start = time.monotonic()
+    def _is_deterministic(self, target, data: bytes, first: Observation,
+                          repeats: int = 2) -> bool:
+        for _ in range(repeats):
+            again = self._observe(target, data)
+            if again.outcome != first.outcome:
+                return False
+        return True
 
-        def violates(candidate: bytes) -> bool:
+    # -- evaluation ------------------------------------------------------------
+
+    def run(self, spec: dict[str, Any], *, corpus_id: str | None = None,
+            run_id: str | None = None) -> OracleRun:
+        from .targets import create as create_target
+
+        spec = validate_spec(dict(spec))
+        target = create_target(spec["target"])
+        bases = self._base_inputs(spec, corpus_id)
+        if not bases:
+            raise ValidationError(
+                "oracle run needs inputs: provide 'seeds_b64' or 'corpus_id'")
+
+        run = OracleRun(
+            id=run_id or make_id("orl", spec["target"],
+                                 sha256_bytes(_canonical(spec))[:12]),
+            spec=spec)
+
+        for base_sha, base_data in bases:
+            base_obs = self._observe(target, base_data)
+            if base_obs.outcome == "timeout":
+                run.inconclusive_timeouts += 1
+                continue
+            if not self._is_deterministic(target, base_data, base_obs):
+                run.inconclusive_nondeterministic += 1
+                continue
+            run.bases_evaluated += 1
+
+            for transform_name in spec["transformations"]:
+                transform = TRANSFORMATIONS[transform_name]
+                mutated = transform(base_data)[:MAX_COUNTEREXAMPLE_BYTES]
+                obs = self._observe(target, mutated)
+                run.cases_evaluated += 1
+                self._evaluate(run, spec, target, base_sha, base_data,
+                               transform_name, mutated, base_obs, obs)
+        self._persist(run)
+        return run
+
+    # -- relation checks -----------------------------------------------------
+
+    def _evaluate(self, run: OracleRun, spec: dict[str, Any], target,
+                  base_sha: str, base_data: bytes, transform_name: str,
+                  mutated: bytes, base_obs: Observation,
+                  obs: Observation) -> None:
+        relations = spec["relations"]
+        transition = f"{_label(base_obs.outcome)}->{_label(obs.outcome)}"
+
+        if obs.outcome == "timeout":
+            run.inconclusive_timeouts += 1
+            return
+        if not self._is_deterministic(target, mutated, obs):
+            run.inconclusive_nondeterministic += 1
+            return
+
+        violated: list[str] = []
+        if "not_crash" in relations and obs.outcome == "crash":
+            violated.append("not_crash")
+        if "same_outcome" in relations and obs.outcome != base_obs.outcome:
+            violated.append("same_outcome")
+        if "bounded_time" in relations \
+                and obs.duration_ms > spec["max_duration_ms"]:
+            violated.append("bounded_time")
+
+        if transition not in ("NORMAL->NORMAL", "CRASH->CRASH") \
+                and transition not in [t["transition"] for t in
+                                       run.transitions]:
+            run.transitions.append({
+                "transition": transition,
+                "transform": transform_name,
+                "base_input_sha256": base_sha})
+
+        if not violated:
+            return
+        if transition == "NORMAL->CRASH":
+            severity_key = "NORMAL->CRASH"
+        elif "bounded_time" in violated:
+            severity_key = "bounded_time"
+        else:
+            severity_key = "outcome-change"
+
+        minimized = self._minimize(target, spec, mutated, violated,
+                                   base_obs)
+        artifact = None
+        from .artifacts import ArtifactStore
+        store = ArtifactStore(self.ws)
+        artifact = store.put(minimized, kind="oracle-counterexample")
+        run.violations.append({
+            "relation": "+".join(violated),
+            "transform": transform_name,
+            "base_input_sha256": base_sha,
+            "counterexample_sha256": artifact.sha256,
+            "original_size": len(mutated),
+            "minimized_size": len(minimized),
+            "transition": transition,
+            "behavioral_severity": _SEVERITY[severity_key],
+            "base_observation": base_obs.to_dict(),
+            "observation": obs.to_dict(),
+            "note": ("behavioral-severity only; this is NOT an "
+                     "exploitability claim"),
+        })
+
+    def _minimize(self, target, spec: dict[str, Any], mutated: bytes,
+                  violated: list[str],
+                  base_obs: Observation | None = None) -> bytes:
+        """Smallest variant that still violates any of ``violated``."""
+        from .triage import ddmin
+
+        def predicate(candidate: bytes) -> bool:
             try:
-                obs_ref = observe(target, reference)
-                obs_new = observe(
-                    target, get_transform(transform)(candidate, _Rng(1)))
-            except TimeoutError:
-                return True   # a timeout on smaller input still violates
-            return get_relation(relation)(obs_ref, obs_new) is not None
+                obs = self._observe(target, candidate)
+            except Exception:
+                return False
+            if "not_crash" in violated and obs.outcome == "crash":
+                return True
+            if base_obs is not None and "same_outcome" in violated \
+                    and obs.outcome != base_obs.outcome \
+                    and obs.outcome != "timeout":
+                return True
+            if "bounded_time" in violated \
+                    and obs.duration_ms > spec["max_duration_ms"]:
+                return True
+            return False
 
-        current = reference
-        changed = True
-        iterations = 0
-        while changed and iterations < max_iterations:
-            changed = False
-            iterations += 1
-            parts = current.split(b"\n") if b"\n" in current else \
-                [current[i:i + max(1, len(current) // 4)]
-                 for i in range(0, len(current), max(1, len(current) // 4))]
-            if len(parts) < 2:
-                break
-            half = len(parts) // 2
-            for cand in (b"\n".join(parts[half:]),
-                         b"\n".join(parts[:half]),
-                         b"\n".join(parts[:half] + parts[half:])):
-                if cand and cand != current and violates(cand):
-                    current = cand
-                    changed = True
+        try:
+            return ddmin(mutated, predicate)
+        except Exception:
+            return mutated
+
+    # -- inputs / persistence -------------------------------------------------
+
+    def _base_inputs(self, spec: dict[str, Any],
+                     corpus_id: str | None) -> list[tuple[str, bytes]]:
+        bases: list[tuple[str, bytes]] = []
+        if corpus_id:
+            from .corpus import CorpusStore
+            corpus_store = CorpusStore(self.ws)
+            corpus = corpus_store.get(corpus_id)
+            for tc in corpus.testcases:
+                bases.append((tc["sha256"],
+                              corpus_store.read_bytes(corpus, tc["sha256"])))
+                if len(bases) >= MAX_BASES:
                     break
-        minimized = current if current != reference else None
-        stats = {
-            "data_sha256": sha256_bytes(minimized) if minimized else None,
-            "iterations": iterations,
-            "size_reduction": len(reference) - len(current),
-            "elapsed_s": round(time.monotonic() - start, 3),
-        }
-        return minimized, stats
+        else:
+            for i, encoded in enumerate(spec.get("seeds_b64", [])):
+                try:
+                    data = base64.b64decode(encoded, validate=True)
+                except Exception as exc:
+                    raise ValidationError(
+                        f"seed #{i} is not valid base64: {exc}") from exc
+                bases.append((sha256_bytes(data), data))
+                if len(bases) >= MAX_BASES:
+                    break
+        return bases
+
+    def _persist(self, run: OracleRun) -> None:
+        self.ws.write_json(f"analysis/oracles/{run.id}.json", run.to_dict())
+
+    # -- queries ---------------------------------------------------------------
+
+    def get(self, run_id: str) -> dict[str, Any]:
+        rel = f"analysis/oracles/{run_id}.json"
+        if not self.ws.path(rel).exists():
+            from .errors import NotFoundError
+            raise NotFoundError(f"oracle run '{run_id}' not found")
+        return self.ws.read_json(rel)
+
+    def list_runs(self) -> list[dict[str, Any]]:
+        out = []
+        base = self.ws.dir("analysis") / "oracles"
+        if base.is_dir():
+            for path in sorted(base.glob("orl_*.json")):
+                record = self.ws.read_json(
+                    str(path.relative_to(self.ws.root)))
+                out.append({"id": record["id"],
+                            "target": record["spec"]["target"],
+                            "violations": record["violation_count"],
+                            "cases": record["cases_evaluated"]})
+        return out
 
 
-class _Rng:
-    """Tiny deterministic RNG so oracle runs need no shared global state."""
+def _canonical(spec: dict[str, Any]) -> bytes:
+    from .hashing import canonical_json
+    return canonical_json(spec).encode("utf-8")
 
-    def __init__(self, seed: int):
-        self.state = seed & 0xFFFFFFFF or 1
 
-    def _next(self) -> int:
-        self.state = (1103515245 * self.state + 12345) & 0x7FFFFFFF
-        return self.state
-
-    def shuffle(self, items: list) -> None:
-        for i in reversed(range(1, len(items))):
-            j = self._next() % (i + 1)
-            items[i], items[j] = items[j], items[i]
+def _label(outcome: str) -> str:
+    return "CRASH" if outcome == "crash" else \
+        "TIMEOUT" if outcome == "timeout" else "NORMAL"

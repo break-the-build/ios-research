@@ -41,6 +41,11 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--experiment", default=None)
     p_start.add_argument("--seed", type=int, default=None)
     p_start.add_argument("--max-cases", type=int, default=None)
+    p_start.add_argument("--delivery", default=None,
+                         choices=["interactive", "one-click", "zero-click",
+                                  "proximity", "physical"],
+                         help="researcher-declared input-delivery channel "
+                              "(reporting provenance, #106)")
     p_start.add_argument("--duration", type=float, default=None,
                          help="wall-clock budget in seconds")
     p_start.add_argument("--workers", type=int, default=None)
@@ -54,6 +59,13 @@ def register(subparsers, parent) -> None:
                          help="named sanitizer build profile recorded as provenance (#31)")
     p_start.add_argument("--mutator-plugin", default=None, dest="mutator_plugin",
                          help="path to a grammar-aware mutator plugin (#41)")
+    p_start.add_argument("--max-input-bytes", type=int, default=None,
+                         help="skip mutated inputs larger than this many bytes "
+                              "(default 1048576; 0 disables the bound)")
+    p_start.add_argument("--sched-perturb", default=None, dest="sched_perturb",
+                         help="comma-separated scheduling-perturbation modes "
+                              "applied between cases (#70): "
+                              "yield,priority,affinity,random-delay")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -126,10 +138,21 @@ def cmd_start(ctx, args) -> Result:
         experiment = exp_store.create(
             target=target_id, device=device.id, os_version=device.os_version,
             config_hash=cfg.hash, seed=seed,
-            params={"corpus": corpus.id, "max_cases": max_cases})
+            params={"corpus": corpus.id, "max_cases": max_cases,
+                    **({"delivery": args.delivery}
+                       if getattr(args, "delivery", None) else {})})
 
     engine = FuzzEngine(ws)
     dictionary = getattr(args, "dictionary", None)
+    max_input_bytes = getattr(args, "max_input_bytes", None)
+    if max_input_bytes is None:
+        max_input_bytes = cfg.get("limits.max_input_bytes")
+    sched_modes = ()
+    raw_sched = getattr(args, "sched_perturb", None)
+    if raw_sched:
+        from ..races import validate_modes
+        sched_modes = validate_modes(
+            mode.strip() for mode in raw_sched.split(",") if mode.strip())
     session = engine.create(experiment_id=experiment.id, target=target_id,
                             corpus_id=corpus.id, seed=seed, workers=workers,
                             max_cases=max_cases, duration_s=args.duration,
@@ -140,7 +163,9 @@ def cmd_start(ctx, args) -> Result:
                             sanitizer_profile=getattr(
                                 args, "sanitizer_profile", None),
                             mutator_plugin_path=getattr(
-                                args, "mutator_plugin", None))
+                                args, "mutator_plugin", None),
+                            max_input_bytes=max_input_bytes,
+                            sched_modes=sched_modes)
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

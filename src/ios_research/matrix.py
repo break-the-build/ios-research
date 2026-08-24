@@ -205,8 +205,24 @@ class ReproductionMatrixEngine:
                 "configuration evidence, not detected by this framework.",
                 "Reliability scores describe repetition of the recorded "
                 "finding; they do not assert exploitability.",
+                "Mitigation profiles derive only from declared model/OS "
+                "strings via config/mitigation-models.json (#87); unmatched "
+                "devices record 'unknown'.",
             ],
         }
+        # Mitigation-generation mismatch is a non-binding warning (#87): it
+        # never changes reproduction verdicts.
+        from .mitigation import summarize_profiles
+        reproducing = [c for c in cell_results if c["crashes"] > 0]
+        profiles = summarize_profiles(reproducing)
+        summary["mitigation_profiles"] = profiles
+        warnings: list[str] = []
+        if len(profiles) > 1:
+            warnings.append(
+                "Reproducing cells span multiple memory-safety mitigation "
+                f"generations ({', '.join(sorted(profiles))}); exploitability "
+                "reasoning may not transfer between them.")
+        summary["warnings"] = warnings
         self.ws.write_json(self._results_rel(run.id), {
             "matrix_id": run.id, "summary": summary})
         run.status = "run"
@@ -218,6 +234,14 @@ class ReproductionMatrixEngine:
     def _run_cell(self, run: MatrixRun, cell: MatrixCell,
                   input_bytes: bytes) -> dict[str, Any]:
         target = targets.create(run.target)
+        # Mitigation provenance (#87): derived from the *declared* cell
+        # model/OS strings only via the workspace model table; fails closed
+        # to "unknown".
+        from .mitigation import classify as classify_mitigation
+        from .mitigation import load_model_table
+        mitigation = classify_mitigation(
+            hardware_model=cell.model, os_train=cell.os_version,
+            table=load_model_table(self.ws))
         crashes = 0
         signatures: list[str] = []
         first_crash_ms: int | None = None
@@ -250,6 +274,7 @@ class ReproductionMatrixEngine:
             "stable": bool(stability >= 0.99 and crashes == run.trials_per_cell),
             "time_to_crash_ms": first_crash_ms,
             "outcomes": outcome_counts,
+            "mitigation_profile": mitigation["mitigation_profile"],
         }
 
     @staticmethod

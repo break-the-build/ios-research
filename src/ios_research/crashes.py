@@ -14,11 +14,21 @@ from typing import Any
 
 from .artifacts import ArtifactStore
 from .clock import now_iso
+from .errors import StateError, ValidationError
 from .hashing import sha256_bytes
 from .ids import make_id
-from .errors import ValidationError
 from .targets.base import Outcome
-from .workspace import Workspace
+from .workspace import Workspace, validate_component
+
+
+def _crash_from_dict(data: dict) -> CrashRecord:
+    """Build a record from persisted JSON with a stable error on drift."""
+    try:
+        return CrashRecord(**data)
+    except TypeError:
+        raise StateError(
+            "crash record is corrupt or from an incompatible version",
+            details={"keys": sorted(data)}) from None
 
 
 @dataclass
@@ -56,11 +66,12 @@ class CrashStore:
         return f"crashes/{crash_id}/crash.json"
 
     def get(self, crash_id: str, *, experiment_id: str | None = None) -> CrashRecord:
+        validate_component(crash_id, what="crash id")
         rel = self._rel(crash_id)
         if not self.ws.path(rel).exists():
             from .errors import NotFoundError
             raise NotFoundError(f"crash '{crash_id}' not found")
-        crash = CrashRecord(**self.ws.read_json(rel))
+        crash = _crash_from_dict(self.ws.read_json(rel))
         if experiment_id is not None and crash.experiment_id != experiment_id:
             raise ValidationError(
                 f"crash '{crash_id}' is not in experiment '{experiment_id}'")
@@ -96,7 +107,7 @@ class CrashStore:
         base = self.ws.dir("crashes")
         out = []
         for manifest in sorted(base.glob("*/crash.json")):
-            crash = CrashRecord(**self.ws.read_json(
+            crash = _crash_from_dict(self.ws.read_json(
                 str(manifest.relative_to(self.ws.root))))
             if experiment_id is None or crash.experiment_id == experiment_id:
                 out.append(crash)

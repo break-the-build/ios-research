@@ -1,0 +1,1 @@
+"""Experiment-loop environment bindings for ios-research. Load with: python -m experiment_loop run <goal.json> --load tools.experiment_loop.ios_env (run from the repository root with src/ on PYTHONPATH, e.g. PYTHONPATH=src)."""

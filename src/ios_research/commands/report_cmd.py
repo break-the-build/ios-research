@@ -42,6 +42,11 @@ def register(subparsers, parent) -> None:
     p_bounty_validate.add_argument("report_id")
     p_bounty_validate.add_argument("--metadata", default=None,
                                   help="optional local JSON metadata/attestations")
+    p_bounty_validate.add_argument("--tccutil-output", dest="tccutil_output",
+                                  default=None,
+                                  help="captured 'tccutil flag check' text "
+                                       "file (#84); makes the TCC flag "
+                                       "check binding")
     p_bounty_validate.set_defaults(func=cmd_bounty_validate)
 
     p_bounty_export = sub.add_parser("bounty-export", parents=[parent],
@@ -129,10 +134,21 @@ def cmd_list(ctx, args) -> Result:
 
 
 def cmd_bounty_validate(ctx, args) -> Result:
+    from pathlib import Path
     from ..bounty import BountyReadiness, load_metadata
+    from ..errors import ValidationError
     readiness = BountyReadiness(ctx.workspace())
     report = readiness.reports.get(args.report_id)
-    result = readiness.validate(report, load_metadata(args.metadata))
+    tccutil_output = None
+    if args.tccutil_output:
+        try:
+            tccutil_output = Path(args.tccutil_output).read_text(
+                encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise ValidationError(
+                f"cannot read tccutil output file: {exc}") from exc
+    result = readiness.validate(report, load_metadata(args.metadata),
+                                tccutil_output=tccutil_output)
     return Result(command="report bounty-validate", ok=result["ready"], data=result,
                   messages=["evidence complete" if result["ready"]
                             else f"missing: {', '.join(result['missing'])}"])

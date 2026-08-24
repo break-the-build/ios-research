@@ -7,12 +7,77 @@
     "crashes": ".ios-research/crashes/<crash_id>/",
     "diffs": ".ios-research/diffs/<diff_id>/",
     "experiments": ".ios-research/experiments/<experiment_id>.json",
+    "findings": ".ios-research/findings/<finding_id>.json",
     "fuzz_sessions": ".ios-research/fuzz/<session_id>.json",
+    "harnesses": ".ios-research/harnesses/<candidate_id>.json",
+    "ndays": ".ios-research/ndays/<diff_id>.json",
+    "races": ".ios-research/races/<race_id>.json",
     "reports": ".ios-research/reports/<report_id>/",
     "research": ".ios-research/research/<research_id>.json",
+    "spoints": ".ios-research/spoints/<report_id>.json",
+    "supply": ".ios-research/supply/<record_id>.json",
     "workspace_marker": ".ios-research/workspace.json"
   },
   "commands": {
+    "advisory": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "import": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "JSON file with an 'advisories' array",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "match": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "scan": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "experiment_id",
+                "flags": [
+                  "--experiment-id"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
     "agent": {
       "arguments": {
         "options": [],
@@ -173,6 +238,82 @@
             "required": false
           }
         ]
+      }
+    },
+    "beta": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "diff": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "release_a",
+                "flags": [
+                  "--release-a"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "release_b",
+                "flags": [
+                  "--release-b"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "tag": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "diff_id",
+                "required": true
+              }
+            ]
+          }
+        }
       }
     },
     "config": {
@@ -390,7 +531,16 @@
         },
         "minimize": {
           "arguments": {
-            "options": [],
+            "options": [
+              {
+                "dest": "max_executions",
+                "flags": [
+                  "--max-executions"
+                ],
+                "help": "bound total target executions during minimization",
+                "required": false
+              }
+            ],
             "positionals": [
               {
                 "help": "",
@@ -419,6 +569,196 @@
               {
                 "help": "",
                 "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "cve": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "add": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "title",
+                "flags": [
+                  "--title"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "input_hex",
+                "flags": [
+                  "--input-hex"
+                ],
+                "help": "hex-encoded input (mutually exclusive with --input-file)",
+                "required": false
+              },
+              {
+                "dest": "input_file",
+                "flags": [
+                  "--input-file"
+                ],
+                "help": "read the input from this file instead",
+                "required": false
+              },
+              {
+                "dest": "vulnerable",
+                "flags": [
+                  "--vulnerable"
+                ],
+                "help": "comma-separated targets that must crash",
+                "required": false
+              },
+              {
+                "dest": "fixed",
+                "flags": [
+                  "--fixed"
+                ],
+                "help": "comma-separated targets that must stay clean",
+                "required": false
+              },
+              {
+                "dest": "reference",
+                "flags": [
+                  "--reference"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "note",
+                "flags": [
+                  "--note"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "cve_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "catalog": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "install-catalog": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "remove": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "cve_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "validate": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "cve_id",
+                "required": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    "detect": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "lint": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "rules",
+                "flags": [
+                  "--rules"
+                ],
+                "help": "rules JSON (default: built-in signatures)",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list-rules": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "rules",
+                "flags": [
+                  "--rules"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "scan": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "rules",
+                "flags": [
+                  "--rules"
+                ],
+                "help": "rules JSON (default: built-in signatures)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "path",
                 "required": true
               }
             ]
@@ -565,6 +905,47 @@
       "arguments": {
         "options": [],
         "positionals": []
+      }
+    },
+    "engine": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "experiment_id",
+                "flags": [
+                  "--experiment-id"
+                ],
+                "help": "attach imported findings to an existing experiment",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "path to the import manifest JSON",
+                "name": "manifest",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        }
       }
     },
     "evidence": {
@@ -717,6 +1098,14 @@
                 ],
                 "help": "",
                 "required": false
+              },
+              {
+                "dest": "delivery",
+                "flags": [
+                  "--delivery"
+                ],
+                "help": "researcher-declared input-delivery channel (reporting provenance, #106)",
+                "required": false
               }
             ],
             "positionals": []
@@ -735,6 +1124,138 @@
               {
                 "help": "",
                 "name": "experiment_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "findings": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "adjudicate": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "finding_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "confirm": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reason",
+                "flags": [
+                  "--reason"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "finding_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "dismiss": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reason",
+                "flags": [
+                  "--reason"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "finding_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "sarif",
+                "flags": [
+                  "--sarif"
+                ],
+                "help": "path to the SARIF JSON file",
+                "required": true
+              },
+              {
+                "dest": "tool",
+                "flags": [
+                  "--tool"
+                ],
+                "help": "override tool name for all imported findings",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "status",
+                "flags": [
+                  "--status"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "cwe",
+                "flags": [
+                  "--cwe"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "objectives": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "finding_id",
                 "required": true
               }
             ]
@@ -839,6 +1360,14 @@
                 "required": false
               },
               {
+                "dest": "delivery",
+                "flags": [
+                  "--delivery"
+                ],
+                "help": "researcher-declared input-delivery channel (reporting provenance, #106)",
+                "required": false
+              },
+              {
                 "dest": "duration",
                 "flags": [
                   "--duration"
@@ -893,6 +1422,22 @@
                 ],
                 "help": "path to a grammar-aware mutator plugin (#41)",
                 "required": false
+              },
+              {
+                "dest": "max_input_bytes",
+                "flags": [
+                  "--max-input-bytes"
+                ],
+                "help": "skip mutated inputs larger than this many bytes (default 1048576; 0 disables the bound)",
+                "required": false
+              },
+              {
+                "dest": "sched_perturb",
+                "flags": [
+                  "--sched-perturb"
+                ],
+                "help": "comma-separated scheduling-perturbation modes applied between cases (#70): yield,priority,affinity,random-delay",
+                "required": false
               }
             ],
             "positionals": []
@@ -936,6 +1481,135 @@
         }
       }
     },
+    "harness": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "accept": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "candidate_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "generate": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "provider",
+                "flags": [
+                  "--provider"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "proposals_path",
+                "flags": [
+                  "--proposals-path"
+                ],
+                "help": "JSON file of proposals (provider 'file')",
+                "required": false
+              },
+              {
+                "dest": "max_candidates",
+                "flags": [
+                  "--max-candidates"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "smoke",
+                "flags": [
+                  "--smoke"
+                ],
+                "help": "execute validated candidates once (opt-in)",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "status",
+                "flags": [
+                  "--status"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "reject": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reason",
+                "flags": [
+                  "--reason"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "candidate_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "candidate_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "info": {
       "arguments": {
         "options": [],
@@ -955,6 +1629,233 @@
           }
         ],
         "positionals": []
+      }
+    },
+    "kernel": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "msg-build": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "bits",
+                "flags": [
+                  "--bits"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "remote",
+                "flags": [
+                  "--remote"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "local",
+                "flags": [
+                  "--local"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "voucher",
+                "flags": [
+                  "--voucher"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "msg_id",
+                "flags": [
+                  "--id"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "port",
+                "flags": [
+                  "--port"
+                ],
+                "help": "port right name (repeatable)",
+                "required": false
+              },
+              {
+                "dest": "ool_size",
+                "flags": [
+                  "--ool-size"
+                ],
+                "help": "OOL region size (repeatable)",
+                "required": false
+              },
+              {
+                "dest": "payload",
+                "flags": [
+                  "--payload"
+                ],
+                "help": "hex payload bytes",
+                "required": false
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "write the packed message here",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "msg-unpack": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "input",
+                "required": true
+              }
+            ]
+          }
+        },
+        "surface": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        }
+      }
+    },
+    "lockdown": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "create": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "name",
+                "flags": [
+                  "--name"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "target_standard",
+                "flags": [
+                  "--target-standard"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "target_lockdown",
+                "flags": [
+                  "--target-lockdown"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "build_standard",
+                "flags": [
+                  "--build-standard"
+                ],
+                "help": "build id of the standard configuration",
+                "required": true
+              },
+              {
+                "dest": "build_lockdown",
+                "flags": [
+                  "--build-lockdown"
+                ],
+                "help": "build id of the lockdown configuration",
+                "required": true
+              },
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "real_device",
+                "flags": [
+                  "--real-device"
+                ],
+                "help": "pair runs against a real enrolled device (opt-in; default is simulation fixtures)",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "attest",
+                "flags": [
+                  "--attest-lockdown-enabled"
+                ],
+                "help": "researcher attestation that the lockdown configuration was enabled",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "pair_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "pair_id",
+                "required": false
+              }
+            ]
+          }
+        }
       }
     },
     "matrix": {
@@ -1048,6 +1949,195 @@
         }
       }
     },
+    "nday": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "campaign": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reachable",
+                "flags": [
+                  "--reachable"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "nday_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "diff": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "name",
+                "flags": [
+                  "--name"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "symbols_a",
+                "flags": [
+                  "--symbols-a"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "symbols_b",
+                "flags": [
+                  "--symbols-b"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "prioritize": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reachable",
+                "flags": [
+                  "--reachable"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "nday_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "nday_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "net": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "deliver": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "transport target id (net:<inner-target>)",
+                "required": true
+              },
+              {
+                "dest": "input",
+                "flags": [
+                  "--input"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "schedule",
+                "flags": [
+                  "--schedule"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "replay": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "input",
+                "flags": [
+                  "--input"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "schedule",
+                "flags": [
+                  "--schedule"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "capture",
+                "flags": [
+                  "--capture"
+                ],
+                "help": "JSON file with a saved capture",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
     "oracle": {
       "arguments": {
         "options": [],
@@ -1066,53 +2156,179 @@
             "positionals": []
           }
         },
-        "relations": {
+        "mac": {
           "arguments": {
             "options": [],
-            "positionals": []
+            "positionals": [
+              {
+                "help": "",
+                "name": "mac_subcommand",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "oracles": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            },
+            "run": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "oracle name (see 'oracle mac oracles')",
+                    "name": "name",
+                    "required": true
+                  },
+                  {
+                    "help": "path to the evidence JSON record",
+                    "name": "evidence",
+                    "required": true
+                  }
+                ]
+              }
+            }
           }
         },
         "run": {
           "arguments": {
             "options": [
               {
-                "dest": "target",
-                "flags": [
-                  "--target"
-                ],
-                "help": "",
-                "required": true
-              },
-              {
                 "dest": "corpus",
                 "flags": [
                   "--corpus"
                 ],
-                "help": "corpus id (default: target's seed inputs)",
+                "help": "corpus id providing the base inputs",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "path to the oracle spec JSON",
+                "name": "spec",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "run_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "proximity": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "smoke": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "enable",
+                "flags": [
+                  "--enable"
+                ],
+                "help": "explicitly opt in to this profile for this invocation",
                 "required": false
               },
               {
-                "dest": "relations",
+                "dest": "max_cases",
                 "flags": [
-                  "--relations"
+                  "--max-cases"
                 ],
-                "help": "relation IDs to evaluate",
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "profile_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "races": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "report",
+                "flags": [
+                  "--report"
+                ],
+                "help": "path to a saved TSan report text file",
+                "required": true
+              },
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "target id the report came from",
                 "required": false
               },
               {
-                "dest": "transforms",
+                "dest": "input_sha",
                 "flags": [
-                  "--transforms"
+                  "--input-sha"
                 ],
-                "help": "transform IDs to apply",
+                "help": "sha256 of the triggering input, if known",
                 "required": false
-              },
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [
               {
-                "dest": "trials",
+                "dest": "kind",
                 "flags": [
-                  "--trials"
+                  "--kind"
                 ],
-                "help": "re-checks before a violation is confirmed",
+                "help": "filter by race kind (e.g. 'data race')",
                 "required": false
               }
             ],
@@ -1125,7 +2341,7 @@
             "positionals": [
               {
                 "help": "",
-                "name": "run_id",
+                "name": "race_id",
                 "required": true
               }
             ]
@@ -1183,6 +2399,14 @@
                   "--metadata"
                 ],
                 "help": "optional local JSON metadata/attestations",
+                "required": false
+              },
+              {
+                "dest": "tccutil_output",
+                "flags": [
+                  "--tccutil-output"
+                ],
+                "help": "captured 'tccutil flag check' text file (#84); makes the TCC flag check binding",
                 "required": false
               }
             ],
@@ -1527,6 +2751,243 @@
         }
       }
     },
+    "spoints": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "points": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "run": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "experiment",
+                "flags": [
+                  "--experiment"
+                ],
+                "help": "restrict to one experiment",
+                "required": false
+              },
+              {
+                "dest": "limit",
+                "flags": [
+                  "--limit"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "report_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "supply": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "audit": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "requirements",
+                "flags": [
+                  "--requirements"
+                ],
+                "help": "path to requirements.txt-style text",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "scan": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "directory of *.py files to scan",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "record_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "verify": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "lockfile",
+                "flags": [
+                  "--lockfile"
+                ],
+                "help": "path to the lockfile JSON",
+                "required": true
+              },
+              {
+                "dest": "root",
+                "flags": [
+                  "--root"
+                ],
+                "help": "root directory lock paths resolve against",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
+    "surface": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "ingest": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "plan": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "inventory",
+                "flags": [
+                  "--inventory"
+                ],
+                "help": "surface-inventory id from 'surface ingest'",
+                "required": true
+              },
+              {
+                "dest": "previous_plan",
+                "flags": [
+                  "--previous-plan"
+                ],
+                "help": "down-rank surfaces covered by an earlier plan",
+                "required": false
+              },
+              {
+                "dest": "novelty_yield",
+                "flags": [
+                  "--novelty-yield"
+                ],
+                "help": "explicit novel ratio override [0..1] (default: latest advisory scan or 0.5)",
+                "required": false
+              },
+              {
+                "dest": "saturation_penalty",
+                "flags": [
+                  "--saturation-penalty"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "plan_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "target": {
       "arguments": {
         "options": [],
@@ -1571,6 +3032,38 @@
             }
           }
         },
+        "bluetooth": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "bluetooth_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "btle-adv|l2cap|gatt or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "build": {
           "arguments": {
             "options": [
@@ -1590,6 +3083,134 @@
                 "required": true
               }
             ]
+          }
+        },
+        "continuity": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "continuity_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "handoff|findmy-adv|hotspot-tlv or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "docimp": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "docimp_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "zip-archive|ooxml-part|font|pdfform or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "fsclient": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "fsclient_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "exfat-vol|smb2-resp or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "geo": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "geo_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "gpx|fit|geojson|tile-proto or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
           }
         },
         "init": {
@@ -1631,10 +3252,234 @@
             "positionals": []
           }
         },
+        "ipc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "ipc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "share-payload|docprovider-item|intent-donation or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "list": {
           "arguments": {
             "options": [],
             "positionals": []
+          }
+        },
+        "lockeddevice": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "lockeddevice_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "lockdownd|mfi-auth|notification or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "messaging": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "messaging_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "sms|mime|link-preview or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "netip": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "netip_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "mdns-record|dhcpv6-opt|icmp6-info|edns or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "nfc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "nfc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "ndef|isodep|tagcmd or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "pq3": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "pq3_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "handshake|rekey or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "proxapp": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "proxapp_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "hap-tlv|airplay-nego|mpc-frame|pbap-vcard or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
           }
         },
         "register": {
@@ -1661,6 +3506,38 @@
             ]
           }
         },
+        "signeddoc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "signeddoc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "profile|provision|receipt|pkpass or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
         "validate": {
           "arguments": {
             "options": [
@@ -1677,6 +3554,178 @@
               {
                 "help": "path to target-manifest.json",
                 "name": "manifest",
+                "required": true
+              }
+            ]
+          }
+        },
+        "voiceassist": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "voiceassist_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "siri-suggestion|callkit-intent or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "wifi": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "wifi_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "beacon|probe-resp|action or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "wifiaware": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "wifiaware_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "publish|subscribe|datapath or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        },
+        "xpc": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "xpc_action",
+                "required": true
+              }
+            ]
+          },
+          "subcommands": {
+            "harvest": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "",
+                    "name": "schema_file",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "inspect": {
+              "arguments": {
+                "options": [],
+                "positionals": [
+                  {
+                    "help": "dict|array|endpoint or a full id",
+                    "name": "format",
+                    "required": true
+                  }
+                ]
+              }
+            },
+            "list": {
+              "arguments": {
+                "options": [],
+                "positionals": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "targetflags": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "flag_id",
                 "required": true
               }
             ]
@@ -1767,7 +3816,9 @@
       "differential_testing",
       "exploitability_indicators",
       "research_device_instrumentation",
-      "responsible_reporting"
+      "responsible_reporting",
+      "malware_detection_signatures",
+      "known_cve_regression_validation"
     ],
     "authorized_research_only": true,
     "forbidden": [

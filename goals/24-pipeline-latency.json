@@ -1,0 +1,34 @@
+{
+  "id": "iosr-pipeline-latency-profile-v1",
+  "objective": "Minimize discovery-to-evidence wall-clock time while keeping every pipeline stage observable (per-stage timings emitted for each run)",
+  "environment": "ios_research_pipeline_latency",
+  "primary_metric": "pipeline_total_seconds",
+  "metrics": [
+    {"name": "pipeline_total_seconds", "direction": "minimize", "unit": "seconds"},
+    {"name": "triage_stage_seconds", "direction": "minimize", "unit": "seconds"},
+    {"name": "report_stage_seconds", "direction": "minimize", "unit": "seconds"},
+    {"name": "validation_stage_seconds", "direction": "minimize", "unit": "seconds"},
+    {"name": "stages_completed", "direction": "maximize", "unit": "count"}
+  ],
+  "constraints": [
+    {
+      "metric": "stages_completed",
+      "op": ">=",
+      "value": 3.0,
+      "hard": false,
+      "description": "Faster pipelines must not silently skip observability stages"
+    }
+  ],
+  "safety_rules": [
+    "max-knobs:4",
+    "stage-timings-always-emitted",
+    "no-real-target-performance-claim-from-simulator"
+  ],
+  "budget": {
+    "max_experiments_per_batch": 8,
+    "max_parallel": 8,
+    "max_experiments_total": 80,
+    "max_cost_usd": 80.0,
+    "max_cost_usd_per_batch": 15.0
+  }
+}

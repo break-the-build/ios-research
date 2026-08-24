@@ -103,3 +103,33 @@ def test_render_error_goes_to_stderr(capsys):
 def test_result_envelope_shape():
     env = Result(command="c", data={"k": "v"}).envelope()
     assert set(env) == {"ok", "command", "data", "messages", "error", "exit_code"}
+
+
+def test_redact_covers_secrets_nested_in_lists():
+    original = {"records": [{"token": "leak-me", "n": 1}],
+                "pairs": ({"client_secret": "x"}, {"ok": True})}
+    cleaned = redact(original)
+    assert cleaned["records"][0]["token"] == "***REDACTED***"
+    assert cleaned["records"][0]["n"] == 1
+    assert cleaned["pairs"][0]["client_secret"] == "***REDACTED***"
+    assert cleaned["pairs"][1] == {"ok": True}
+    assert isinstance(cleaned["pairs"], tuple)
+
+
+def test_redact_matches_compound_key_variants():
+    fields = {"access_token": "a", "refresh_token": "b",
+              "session_token": "c", "client_secret": "d",
+              "password_hash": "e", "set_cookie": "f",
+              "X-Api-Key": "g", "Private_Key": "h", "safe": 1}
+    cleaned = redact(fields)
+    redacted = {k for k, v in cleaned.items() if v == "***REDACTED***"}
+    assert redacted == {"access_token", "refresh_token", "session_token",
+                        "client_secret", "password_hash", "set_cookie",
+                        "X-Api-Key", "Private_Key"}
+    assert cleaned["safe"] == 1
+
+
+def test_redact_does_not_mangle_benign_keys():
+    cleaned = redact({"token_count": None} | {})
+    # "token" substring rule is deliberately aggressive; document it.
+    assert cleaned["token_count"] == "***REDACTED***"

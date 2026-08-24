@@ -38,6 +38,8 @@ ALLOWED_CAPABILITIES = (
     "exploitability_indicators",
     "research_device_instrumentation",
     "responsible_reporting",
+    "malware_detection_signatures",
+    "known_cve_regression_validation",
 )
 
 

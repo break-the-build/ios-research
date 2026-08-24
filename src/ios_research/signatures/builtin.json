@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "rules": [
+    {
+      "name": "spyware_surveillance_exfil_combo",
+      "family": "generic-spyware",
+      "severity": "critical",
+      "description": "Combination of microphone/camera/location capture APIs with network exfiltration strings, as documented for commercial spyware families (e.g. Pegasus-style capability sets). Single capabilities are common in legitimate apps; the combination is the indicator.",
+      "meta": {
+        "rationale": "capability-combination rule; tune to your environment",
+        "reference": "public spyware capability reporting (Amnesty MVT, Kaspersky, Apple platform security guides)"
+      },
+      "strings": [
+        {"id": "$mic",  "type": "ascii", "value": "AVAudioRecorder"},
+        {"id": "$cam",  "type": "ascii", "value": "AVCaptureDevice"},
+        {"id": "$loc",  "type": "ascii", "value": "CLLocationManager"},
+        {"id": "$keys", "type": "ascii", "value": "SecItemCopyMatching"},
+        {"id": "$post", "type": "ascii", "value": "POST /"},
+        {"id": "$beacon", "type": "hex", "value": "3F 74 6F 6B 65 6E 3D"}
+      ],
+      "condition": {"at_least": 4, "of": ["$mic", "$cam", "$loc", "$keys", "$post", "$beacon"]}
+    },
+    {
+      "name": "persistence_launchd_daemon_abuse",
+      "family": "generic-persistence",
+      "severity": "high",
+      "description": "Strings consistent with installing a rogue LaunchDaemon for persistence: a system LaunchDaemons path plus RunAtLoad/KeepAlive keys written together.",
+      "meta": {
+        "rationale": "persistence technique T1543/COM: launch agents and daemons",
+        "reference": "Apple Platform Security: launching daemons and agents"
+      },
+      "strings": [
+        {"id": "$daemons", "type": "ascii", "value": "/Library/LaunchDaemons/"},
+        {"id": "$agents",  "type": "ascii", "value": "/Library/LaunchAgents/", "nocase": true},
+        {"id": "$runload", "type": "ascii", "value": "RunAtLoad"},
+        {"id": "$keepalive", "type": "ascii", "value": "KeepAlive"},
+        {"id": "$plist",   "type": "ascii", "value": "<?xml", "nocase": true}
+      ],
+      "condition": {"at_least": 3, "of": ["$daemons", "$agents", "$runload", "$keepalive", "$plist"]}
+    },
+    {
+      "name": "keychain_credential_harvest_combo",
+      "family": "generic-credential-theft",
+      "severity": "medium",
+      "description": "Keychain enumeration API combined with generic-password class queries and serialized export markers; associated with credential-theft tooling.",
+      "meta": {
+        "rationale": "combination rule; SecItem usage alone is normal"
+      },
+      "strings": [
+        {"id": "$enum",  "type": "ascii", "value": "SecItemCopyMatching"},
+        {"id": "$class", "type": "ascii", "value": "kSecClassGenericPassword"},
+        {"id": "$attrs", "type": "ascii", "value": "kSecReturnAttributes"},
+        {"id": "$dump",  "type": "ascii", "value": "keychain-dump", "nocase": true}
+      ],
+      "condition": {"at_least": 3, "of": ["$enum", "$class", "$attrs", "$dump"]}
+    },
+    {
+      "name": "tcc_privacy_database_probing",
+      "family": "generic-privacy-bypass-recon",
+      "severity": "high",
+      "description": "Direct references to the TCC privacy database and its schema table, which legitimate apps do not perform; consistent with privacy-control probing or tampering preparation.",
+      "meta": {
+        "rationale": "TCC.db access is reserved to the OS; app references are anomalous"
+      },
+      "strings": [
+        {"id": "$tccdb", "type": "ascii", "value": "TCC.db"},
+        {"id": "$table", "type": "ascii", "value": "access", "nocase": true},
+        {"id": "$svc",   "type": "ascii", "value": "kTCCService"},
+        {"id": "$client","type": "ascii", "value": "client_reference"}
+      ],
+      "condition": {"all": ["$tccdb", {"any": ["$svc", "$client", "$table"]}]}
+    },
+    {
+      "name": "sandbox_profile_denial_markers",
+      "family": "generic-sandbox-recon",
+      "severity": "info",
+      "description": "Embedded sandbox-profile denial directives; useful for flagging samples that introspect sandbox restrictions during analysis.",
+      "meta": {
+        "rationale": "informational; common in research tooling too"
+      },
+      "filesize": {"min": 0, "max": 52428800},
+      "strings": [
+        {"id": "$deny",  "type": "ascii", "value": "(deny ", "nocase": true},
+        {"id": "$allow", "type": "ascii", "value": "(allow ", "nocase": true},
+        {"id": "$import", "type": "ascii", "value": "(import "}
+      ],
+      "condition": {"at_least": 2, "of": ["$deny", "$allow", "$import"]}
+    }
+  ]
+}

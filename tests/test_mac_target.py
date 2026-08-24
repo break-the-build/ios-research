@@ -576,6 +576,7 @@ def _selftest_clang() -> str | None:
     return _asan_clang() or "clang"
 
 
+@pytest.mark.native
 @pytest.mark.skipif(_selftest_clang() is None,
                     reason="requires a macOS clang with an ASan runtime")
 def test_selftest_real_crash_pipeline(tmp_path):
@@ -662,6 +663,7 @@ def _fuzzer_clang() -> str | None:
             return None
 
 
+@pytest.mark.native
 @pytest.mark.skipif(_fuzzer_clang() is None,
                     reason="requires a clang with the libFuzzer runtime "
                            "(e.g. Homebrew LLVM; Apple ships none)")
@@ -685,6 +687,7 @@ def test_native_libfuzzer_finds_real_crashes(tmp_path):
         assert res.diagnostics.signature.startswith("asan_")
 
 
+@pytest.mark.native
 @pytest.mark.skipif(_asan_clang() is None,
                     reason="requires macOS with a full-Xcode/Homebrew ASan clang")
 def test_native_coregraphics_rejects_junk(tmp_path):

@@ -1,197 +1,232 @@
-"""Metamorphic and property-based oracles (#42)."""
+"""Metamorphic and property-based oracles for non-crash findings (#42)."""
 
 from __future__ import annotations
 
+import base64
+import json
+
 import pytest
 
-from ios_research import targets as target_registry
 from ios_research.errors import ValidationError
 from ios_research.oracles import (
-    Observation, OracleEngine, RELATIONS, TRANSFORMS, get_relation,
-    get_transform)
-from ios_research.targets.base import Diagnostics, ExecResult, Outcome, Target
+    TRANSFORMATIONS, OracleEngine, validate_spec,
+)
+from ios_research.targets.base import ExecResult, Outcome, Target
 
 
-class OrderSensitiveKVTarget(Target):
-    """Accepts sorted key=value lines; rejects reordered ones (non-crash bug).
+class BoundedTarget(Target):
+    """Accepts inputs up to a hard length boundary, then 'overflows'."""
 
-    A canonicalization-idempotence style defect: semantically equivalent
-    rewrites of the same mapping change the parser's verdict.
-    """
+    id = "test:bounded"
 
-    target_id = "test:kv"
-    kind = "mock-parser"
-    description = "order-sensitive key=value parser"
-
-    def _run(self, data: bytes) -> ExecResult:
-        lines = [line for line in data.split(b"\n") if line]
-        keys = []
-        for line in lines:
-            if b"=" not in line:
-                return ExecResult(outcome=Outcome.REJECTED,
-                                  detail="malformed line")
-            key = line.split(b"=", 1)[0]
-            if key in keys:
-                return ExecResult(outcome=Outcome.REJECTED,
-                                  detail="duplicate key")
-            keys.append(key)
-        if keys != sorted(keys):
-            return ExecResult(outcome=Outcome.REJECTED,
-                              detail="keys not sorted")
-        return ExecResult(outcome=Outcome.ACCEPTED)
+    def execute(self, data: bytes) -> ExecResult:
+        if len(data) > 32:
+            return ExecResult(outcome=Outcome.CRASH, detail="overflow",
+                              diagnostics=None)
+        return ExecResult(outcome=Outcome.ACCEPTED, detail="ok")
 
 
-class FlakyObsTarget(Target):
-    """Alternates verdicts between runs — nondeterministic observations."""
+class PolicyTarget(Target):
+    """Never crashes; long inputs are rejected by policy (accepted→rejected)."""
 
-    target_id = "test:flakyobs"
-    kind = "mock-parser"
-    description = "alternating observations"
-    calls = 0
+    id = "test:policy"
 
-    def _run(self, data: bytes) -> ExecResult:
-        FlakyObsTarget.calls += 1
-        outcome = Outcome.ACCEPTED if FlakyObsTarget.calls % 2 else \
-            Outcome.REJECTED
-        return ExecResult(outcome=outcome)
+    def execute(self, data: bytes) -> ExecResult:
+        if len(data) > 16:
+            return ExecResult(outcome=Outcome.REJECTED, detail="too long")
+        return ExecResult(outcome=Outcome.ACCEPTED, detail="ok")
 
 
-@pytest.fixture()
-def kv_target():
-    target_registry.register("test:kv", lambda: OrderSensitiveKVTarget())
-    yield
-    target_registry._REGISTRY.pop("test:kv", None)
+class SlowTarget(Target):
+    """Always accepts but reports durations proportional to input size."""
+
+    id = "test:slow"
+
+    def execute(self, data: bytes) -> ExecResult:
+        return ExecResult(outcome=Outcome.ACCEPTED, detail="ok",
+                          duration_ms=len(data))
 
 
-@pytest.fixture()
-def flaky_obs_target():
-    FlakyObsTarget.calls = 0
-    target_registry.register("test:flakyobs", lambda: FlakyObsTarget())
-    yield
-    target_registry._REGISTRY.pop("test:flakyobs", None)
+@pytest.fixture(autouse=True)
+def _register(monkeypatch):
+    from ios_research.targets import _REGISTRY
+    monkeypatch.setitem(_REGISTRY, BoundedTarget.id, BoundedTarget)
+    monkeypatch.setitem(_REGISTRY, PolicyTarget.id, PolicyTarget)
+    monkeypatch.setitem(_REGISTRY, SlowTarget.id, SlowTarget)
 
 
-SORTED_KV = b"a=1\nb=2\nc=3\n"
-
-# --- primitives -----------------------------------------------------------------
-
-def test_transforms_are_deterministic_and_registered():
-    assert set(TRANSFORMS) >= {"identity", "sort_lines", "dedupe_lines",
-                               "trim_lines", "shuffle_chunks"}
-    from ios_research.oracles import _Rng
-    a = get_transform("sort_lines")(b"b\na", _Rng(1))
-    b = get_transform("sort_lines")(b"b\na", _Rng(1))
-    assert a == b == b"a\nb"
+SPEC = {
+    "schema_version": 1,
+    "target": "test:bounded",
+    "transformations": ["append-self", "flip-first-bit"],
+    "relations": ["not_crash", "same_outcome"],
+    "max_duration_ms": 1000,
+}
 
 
-def test_unknown_relation_or_transform_rejected():
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+# --- validation ------------------------------------------------------------------
+
+@pytest.mark.parametrize("mutation", [
+    lambda s: s.update(schema_version=2),
+    lambda s: s.update(target=""),
+    lambda s: s.update(transformations=["nope"]),
+    lambda s: s.update(transformations=[]),
+    lambda s: s.update(relations=["psychic"]),
+    lambda s: s.update(max_duration_ms=-1),
+])
+def test_invalid_specs_are_rejected(mutation):
+    spec = json.loads(json.dumps(SPEC))
+    mutation(spec)
     with pytest.raises(ValidationError):
-        get_relation("nope")
-    with pytest.raises(ValidationError):
-        get_transform("nope")
+        validate_spec(spec)
 
 
-def test_outcome_invariant_relation_flags_verdict_change():
-    check = get_relation("outcome_invariant")
-    assert check(Observation("accepted"), Observation("accepted")) is None
-    reason = check(Observation(outcome="accepted"),
-                   Observation(outcome="rejected", classification="X"))
-    assert reason and "observation changed" in reason
+def test_run_requires_inputs():
+    engine = OracleEngine.__new__(OracleEngine)   # no workspace needed here
+    with pytest.raises(ValidationError, match="inputs"):
+        engine.run(dict(SPEC))
 
 
-# --- discovery + minimization -----------------------------------------------------
+# --- discovery + minimization of a non-crashing invariant violation ---------------
 
-def test_discovers_noncrash_invariant_violation(workspace, kv_target):
+def test_oracle_discovers_and_minimizes_crash_introducing_transformation(
+        workspace):
     engine = OracleEngine(workspace)
-    summary = engine.run(target_id="test:kv", inputs=[SORTED_KV],
-                         relations=["outcome_invariant"],
-                         transforms=["sort_lines"])
-    # The input is already sorted; sorting must NOT change the verdict.
-    confirmed = [f for f in summary["findings"]
-                 if f["status"] == "confirmed"]
-    assert confirmed == []  # no violation on already-canonical input
+    run = engine.run({**SPEC, "seeds_b64": [_b64(b"A" * 20)]})
+    assert run.cases_evaluated == 2            # 1 seed x 2 transformations
+    assert len(run.violations) >= 1
 
-    # Now an unsorted-but-otherwise-valid input: dedupe/trim keep it valid.
-    unsorted = b"c=3\nb=2\na=1\n"
-    summary = engine.run(target_id="test:kv",
-                         inputs=[unsorted, SORTED_KV],
-                         relations=["outcome_invariant"],
-                         transforms=["sort_lines"])
-    confirmed = [f for f in summary["findings"]
-                 if f["status"] == "confirmed"]
-    # sort_lines *fixes* the unsorted input -> verdict changes -> violation!
-    # Wait: reference rejects, transformed accepts => relation flags it.
-    assert summary["pairs_evaluated"] >= 1
-    assert confirmed, summary
+    violation = run.violations[0]
+    # 'append-self' doubles a clean input past the target's hard boundary.
+    assert violation["relation"].startswith("not_crash")
+    assert violation["behavioral_severity"] == "high"
+    assert violation["transition"] == "NORMAL->CRASH"
+    assert violation["minimized_size"] < violation["original_size"]
+    assert "NOT an exploitability claim" in violation["note"]
+    # Counterexample artifact is retained content-addressed.
+    stored = workspace.path("artifacts",
+                            violation["counterexample_sha256"][:2],
+                            violation["counterexample_sha256"] + ".bin")
+    assert stored.is_file()
+    assert run.transitions and \
+        any(t["transition"] == "NORMAL->CRASH" for t in run.transitions)
 
 
-def test_minimized_counterexample_retained(workspace, kv_target):
+def test_same_outcome_relation_flags_silent_behavior_change(workspace):
     engine = OracleEngine(workspace)
-    noisy = b"x=24\np=1\nq=2\nr=3\ns=4\nt=5\n"
-    summary = engine.run(target_id="test:kv", inputs=[noisy],
-                         relations=["outcome_invariant"],
-                         transforms=["sort_lines"])
-    findings = [f for f in summary["findings"] if f["status"] == "confirmed"]
-    assert findings
-    finding = findings[0]
-    minimized_rel = workspace.path(
-        f"findings/{finding['id']}/minimized.bin")
-    assert minimized_rel.is_file()
-    assert finding["minimized"]["size_reduction"] > 0
-    # The minimized counterexample is itself a confirmed violation.
-    assert finding["minimized"]["data_sha256"]
+    run = engine.run({
+        **SPEC,
+        "target": "test:policy",
+        "relations": ["same_outcome"],
+        "seeds_b64": [_b64(b"A" * 10)],       # accepted; append-self -> rejected
+        "transformations": ["append-self"],
+    })
+    assert run.violations and \
+        run.violations[0]["relation"] == "same_outcome"
+    assert run.violations[0]["behavioral_severity"] == "medium"
 
 
-# --- explicit nondeterminism --------------------------------------------------------
-
-def test_nondeterministic_observations_not_promoted(workspace,
-                                                    flaky_obs_target):
+def test_bounded_time_violation_is_low_severity(workspace):
     engine = OracleEngine(workspace)
-    summary = engine.run(
-        target_id="test:flakyobs", inputs=[b"x=1"],
-        relations=["outcome_invariant"], transforms=["identity"],
-        trials=3)
-    # Every pair flips verdicts run-to-run -> nothing may be 'confirmed'.
-    assert summary["violations_confirmed"] == 0
-    assert summary["nondeterministic"] >= 0  # tracked explicitly if seen
+    run = engine.run({
+        **SPEC,
+        "target": "test:slow",
+        "relations": ["bounded_time"],
+        "max_duration_ms": 10,
+        "seeds_b64": [_b64(b"B" * 50)],
+        "transformations": ["append-self"],
+    })
+    assert run.violations, "100-byte input takes ~100ms > budget"
+    assert run.violations[0]["behavioral_severity"] == "low"
 
 
-def test_trials_below_two_rejected(workspace, kv_target):
+# --- honesty: timeouts & nondeterminism stay inconclusive --------------------------
+
+class FlakyTarget(BoundedTarget):
+    id = "test:flaky"
+
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, data: bytes) -> ExecResult:
+        self.calls += 1
+        outcome = Outcome.CRASH if self.calls % 2 == 0 else Outcome.ACCEPTED
+        return ExecResult(outcome=outcome, detail="nondeterministic")
+
+
+def test_nondeterministic_bases_are_inconclusive_not_findings(
+        workspace, monkeypatch):
+    from ios_research.targets import _REGISTRY
+    counter = {"n": 0}
+
+    class CountingFlaky(FlakyTarget):
+        def execute(self, data):  # noqa: D102
+            counter["n"] += 1
+            return ExecResult(outcome=(Outcome.CRASH if counter["n"] % 2
+                                       else Outcome.ACCEPTED),
+                              detail="nondeterministic")
+
+    monkeypatch.setitem(_REGISTRY, "test:flaky", CountingFlaky)
     engine = OracleEngine(workspace)
-    with pytest.raises(ValidationError):
-        engine.run(target_id="test:kv", inputs=[SORTED_KV], trials=1)
+    run = engine.run({**SPEC, "target": "test:flaky",
+                      "seeds_b64": [_b64(b"AAAA")]})
+    assert run.bases_evaluated == 0
+    assert run.inconclusive_nondeterministic >= 1
+    assert len(run.violations) == 0
 
 
-# --- provenance / separation of claims ----------------------------------------------
+def test_timeout_observations_are_tracked_not_promoted(workspace, monkeypatch):
+    from ios_research.targets import _REGISTRY
 
-def test_finding_records_version_and_separates_claims(workspace, kv_target):
+    class TimeoutBase(BoundedTarget):
+        id = "test:tbase"
+
+        def execute(self, data):
+            return ExecResult(outcome=Outcome.TIMEOUT, detail="stuck")
+
+    monkeypatch.setitem(_REGISTRY, TimeoutBase.id, TimeoutBase)
     engine = OracleEngine(workspace)
-    summary = engine.run(target_id="test:kv", inputs=[b"c=3\nb=2\n"],
-                         relations=["outcome_invariant"],
-                         transforms=["dedupe_lines"])
-    for finding in summary["findings"]:
-        assert finding["oracle_version"] == 1
-        assert finding["exploitability_claim"] is None
-        assert finding["severity_rationale"]
-        assert finding["reference_sha256"]
-        assert "exploitability" in summary["note"] or summary["note"]
+    run = engine.run({**SPEC, "target": "test:tbase",
+                      "seeds_b64": [_b64(b"AAAA")]})
+    assert run.inconclusive_timeouts == 1
+    assert len(run.violations) == 0
+    assert run.cases_evaluated == 0
 
 
-def test_run_persisted_and_listable(workspace, kv_target):
-    engine = OracleEngine(workspace)
-    out = engine.run(target_id="test:kv", inputs=[SORTED_KV])
-    record = engine.get(out["run_id"])
-    assert record.status == "run"
-    assert any(r.id == out["run_id"] for r in engine.list())
+# --- reproducibility ---------------------------------------------------------------
+
+def test_runs_are_reproducible_and_persisted(workspace):
+    seeds = [_b64(b"AAAA" * 4), _b64(b"C" * 12)]
+    first = OracleEngine(workspace).run({**SPEC, "seeds_b64": seeds})
+    second = OracleEngine(workspace).run({**SPEC, "seeds_b64": seeds})
+    assert first.to_dict() == second.to_dict()
+    stored = workspace.path("analysis", "oracles", f"{first.id}.json")
+    assert stored.is_file()
+    assert json.loads(stored.read_text())["id"] == first.id
 
 
-def test_unknown_target_rejected(workspace):
-    with pytest.raises(Exception):
-        OracleEngine(workspace).run(target_id="missing:target",
-                                    inputs=[b"x"])
+# --- CLI envelope ----------------------------------------------------------------
 
+def test_oracle_cli_roundtrip(workspace, tmp_path, capsys):
+    from ios_research.cli import main
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(
+        {**SPEC, "seeds_b64": [_b64(b"A" * 20)]}), encoding="utf-8")
+    ws = ["--workspace", str(workspace.root)]
 
-def test_input_size_bound_enforced(workspace, kv_target):
-    with pytest.raises(ValidationError):
-        OracleEngine(workspace).run(target_id="test:kv",
-                                    inputs=[b"x" * (256 * 1024 + 1)])
+    code = main([*ws, "oracle", "run", str(spec_path), "--json"])
+    env = json.loads(capsys.readouterr().out)
+    assert code == 0 and env["ok"] is True
+    assert env["data"]["violation_count"] >= 1
+    run_id = env["data"]["id"]
+
+    code = main([*ws, "oracle", "show", run_id, "--json"])
+    assert json.loads(capsys.readouterr().out)["data"]["id"] == run_id
+
+    code = main([*ws, "oracle", "list", "--json"])
+    env = json.loads(capsys.readouterr().out)
+    assert code == 0 and env["data"]["count"] == 1
