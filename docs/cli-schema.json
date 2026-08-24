@@ -14,6 +14,7 @@
     "reports": ".ios-research/reports/<report_id>/",
     "research": ".ios-research/research/<research_id>.json",
     "spoints": ".ios-research/spoints/<report_id>.json",
+    "supply": ".ios-research/supply/<record_id>.json",
     "workspace_marker": ".ios-research/workspace.json"
   },
   "commands": {
@@ -2737,6 +2738,88 @@
                 "required": true
               }
             ]
+          }
+        }
+      }
+    },
+    "supply": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "audit": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "requirements",
+                "flags": [
+                  "--requirements"
+                ],
+                "help": "path to requirements.txt-style text",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "scan": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "directory of *.py files to scan",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "record_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "verify": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "lockfile",
+                "flags": [
+                  "--lockfile"
+                ],
+                "help": "path to the lockfile JSON",
+                "required": true
+              },
+              {
+                "dest": "root",
+                "flags": [
+                  "--root"
+                ],
+                "help": "root directory lock paths resolve against",
+                "required": false
+              }
+            ],
+            "positionals": []
           }
         }
       }

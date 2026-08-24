@@ -1,5 +1,6 @@
 {
-  "id": "iosr-corpus-quality-simulator-v1",
+  "_widening_note": "v2 widens all seven weight_* knobs from low=0,high=3 to low=0,high=6 (step=1). Supported by the bound environment: tools/experiment_loop/ios_env/corpus.py:27 declares the current domain (Knob(name=f\"weight_{s}\", kind=KNOB_INT, default=1, low=0, high=3, step=1)), and the underlying weight consumer accepts any non-negative integer - ios_research/src/ios_research/mutation.py:182 encodes weights as pool repetition (built.extend([strat] * max(0, int(weights.get(strat, 1))))) via common.py:38 weights_from_config. Activation requires the matching one-line knob_list edit in corpus.py:27 (high=3 -> high=6); this goal file alone does not move the generator, which samples against env knob declarations. Id bumped v1->v2 because Goal.stable_id ignores knob ranges and declared ids override it anyway, so resuming under -v1 would reuse a knowledge base saturated by lessons learned on the 0..3 domain.",
+  "id": "iosr-corpus-quality-simulator-v2",
   "objective": "Improve mock-target corpus behavior diversity and discovery efficiency",
   "environment": "ios_research_corpus",
   "primary_metric": "coverage_per_input",
@@ -25,5 +26,20 @@
     "max_experiments_total": 80,
     "max_cost_usd": 150.0,
     "max_cost_usd_per_batch": 25.0
+  },
+  "search_space": {
+    "note": "Declarative mirror of the intended env knob domains; ignored by experiment_loop.models.Goal.from_dict. All seven strategies come from ios_research.mutation.STRATEGIES via ios_env/common.py:15.",
+    "knobs": [
+      {"name": "weight_byte",           "kind": "int", "low": 0, "high": 6, "step": 1, "previous_high": 3, "change": "widened"},
+      {"name": "weight_truncation",     "kind": "int", "low": 0, "high": 6, "step": 1, "previous_high": 3, "change": "widened"},
+      {"name": "weight_insertion",      "kind": "int", "low": 0, "high": 6, "step": 1, "previous_high": 3, "change": "widened"},
+      {"name": "weight_deletion",       "kind": "int", "low": 0, "high": 6, "step": 1, "previous_high": 3, "change": "widened"},
+      {"name": "weight_boundary",       "kind": "int", "low": 0, "high": 6, "step": 1, "previous_high": 3, "change": "widened"},
+      {"name": "weight_integer",        "kind": "int", "low": 0, "high": 6, "step": 1, "previous_high": 3, "change": "widened"},
+      {"name": "weight_structure_aware","kind": "int", "low": 0, "high": 6, "step": 1, "previous_high": 3, "change": "widened"}
+    ],
+    "excluded": [
+      {"candidate": "weight_dict_overwrite / weight_dict_insert", "reason": "DICT_STRATEGIES are only appended when a dictionary is supplied; corpus.py run() calls mutation.mutate without tokens, so these would be near-no-op knobs - outside validated support."}
+    ]
   }
 }

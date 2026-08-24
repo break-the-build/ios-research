@@ -45,6 +45,7 @@ ARTIFACT_LOCATIONS = {
     "findings": ".ios-research/findings/<finding_id>.json",
     "ndays": ".ios-research/ndays/<diff_id>.json",
     "artifacts": ".ios-research/artifacts/<sha2>/<sha256>.bin",
+    "supply": ".ios-research/supply/<record_id>.json",
 }
 
 EXPERIMENT_LIFECYCLE = [

@@ -510,3 +510,34 @@ bugs) so the whole path runs on genuine crashes:
 
 267 tests pass (was 236). Native e2e for both ImageIO and self-test run when a
 suitable ASan clang is present; skip otherwise (CI stays mock-only).
+
+---
+
+## Session 2026-08-23 — throughput retune, saturation audit, loader fix
+
+| Field | Value |
+|-------|-------|
+| Starting commit | `1f25151` |
+| Engine | experiment-loop (pure statistical, no LLM calls) |
+| Goals run | 05-engine, 07-corpus, 08-dedup, 09-minimizer, 12-differential (+powered re-run) |
+| Experiments | 5 batches, ~40 arm evaluations, seed 20260823 |
+
+### Findings → tracking
+
+| Finding | Verdict | Issue | PR |
+|---|---|---|---|
+| Non-uniform weights `deletion=4, integer=2, structure_aware=4` give +27.05% end-to-end exec/s; detection guardrail held | IMPLEMENT_NOW | #164 | merged |
+| Differential-testing lift suggestive (+29.8% avg; best +94.4% powered) but never significant (n=10→30) | REJECT (recorded) | #165 | — |
+| Corpus/minimizer/dedup goal spaces saturated (0% wins; dedup next-best EVs negative) | Widen: corpus knobs →0..6, minimizer start_n→16 + min_chunk knob; dedup has no headroom (3 knobs, exact-match signatures) | #166 | merged |
+| Documented env loading fails (relative-import file-path load; stale flat module reference) | FIXED | #167 | merged |
+
+### Metrics
+
+| metric | before | after |
+|---|---|---|
+| executions_per_second (engine env, winner vs control) | baseline | **+27.05%** (guardrail crash_detection_rate >= 0.99 held) |
+
+### Lessons
+
+- Inner-loop yield tuning (goal 06) and end-to-end throughput tuning (goal 05) prefer different weight profiles; both are recorded in config provenance comments.
+- Saturation is informative: dedup's exact-match signature space is exhausted by design; widening requires env changes first (knob domains), not just goal JSONs.

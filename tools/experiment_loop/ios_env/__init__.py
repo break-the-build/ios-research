@@ -1,10 +1,24 @@
 """experiment-loop environments for ios-research.
 
 Importing this package registers every ios-research environment with the
-experiment-loop registry. Load it from the CLI with::
+experiment-loop registry. Load it from the CLI with a *dotted* import::
 
-    python -m experiment_loop run <goal.json> \
-        --load tools/experiment_loop/ios_research_env.py --samples 40
+    PYTHONPATH=src python -m experiment_loop run <goal.json> \
+        --load tools.experiment_loop.ios_env --samples 40
+
+Run from the repository root with ``src/`` on ``PYTHONPATH``: the environment
+modules import the real framework (``from ios_research import ...``), which
+lives under ``src/``.
+
+File-path loading does **not** work here::
+
+    --load tools/experiment_loop/ios_env/__init__.py   # BROKEN
+
+``--load`` with a path imports the file as a standalone module, so the
+package's relative imports (``from . import fuzzer`` and friends) fail with
+``ImportError: attempted relative import with no known parent package``. Use
+the dotted form above; ``tools`` and ``tools.experiment_loop`` resolve as
+(implicit/explicit) namespace packages on the repository root.
 
 Each environment binds the *real* ios-research code to the experiment-loop
 search engine via a ``run(config, samples, seed) -> Observation`` method, so the
