@@ -1,0 +1,5 @@
+Test session results produced by the ios-research fixture, not by Xcode.
+Running SampleAppTests on iPhone15,2 (iOS 17.5)
+AddressSanitizer: heap-buffer-overflow WRITE of size 4 in parse_record
+Test 'SampleAppTests/SyncTests/testRace' reported a data race
+Session ended with 1 crash and 2 failures.
