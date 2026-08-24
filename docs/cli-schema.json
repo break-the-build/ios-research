@@ -316,6 +316,113 @@
         }
       }
     },
+    "campaign": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "export": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "worker",
+                "flags": [
+                  "--worker"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "campaign",
+                "flags": [
+                  "--campaign"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "from_dir",
+                "flags": [
+                  "--from"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "corpus",
+                "flags": [
+                  "--corpus"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "require_new_coverage",
+                "flags": [
+                  "--require-new-coverage"
+                ],
+                "help": "skip inputs that add no new coverage feature",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "status": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "campaign",
+                "flags": [
+                  "--campaign"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
     "config": {
       "arguments": {
         "options": [],
@@ -1445,6 +1552,14 @@
                   "--llm-budget"
                 ],
                 "help": "max proposals consumed per campaign",
+                "required": false
+              },
+              {
+                "dest": "focus_symbol",
+                "flags": [
+                  "--focus-symbol"
+                ],
+                "help": "directed scheduling toward this symbol (#73); requires a target with a callgraph() hook",
                 "required": false
               },
               {

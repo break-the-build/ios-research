@@ -100,6 +100,11 @@ class FuzzSession:
     llm_cursor: int = 0
     llm_round: int = 0
     llm_stats: dict = field(default_factory=dict)
+    focus_symbol: str = ""
+    focus_distances: dict = field(default_factory=dict)
+    focus_entry_distances: dict = field(default_factory=dict)
+    focus_counts: dict = field(default_factory=dict)
+    focus_biased: int = 0
     started_at: str = ""
     updated_at: str = ""
 
@@ -133,6 +138,13 @@ class FuzzSession:
                 "value_profile": self.value_profile,
                 "token_uses": self.token_uses,
             },
+            "focus": {
+                "symbol": self.focus_symbol,
+                "targets_reachable": sum(
+                    1 for d in self.focus_distances.values() if d == 0),
+                "biased_selections": self.focus_biased,
+                "selection_counts": dict(self.focus_counts),
+            } if self.focus_symbol else {},
             "sanitizer_profile": self.sanitizer_profile,
             "mutator_plugin": {
                 "path": self.mutator_plugin_path,
@@ -198,7 +210,8 @@ class FuzzEngine:
                max_input_bytes: int | None = None,
                sched_modes: tuple = (),
                llm_proposal_file: str = "",
-               llm_budget: int = 0) -> FuzzSession:
+               llm_budget: int = 0,
+               focus_symbol: str = "") -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -270,6 +283,7 @@ class FuzzEngine:
             llm_proposal_file=str(llm_proposal_file),
             llm_budget=int(llm_budget),
             llm_stats=llm_stats,
+            focus_symbol=str(focus_symbol or ""),
         )
         if tokens:
             self.ws.write_json(self._dict_rel(session.id), {
@@ -284,9 +298,90 @@ class FuzzEngine:
                  for sha in session.base_shas]
         return bases or [DEFAULT_BASE]
 
+    def _ensure_focus_distances(self, session: FuzzSession, target) -> None:
+        """One-time distance computation for directed scheduling (#73).
+
+        Requires the target's optional ``callgraph`` hook; without it (or with
+        an empty result) focus stays recorded but scheduling is unchanged.
+        """
+        if not session.focus_symbol or session.focus_distances:
+            return
+        graph_doc = getattr(target, "callgraph", None)
+        if not callable(graph_doc):
+            return
+        try:
+            doc = graph_doc()
+            if not doc:
+                return
+            from .directed import load_callgraph, target_distances
+            graph = load_callgraph(doc)
+            session.focus_distances = target_distances(
+                graph, {session.focus_symbol})
+        except Exception:  # optional guidance must never break a campaign
+            session.focus_distances = {}
+
+    def _focus_entry_distances(self, session: FuzzSession,
+                               pairs: list[tuple[str, bytes]], target) -> dict:
+        """Map corpus entries to call-graph distances via the target hook.
+
+        The target's optional ``focus_symbol_for(data)`` says which modeled
+        symbol an input exercises; combined with symbol-level distances this
+        yields per-input weights. Results are cached on the session (by input
+        sha) so pause/resume reproduces identical scheduling.
+        """
+        cached = session.focus_entry_distances
+        symbol_for = getattr(target, "focus_symbol_for", None)
+        for sha, data in pairs:
+            if sha in cached:
+                continue
+            distance = None
+            if callable(symbol_for):
+                try:
+                    symbol = symbol_for(data)
+                except Exception:
+                    symbol = None
+                if symbol is not None:
+                    distance = session.focus_distances.get(symbol)
+            cached[sha] = distance
+        return cached
+
     def _select_base(self, session: FuzzSession, corpus: Corpus,
-                     fallback_bases: list[bytes], iteration: int) -> bytes:
+                     fallback_bases: list[bytes], iteration: int,
+                     target=None) -> bytes:
         """Select a coverage corpus entry deterministically when available."""
+        from .hashing import sha256_bytes
+        if session.focus_distances and fallback_bases:
+            # Directed scheduling applies on both the coverage and fallback
+            # paths (#73): weight each candidate by the distance of the
+            # symbol its input exercises (via the target hook).
+            from .directed import selection_weight, weighted_selection
+            pairs: list[tuple[str, bytes]] = []
+            seen = set()
+            for data in fallback_bases:
+                sha = sha256_bytes(data)
+                if sha not in seen:
+                    seen.add(sha)
+                    pairs.append((sha, data))
+            if session.coverage_available is True:
+                entries = {tc["sha256"]: tc for tc in corpus.testcases}
+                for sha in session.base_shas + session.coverage_retained_shas:
+                    if sha in entries and sha not in seen:
+                        seen.add(sha)
+                        pairs.append((sha,
+                                      self.corpus_store.read_bytes(corpus,
+                                                                   sha)))
+            entry_distances = self._focus_entry_distances(session, pairs,
+                                                          target)
+            candidates = [(sha, entry_distances.get(sha)) for sha, _ in pairs]
+            sha = weighted_selection(candidates, session.focus_counts)
+            session.focus_counts[sha] = \
+                session.focus_counts.get(sha, 0) + 1
+            if selection_weight(entry_distances.get(sha)) > 1:
+                session.focus_biased += 1
+            for data in fallback_bases:
+                if sha256_bytes(data) == sha:
+                    return data
+            return fallback_bases[iteration % len(fallback_bases)]
         if session.coverage_available is not True:
             return fallback_bases[iteration % len(fallback_bases)]
         shas = list(dict.fromkeys(session.base_shas + session.coverage_retained_shas))
@@ -329,6 +424,7 @@ class FuzzEngine:
         target = targets.create(session.target)
         fmt = target.formats[0] if target.formats else target.kind
         struct_fn = target.structure_mutate
+        self._ensure_focus_distances(session, target)
         tokens = self.tokens_for(session)
         strategies: tuple[str, ...] = mutation.STRATEGIES
         if tokens:
@@ -376,7 +472,7 @@ class FuzzEngine:
                 break
 
             i = session.cursor
-            base = self._select_base(session, corpus, bases, i)
+            base = self._select_base(session, corpus, bases, i, target)
             mutated = None
             strategy = ""
             llm_note = ""
