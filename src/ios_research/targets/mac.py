@@ -474,6 +474,8 @@ class MacFuzzTarget(Target):
                 # Collect crash artifacts and normalize each unique one.
                 unique: list[tuple[bytes, ExecResult]] = []
                 seen: set[str] = set()
+                timeouts: list[bytes] = []
+                seen_timeouts: set[str] = set()
                 arts = sorted(glob.glob(os.path.join(artifact_dir, "crash-*"))
                               + glob.glob(os.path.join(artifact_dir, "oom-*"))
                               + glob.glob(os.path.join(artifact_dir, "timeout-*")))
@@ -489,6 +491,15 @@ class MacFuzzTarget(Target):
                         if sig not in seen:
                             seen.add(sig)
                             unique.append((data, res))
+                    elif res.outcome == Outcome.TIMEOUT:
+                        # Confirmed hang: keep it visible in stats instead of
+                        # silently dropping the finding (#190). The raw input
+                        # stays on disk as libFuzzer's timeout-* artifact.
+                        import hashlib
+                        digest = hashlib.sha256(data).hexdigest()
+                        if digest not in seen_timeouts:
+                            seen_timeouts.add(digest)
+                            timeouts.append(data)
 
                 executed = _parse_lf_runs(blob)
                 stats = {
@@ -498,6 +509,7 @@ class MacFuzzTarget(Target):
                                    if executed and elapsed else None),
                     "artifacts": len(arts),
                     "unique_crashes": len(unique),
+                    "unique_timeouts": len(timeouts),
                     "value_profile": bool(value_profile),
                     "corpus_dir": corpus_dir,
                 }

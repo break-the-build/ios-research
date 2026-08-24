@@ -609,6 +609,40 @@ def test_fuzz_corpus_rejects_non_libfuzzer(tmp_path):
     assert "not a libFuzzer build" in stats["error"]
 
 
+def test_fuzz_corpus_counts_confirmed_timeouts(tmp_path):
+    """libFuzzer timeout-* artifacts must surface as hangs, not vanish (#190)."""
+    lf = tmp_path / "imageio_fuzzer"
+    lf.write_text(r'''#!/usr/bin/env bash
+case "$1" in
+  -help=1) echo "libFuzzer flags: -runs= -max_total_time= -fork="; exit 0 ;;
+esac
+prefix=""; corpus=""; is_run=0
+for a in "$@"; do
+  case "$a" in
+    -artifact_prefix=*) prefix="${a#-artifact_prefix=}"; is_run=1 ;;
+    -*) ;;
+    *) if [ "$is_run" = "0" ]; then corpus="$a"; fi ;;
+  esac
+done
+if [ "$is_run" = "1" ]; then
+  printf 'HANGhanginput' > "${prefix}timeout-aaaa"
+  printf 'HANGhanginput' > "${prefix}timeout-bbbb"
+  echo "stat::number_of_executed_units: 999"
+  exit 0
+fi
+data=$(cat "$corpus" 2>/dev/null)
+case "$data" in
+  *HANG*) sleep 5 ;;
+esac
+exit 0
+''')
+    lf.chmod(0o755)
+    t = MacFuzzTarget("imageio", harness=str(lf), timeout_s=0.3)
+    unique, stats = t.fuzz_corpus([b"seed"], runs=100)
+    assert unique == []                       # crash contract unchanged
+    assert stats["unique_timeouts"] == 1      # deduped by input content
+
+
 def test_campaign_auto_selects_libfuzzer(tmp_path, monkeypatch):
     lf = tmp_path / "imageio_fuzzer"
     _write_libfuzzer_stub(lf)
