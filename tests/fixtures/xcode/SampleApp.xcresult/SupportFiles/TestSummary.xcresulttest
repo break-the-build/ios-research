@@ -1,0 +1,61 @@
+{
+  "_type": {"_name": "ActionsInvocationRecord"},
+  "_values": [
+    {
+      "_type": {"_name": "ActionRunSummary"},
+      "_values": [
+        {"_type": {"_name": "Test Failure"},
+         "_values": [
+           {"_type": {"_name": "String"},
+            "_value": "AddressSanitizer: heap-buffer-overflow WRITE of size 4 in parse_record at Parser.m:88"},
+           {"_type": {"_name": "Test Case"},
+            "_values": [
+              {"_type": {"_name": "String"},
+               "_value": "SampleAppTests/ParserTests/testFuzzInput"}
+            ]}
+         ]},
+        {"_type": {"_name": "Test Failure"},
+         "_values": [
+           {"_type": {"_name": "String"},
+            "_value": "ThreadSanitizer: data race detected between two threads"},
+           {"_type": {"_name": "Test Case"},
+            "_values": [
+              {"_type": {"_name": "String"},
+               "_value": "SampleAppTests/SyncTests/testRace"}
+            ]}
+         ]},
+        {"_type": {"_name": "Test Failure"},
+         "_values": [
+           {"_type": {"_name": "String"},
+            "_value": "failed: assertion: expected 2 got 3"},
+           {"_type": {"_name": "Test Case"},
+            "_values": [
+              {"_type": {"_name": "String"},
+               "_value": "SampleAppTests/MathTests/testAdd"}
+            ]}
+         ]}
+      ]
+    },
+    {
+      "_type": {"_name": "Target Device"},
+      "_values": [
+        {"_type": {"_name": "OS Version"},
+         "_values": [{"_type": {"_name": "String"}, "_value": "17.5 (21F90)"}]},
+        {"_type": {"_name": "Model"},
+         "_values": [{"_type": {"_name": "String"}, "_value": "iPhone15,2"}]}
+      ]
+    },
+    {
+      "_type": {"_name": "Coverage"},
+      "_values": [
+        {"_type": {"_name": "Line Coverage"}, "_value": 0.62}
+      ]
+    },
+    {
+      "_type": {"_name": "ExoticFutureDiagnostic"},
+      "_values": [
+        {"_type": {"_name": "String"}, "_value": "something new"}
+      ]
+    }
+  ]
+}

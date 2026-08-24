@@ -1,0 +1,25 @@
+{
+  "defaultOptions": {
+    "addressSanitizer": "YES",
+    "targetForVariableExpansion": {
+      "containerPath": "container:SampleApp.xcodeproj",
+      "identifier": "SampleAppTests"
+    }
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:SampleApp.xcodeproj",
+        "identifier": "SampleAppTests"
+      }
+    },
+    {
+      "skipped": true,
+      "target": {
+        "containerPath": "container:SampleApp.xcodeproj",
+        "identifier": "SampleAppUITests"
+      }
+    }
+  ],
+  "version": 1
+}

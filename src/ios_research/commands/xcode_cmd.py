@@ -5,8 +5,28 @@ from __future__ import annotations
 import json
 import os
 
-from ..errors import NotFoundError, StateError, UsageError
+from ..errors import InterruptedError_, NotFoundError, StateError, UsageError
 from ..output import Result
+
+
+def _add_test_args(p) -> None:
+    p.add_argument("plan_id")
+    p.add_argument("--project", default=None)
+    p.add_argument("--xcode-workspace", dest="workspace_swift",
+                    default=None)
+    p.add_argument("--destination", default=None)
+    p.add_argument("--only-testing", action="append", default=None)
+    p.add_argument("--sanitizer", action="append", default=None,
+                    help="address|thread|undefined-behavior|"
+                         "main-thread-checker|guard-malloc|zombies|"
+                         "code-coverage (repeatable)")
+    p.add_argument("--result-bundle-path", default=None)
+    p.add_argument("--dry-run", action="store_true",
+                    help="print the command without executing "
+                         "(construction-only is the default)")
+    p.add_argument("--execute", action="store_true",
+                   help="actually run xcodebuild (opt-in; requires --yes)")
+    p.add_argument("--timeout", type=float, default=600.0)
 
 
 def register(subparsers, parent) -> None:
@@ -37,21 +57,48 @@ def register(subparsers, parent) -> None:
     p_test = sub.add_parser("test", parents=[parent],
                             help="construct (or opt-in run) an xcodebuild "
                                  "test command")
-    p_test.add_argument("plan_id")
-    p_test.add_argument("--project", default=None)
-    p_test.add_argument("--xcode-workspace", dest="workspace_swift",
-                    default=None)
-    p_test.add_argument("--destination", default=None)
-    p_test.add_argument("--only-testing", action="append", default=None)
-    p_test.add_argument("--sanitizer", action="append", default=None,
-                        help="address|thread|undefined-behavior|"
-                             "main-thread-checker|zombies (repeatable)")
-    p_test.add_argument("--result-bundle-path", default=None)
-    p_test.add_argument("--dry-run", action="store_true",
-                        help="print the command without executing (default "
-                             "when xcodebuild is unavailable)")
-    p_test.add_argument("--timeout", type=float, default=600.0)
+    _add_test_args(p_test)
     p_test.set_defaults(func=cmd_test)
+
+    # Canonical alias names from the issue's CLI contract.
+    p_import_plan = sub.add_parser("import-plan", parents=[parent],
+                                   help="alias of 'plan import': import a "
+                                        ".xctestplan JSON file")
+    p_import_plan.add_argument("path")
+    p_import_plan.set_defaults(func=cmd_plan_import)
+
+    p_run_tests = sub.add_parser("run-tests", parents=[parent],
+                                 help="alias of 'test': construct (or "
+                                      "opt-in run) an xcodebuild test command")
+    _add_test_args(p_run_tests)
+    p_run_tests.set_defaults(func=cmd_test)
+
+    p_parse_xcr = sub.add_parser("parse-xcresult", parents=[parent],
+                                 help="alias of 'xcresult parse': parse an "
+                                      ".xcresult bundle or exported JSON")
+    p_parse_xcr.add_argument("path")
+    p_parse_xcr.set_defaults(func=cmd_xcresult_parse)
+
+    p_repro_cmd = sub.add_parser("repro-cmd", parents=[parent],
+                                 help="focused xcodebuild reproduction "
+                                      "command from a parsed xcresult record "
+                                      "or a minimized fuzz input")
+    p_repro_cmd.add_argument("record_id", nargs="?", default=None)
+    p_repro_cmd.add_argument("--plan", required=True)
+    p_repro_cmd.add_argument("--failure-index", type=int, default=0)
+    p_repro_cmd.add_argument("--project", default=None)
+    p_repro_cmd.add_argument("--xcode-workspace", dest="workspace_swift",
+                             default=None)
+    p_repro_cmd.add_argument("--input", default=None,
+                             help="minimized fuzz input path to map instead "
+                                  "of a recorded failure")
+    p_repro_cmd.add_argument("--action", action="append", default=None,
+                             help="action sequence step (repeatable, with "
+                                  "--input)")
+    p_repro_cmd.add_argument("--test", default=None,
+                             help="explicit -only-testing identifier override")
+    p_repro_cmd.add_argument("--sanitizer", action="append", default=None)
+    p_repro_cmd.set_defaults(func=cmd_repro_cmd)
 
     p_xcr = sub.add_parser("xcresult", parents=[parent],
                            help="parse .xcresult bundles or exported JSON")
@@ -124,37 +171,51 @@ def cmd_test(ctx, args) -> Result:
         only_testing=args.only_testing, sanitizers=args.sanitizer,
         destination=args.destination,
         result_bundle_path=args.result_bundle_path)
-    dry_run = args.dry_run
+    # Construction-only by default; execution is an explicit, confirmed
+    # opt-in honoring the framework's --yes safety convention.
+    execute = bool(getattr(args, "execute", False)) \
+        and not getattr(args, "dry_run", False)
     backend = XcodebuildBackend()
     run_result = None
-    if not dry_run:
+    if execute:
+        if not ctx.confirm("run xcodebuild test"):
+            raise InterruptedError_(
+                "xcode test --execute requires confirmation; "
+                "re-run with --yes")
         if not backend.available():
             # Actionable JSON error, per the issue's acceptance criteria.
             raise StateError(
                 f"xcodebuild unavailable: {backend.blocker()} "
-                f"(use --dry-run to construct the command only)",
+                f"(omit --execute to construct the command only)",
                 details={"command": cmd})
         run_result = backend.run(cmd, timeout_s=args.timeout)
     return Result(command="xcode test",
                   ok=run_result["exit_code"] == 0 if run_result else True,
-                  data={"command": cmd, "dry_run": dry_run,
+                  data={"command": cmd, "executed": execute,
                         "plan_id": plan["id"], "run": run_result},
                   messages=["constructed: " + " ".join(cmd)]
-                  if dry_run or run_result is None else
+                  if run_result is None else
                   [f"xcodebuild exited {run_result['exit_code']}"])
 
 
 def cmd_xcresult_parse(ctx, args) -> Result:
-    from ..xcode import XCResultStore, parse_xcresult_path
+    from ..xcode import XCResultStore, parse_xcresult_path, tool_provenance
     normalized, raw = parse_xcresult_path(args.path)
+    provenance = normalized.setdefault("provenance", {})
+    if "environment" in normalized and isinstance(
+            normalized["environment"], dict) \
+            and "environment" not in provenance:
+        provenance["environment"] = normalized.pop("environment")
+    provenance["ingest"] = tool_provenance()
     saved = XCResultStore(ctx.workspace()).save(normalized, raw)
-    failures = saved["failures"]
+    crashes = saved.get("crashes") or saved.get("failures") or []
     return Result(command="xcode xcresult parse",
                   data={"record": saved},
                   messages=[f"parsed {saved['source']}: "
-                            f"{len(failures)} failure(s), "
-                            f"{len(saved['unrecognized'])} unrecognized "
-                            f"issue type(s)"])
+                            f"{len(crashes)} crash/failure(s), "
+                            f"{len(saved.get('logs', []))} log file(s), "
+                            f"{len(saved.get('unrecognized', []))} "
+                            f"unrecognized issue type(s)"])
 
 
 def cmd_xcresult_list(ctx, args) -> Result:
@@ -175,11 +236,11 @@ def cmd_xcresult_show(ctx, args) -> Result:
                         .get(args.record_id)})
 
 
-def cmd_repro(ctx, args) -> Result:
+def _repro_from_record(ctx, args) -> Result:
     from ..xcode import XCResultStore, PlanStore, map_repro_command
     record = XCResultStore(ctx.workspace()).get(args.record_id)
     plan = PlanStore(ctx.workspace()).get(args.plan)
-    failures = record.get("failures") or []
+    failures = record.get("failures") or record.get("crashes") or []
     if not failures:
         raise StateError(
             f"xcresult record '{args.record_id}' has no failures to map")
@@ -202,3 +263,30 @@ def cmd_repro(ctx, args) -> Result:
                   data={"command": cmd, "failure": failure,
                         "plan_id": plan["id"]},
                   messages=["focused repro: " + " ".join(cmd)])
+
+
+def cmd_repro(ctx, args) -> Result:
+    return _repro_from_record(ctx, args)
+
+
+def cmd_repro_cmd(ctx, args) -> Result:
+    from ..xcode import PlanStore, map_repro_from_input
+    input_path = getattr(args, "input", None)
+    record_id = getattr(args, "record_id", None)
+    if input_path and record_id:
+        raise UsageError("pass either a record id or --input, not both")
+    if not input_path and not record_id:
+        raise UsageError("provide an xcresult record id or --input PATH")
+    if input_path:
+        plan = PlanStore(ctx.workspace()).get(args.plan)
+        mapped = map_repro_from_input(
+            plan, input_path=input_path,
+            actions=getattr(args, "action", None),
+            project=args.project, workspace_swift=args.workspace_swift,
+            sanitizers=getattr(args, "sanitizer", None),
+            test=getattr(args, "test", None))
+        return Result(command="xcode repro-cmd",
+                      data={**mapped, "plan_id": plan["id"]},
+                      messages=["focused repro: "
+                                + " ".join(mapped["command"])])
+    return _repro_from_record(ctx, args)

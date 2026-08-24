@@ -143,8 +143,7 @@ class TestCommandConstruction:
         plan = {"name": "P"}
         cmd = build_test_command(
             plan, project="P.xcodeproj",
-            sanitizers=["address", "thread", "undefined-behavior",
-                        "main-thread-checker", "zombies"])
+            sanitizers=list(SANITIZER_FLAGS))
         for name in SANITIZER_FLAGS:
             flag, value = SANITIZER_FLAGS[name]
             assert flag in cmd
@@ -284,7 +283,7 @@ def test_cli_test_dry_run_emits_command(tmp_path, monkeypatch):
     cmd = envelope["data"]["command"]
     assert cmd[:2] == ["xcodebuild", "test"]
     assert "-enableAddressSanitizer" in cmd and "YES" in cmd
-    assert envelope["data"]["dry_run"] is True
+    assert envelope["data"]["executed"] is False
 
 
 def test_cli_xcresult_parse_and_repro(tmp_path, monkeypatch):

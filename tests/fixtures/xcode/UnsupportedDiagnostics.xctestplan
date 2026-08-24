@@ -1,0 +1,14 @@
+{
+  "defaultOptions": {
+    "quantumSanitizer": "YES"
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:SampleApp.xcodeproj",
+        "identifier": "SampleAppTests"
+      }
+    }
+  ],
+  "version": 1
+}
