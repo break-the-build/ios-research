@@ -8,6 +8,7 @@ they pin corpus, targets, seed and configuration.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
@@ -123,40 +124,54 @@ class DifferentialEngine:
         target_a = targets.create(diff.target_a)
         target_b = targets.create(diff.target_b)
 
+        # Materialize every testcase's bytes up front: a single pass over the
+        # manifest instead of one disk read per testcase inside the run loop.
+        inputs = [self.corpus_store.read_bytes(corpus, tc["sha256"])
+                  for tc in corpus.testcases]
+
         results = []
         transitions: dict[str, int] = {}
         regressions = 0
         differing = 0
 
-        for tc in corpus.testcases:
-            data = self.corpus_store.read_bytes(corpus, tc["sha256"])
-            ra = target_a.execute(data)
-            rb = target_b.execute(data)
-            cat_a, cat_b = _category(ra.outcome), _category(rb.outcome)
-            sig_a = ra.diagnostics.signature if ra.diagnostics else ""
-            sig_b = rb.diagnostics.signature if rb.diagnostics else ""
-            differs = cat_a != cat_b or sig_a != sig_b
-            is_regression = _RANK[cat_b] > _RANK[cat_a]
-            transition = f"{cat_a}->{cat_b}"
-            if differs:
-                differing += 1
-                transitions[transition] = transitions.get(transition, 0) + 1
-            if is_regression:
-                regressions += 1
-            results.append({
-                "input_sha256": tc["sha256"],
-                "a": {"outcome": ra.outcome, "category": cat_a,
-                      "signature": sig_a,
-                      "classification": ra.diagnostics.classification_hint
-                      if ra.diagnostics else None},
-                "b": {"outcome": rb.outcome, "category": cat_b,
-                      "signature": sig_b,
-                      "classification": rb.diagnostics.classification_hint
-                      if rb.diagnostics else None},
-                "transition": transition,
-                "differs": differs,
-                "is_regression": is_regression,
-            })
+        # The two executions of a testcase are independent (per-case and
+        # per-side), so both sides run concurrently on a tiny shared pool;
+        # subprocess-target waits release the GIL, so threads overlap.
+        # Results are consumed strictly in testcase order. Sharing the two
+        # target instances across workers is safe for the same reason the
+        # triage engine threads a shared instance: execute() wraps each call
+        # in prepare/_run/cleanup with no cross-call mutable state.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            for tc, data in zip(corpus.testcases, inputs):
+                future_a = pool.submit(target_a.execute, data)
+                future_b = pool.submit(target_b.execute, data)
+                ra = future_a.result()
+                rb = future_b.result()
+                cat_a, cat_b = _category(ra.outcome), _category(rb.outcome)
+                sig_a = ra.diagnostics.signature if ra.diagnostics else ""
+                sig_b = rb.diagnostics.signature if rb.diagnostics else ""
+                differs = cat_a != cat_b or sig_a != sig_b
+                is_regression = _RANK[cat_b] > _RANK[cat_a]
+                transition = f"{cat_a}->{cat_b}"
+                if differs:
+                    differing += 1
+                    transitions[transition] = transitions.get(transition, 0) + 1
+                if is_regression:
+                    regressions += 1
+                results.append({
+                    "input_sha256": tc["sha256"],
+                    "a": {"outcome": ra.outcome, "category": cat_a,
+                          "signature": sig_a,
+                          "classification": ra.diagnostics.classification_hint
+                          if ra.diagnostics else None},
+                    "b": {"outcome": rb.outcome, "category": cat_b,
+                          "signature": sig_b,
+                          "classification": rb.diagnostics.classification_hint
+                          if rb.diagnostics else None},
+                    "transition": transition,
+                    "differs": differs,
+                    "is_regression": is_regression,
+                })
 
         summary = {
             "testcases": len(results),
