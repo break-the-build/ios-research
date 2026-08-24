@@ -14,6 +14,7 @@ from typing import Any
 from .clock import now_iso
 from .crashes import CrashStore, CrashRecord
 from .ids import make_id
+from .parallel import map_ordered
 from .triage import Triage
 from .workspace import Workspace
 
@@ -202,5 +203,10 @@ class Analyzer:
         self.crashes.save(crash)
         return analysis
 
-    def analyze_batch(self) -> list[Analysis]:
-        return [self.analyze(crash) for crash in self.crashes.list()]
+    def analyze_batch(self, *, workers: int = 1) -> list[Analysis]:
+        """Analyze every crash in the workspace, in store (sorted-id) order.
+
+        ``workers > 1`` fans the per-crash analyses out over a thread pool
+        (#200); the returned list order is identical for any worker count.
+        """
+        return map_ordered(self.analyze, self.crashes.list(), workers)
