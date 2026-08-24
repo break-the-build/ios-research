@@ -66,6 +66,13 @@ def register(subparsers, parent) -> None:
                          help="comma-separated scheduling-perturbation modes "
                               "applied between cases (#70): "
                               "yield,priority,affinity,random-delay")
+    p_start.add_argument("--targets-of-interest", default=None,
+                         dest="targets_of_interest",
+                         help="comma-separated finding ids to direct energy "
+                              "toward (AFLGo-style distance scheduling, #73)")
+    p_start.add_argument("--callgraph", default=None,
+                         help="path to a schema-1 call-graph JSON document "
+                              "used to compute directed distances (#73)")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -153,6 +160,12 @@ def cmd_start(ctx, args) -> Result:
         from ..races import validate_modes
         sched_modes = validate_modes(
             mode.strip() for mode in raw_sched.split(",") if mode.strip())
+    raw_toi = getattr(args, "targets_of_interest", None)
+    targets_of_interest = [t.strip() for t in (raw_toi or "").split(",")
+                           if t.strip()] if raw_toi else None
+    callgraph = getattr(args, "callgraph", None) or None
+    if targets_of_interest is not None and not targets_of_interest:
+        raise UsageError("--targets-of-interest requires at least one id")
     session = engine.create(experiment_id=experiment.id, target=target_id,
                             corpus_id=corpus.id, seed=seed, workers=workers,
                             max_cases=max_cases, duration_s=args.duration,
@@ -165,13 +178,25 @@ def cmd_start(ctx, args) -> Result:
                             mutator_plugin_path=getattr(
                                 args, "mutator_plugin", None),
                             max_input_bytes=max_input_bytes,
-                            sched_modes=sched_modes)
+                            sched_modes=sched_modes,
+                            targets_of_interest=targets_of_interest,
+                            callgraph_path=callgraph)
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 
     # Reflect fuzzing stats onto the experiment.
     experiment.status = "running" if session.status != "completed" else "completed"
     experiment.stats = session.stats()
+    # Directed objective provenance (#73): persisted on the experiment so
+    # matrix reproduction can report per-target reliability.
+    if session.directed_objectives:
+        experiment.params = dict(experiment.params, directed={
+            "targets_of_interest": list(targets_of_interest or []),
+            "callgraph": callgraph or "",
+            "objectives": session.directed_objectives,
+            "target_functions": list(session.directed_target_functions),
+            "focus_function": session.directed_focus_function,
+        })
     exp_store.save(experiment)
 
     return Result(command="fuzz start",

@@ -24,7 +24,7 @@ from .corpus import CorpusStore, Corpus
 from .crashes import CrashStore
 from .dictionary import (DictionaryToken, load_dictionary, tokens_from_records,
                          tokens_to_records)
-from .errors import NotFoundError, StateError
+from .errors import NotFoundError, StateError, ValidationError
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
@@ -95,6 +95,12 @@ class FuzzSession:
     skipped_oversize: int = 0
     sched_modes: tuple = ()
     sched_calls: int = 0
+    directed_objectives: list[dict] = field(default_factory=list)
+    directed_target_functions: list[str] = field(default_factory=list)
+    directed_function_distance: dict[str, float] = field(default_factory=dict)
+    directed_feature_distance: dict[str, float] = field(default_factory=dict)
+    directed_focus_function: str = ""
+    directed_scheduled_cases: int = 0
     started_at: str = ""
     updated_at: str = ""
 
@@ -136,7 +142,20 @@ class FuzzSession:
             },
             "max_input_bytes": self.max_input_bytes,
             "skipped_oversize": self.skipped_oversize,
+            "directed": {
+                "objectives": list(self.directed_objectives),
+                "target_functions": list(self.directed_target_functions),
+                "focus_function": self.directed_focus_function,
+                "engine_args": self.directed_engine_args(),
+                "scheduled_cases": self.directed_scheduled_cases,
+                "active": bool(self.directed_feature_distance),
+            },
         }
+
+    def directed_engine_args(self, *, engine: str = "libfuzzer") -> list[str]:
+        """External-engine arguments realizing the directed objective (#73)."""
+        from .directed import focus_arguments
+        return focus_arguments(self.directed_focus_function, engine=engine)
 
 
 class FuzzEngine:
@@ -180,6 +199,42 @@ class FuzzEngine:
             return None
         return sorted(sessions, key=lambda s: s.updated_at)[-1]
 
+    # directed greybox (#73) ----------------------------------------------
+    def _directed_plan(self, targets_of_interest: list[str] | None,
+                       callgraph_path: str | None) -> dict[str, Any]:
+        """Resolve ``--targets-of-interest`` into a persisted distance plan.
+
+        Finding ids resolve through the findings store (unknown ids fail with
+        :class:`NotFoundError`). A call-graph document turns the resolved
+        locations into AFLGo-style function distances; without one the
+        objective is still recorded but the schedule stays inactive.
+        """
+        from .directed import (build_plan, CallGraph,
+                               objectives_from_findings)
+        from .findings import FindingsStore
+        empty = {"objectives": [], "target_functions": [],
+                 "function_distance": {}, "feature_distance": {},
+                 "focus_function": ""}
+        ids = [t.strip() for t in (targets_of_interest or []) if t.strip()]
+        if callgraph_path and not ids:
+            raise ValidationError(
+                "--callgraph requires --targets-of-interest")
+        if not ids:
+            return empty
+        findings = [FindingsStore(self.ws).get(fid) for fid in ids]
+        objectives = objectives_from_findings(findings)
+        if not callgraph_path:
+            return {"objectives": objectives, "target_functions": [],
+                    "function_distance": {}, "feature_distance": {},
+                    "focus_function": ""}
+        plan = build_plan(CallGraph.load(callgraph_path), objectives)
+        if not plan["target_functions"]:
+            raise ValidationError(
+                "no target of interest resolved to a call-graph function",
+                details={"targets_of_interest": ids,
+                         "callgraph": str(callgraph_path)})
+        return plan
+
     # lifecycle -----------------------------------------------------------
     def create(self, *, experiment_id: str, target: str, corpus_id: str,
                seed: int, workers: int, max_cases: int,
@@ -191,7 +246,9 @@ class FuzzEngine:
                sanitizer_profile: str | None = None,
                mutator_plugin_path: str | None = None,
                max_input_bytes: int | None = None,
-               sched_modes: tuple = ()) -> FuzzSession:
+               sched_modes: tuple = (),
+               targets_of_interest: list[str] | None = None,
+               callgraph_path: str | None = None) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -233,6 +290,7 @@ class FuzzEngine:
         if sched_modes:
             from .races import validate_modes
             sched_modes = validate_modes(sched_modes)
+        plan = self._directed_plan(targets_of_interest, callgraph_path)
         session = FuzzSession(
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
@@ -250,6 +308,11 @@ class FuzzEngine:
             max_input_bytes=(DEFAULT_MAX_INPUT_BYTES if max_input_bytes is None
                              else max(0, int(max_input_bytes))),
             sched_modes=tuple(sched_modes or ()),
+            directed_objectives=plan["objectives"],
+            directed_target_functions=plan["target_functions"],
+            directed_function_distance=plan["function_distance"],
+            directed_feature_distance=plan["feature_distance"],
+            directed_focus_function=plan["focus_function"],
         )
         if tokens:
             self.ws.write_json(self._dict_rel(session.id), {
@@ -279,9 +342,27 @@ class FuzzEngine:
         available = [sha for sha in shas if sha in entries]
         if not available:
             return fallback_bases[iteration % len(fallback_bases)]
-        sha = min(available, key=lambda value: (
-            session.coverage_selection_counts.get(value, 0),
-            entries[value]["size"], value))
+        if session.directed_feature_distance:
+            # Directed greybox (#73): distance-weighted smooth fair
+            # scheduling.  Energy per input decays exponentially with its
+            # AFLGo distance to the objectives; dividing the selection count
+            # by the energy keeps long-run shares proportional to energy while
+            # never starving distant inputs.
+            from .directed import energy_weight, input_distance
+            weights = {
+                sha: energy_weight(input_distance(
+                    session.directed_feature_distance,
+                    entries[sha].get("coverage_features") or ()))
+                for sha in available}
+            sha = min(available, key=lambda value: (
+                session.coverage_selection_counts.get(value, 0)
+                / weights[value],
+                entries[value]["size"], value))
+            session.directed_scheduled_cases += 1
+        else:
+            sha = min(available, key=lambda value: (
+                session.coverage_selection_counts.get(value, 0),
+                entries[value]["size"], value))
         session.coverage_selection_counts[sha] = \
             session.coverage_selection_counts.get(sha, 0) + 1
         return self.corpus_store.read_bytes(corpus, sha)
