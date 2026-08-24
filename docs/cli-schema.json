@@ -3210,6 +3210,27 @@
             }
           }
         },
+        "build": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "timeout_s",
+                "flags": [
+                  "--timeout-s"
+                ],
+                "help": "build budget in seconds (default 300)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "path to target-manifest.json",
+                "name": "manifest",
+                "required": true
+              }
+            ]
+          }
+        },
         "continuity": {
           "arguments": {
             "options": [],
@@ -3336,6 +3357,45 @@
                 "positionals": []
               }
             }
+          }
+        },
+        "init": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "language",
+                "flags": [
+                  "--language"
+                ],
+                "help": "harness language for the template",
+                "required": true
+              },
+              {
+                "dest": "dest",
+                "flags": [
+                  "--dest"
+                ],
+                "help": "fresh project directory to populate",
+                "required": true
+              },
+              {
+                "dest": "name",
+                "flags": [
+                  "--name"
+                ],
+                "help": "target name (default: --dest basename)",
+                "required": false
+              },
+              {
+                "dest": "authorization_ack",
+                "flags": [
+                  "--acknowledge-authorized-use"
+                ],
+                "help": "write authorization.ack=true; building and running the target executes user-declared local code on your own machine (see SECURITY.md)",
+                "required": false
+              }
+            ],
+            "positionals": []
           }
         },
         "ipc": {
@@ -3568,6 +3628,18 @@
             }
           }
         },
+        "register": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "path to target-manifest.json",
+                "name": "manifest",
+                "required": true
+              }
+            ]
+          }
+        },
         "show": {
           "arguments": {
             "options": [],
@@ -3610,6 +3682,27 @@
                 "positionals": []
               }
             }
+          }
+        },
+        "validate": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "build_timeout_s",
+                "flags": [
+                  "--build-timeout-s"
+                ],
+                "help": "build budget in seconds (default 300)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "path to target-manifest.json",
+                "name": "manifest",
+                "required": true
+              }
+            ]
           }
         },
         "voiceassist": {

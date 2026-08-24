@@ -20,6 +20,25 @@ from .mock import MockParserTarget, MockParserV2Target
 # registry maps a target id (e.g. "mock:parser") to a factory callable.
 _REGISTRY: dict[str, Callable[[], Target]] = {}
 
+_HYDRATED = False
+
+
+def _hydrate_external() -> None:
+    """Load user-declared ``custom:<name>`` targets from the active workspace.
+
+    Runs at most once per process and never raises: a broken record or missing
+    workspace just leaves the built-in registry untouched.
+    """
+    global _HYDRATED
+    if _HYDRATED:
+        return
+    _HYDRATED = True
+    try:
+        from ..targetsdk import hydrate_manifests
+        hydrate_manifests()
+    except Exception:  # noqa: BLE001 - hydration is best-effort
+        pass
+
 
 def register(target_id: str, factory: Callable[[], Target]) -> None:
     _REGISTRY[target_id] = factory
@@ -35,6 +54,8 @@ def create(target_id: str) -> Target:
         if not inner_id or inner_id.startswith("net:"):
             raise NotFoundError(f"invalid transport target '{target_id}'")
         return LoopbackTcpTarget(create(inner_id))
+
+    _hydrate_external()
     if target_id not in _REGISTRY:
         raise NotFoundError(
             f"unknown target '{target_id}'; known: {', '.join(sorted(_REGISTRY))}")
@@ -42,6 +63,7 @@ def create(target_id: str) -> Target:
 
 
 def list_targets() -> list[dict]:
+    _hydrate_external()
     out = []
     for tid in sorted(_REGISTRY):
         target = _REGISTRY[tid]()
@@ -54,6 +76,8 @@ def is_registered(target_id: str) -> bool:
         inner = target_id[len("net:"):]
         return bool(inner) and not inner.startswith("net:") \
             and inner in _REGISTRY
+
+    _hydrate_external()
     return target_id in _REGISTRY
 
 
