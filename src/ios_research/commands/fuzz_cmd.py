@@ -69,6 +69,10 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--llm-budget", type=int, default=0,
                          dest="llm_budget",
                          help="max proposals consumed per campaign")
+    p_start.add_argument("--focus-symbol", default=None,
+                         dest="focus_symbol",
+                         help="directed scheduling toward this symbol (#73); "
+                              "requires a target with a callgraph() hook")
     p_start.add_argument("--sched-perturb", default=None, dest="sched_perturb",
                          help="comma-separated scheduling-perturbation modes "
                               "applied between cases (#70): "
@@ -179,7 +183,9 @@ def cmd_start(ctx, args) -> Result:
                             max_input_bytes=max_input_bytes,
                             sched_modes=sched_modes,
                             llm_proposal_file=llm_proposal_file,
-                            llm_budget=llm_budget)
+                            llm_budget=llm_budget,
+                            focus_symbol=str(getattr(args, "focus_symbol",
+                                                     None) or ""))
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

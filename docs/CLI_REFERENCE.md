@@ -418,6 +418,7 @@ Options:
 - `--chunk` — cases to execute this invocation (for resumable runs)
 - `--llm-proposals` — JSONL proposal file for LLM-in-the-loop mutation (#71); requires --llm-budget
 - `--llm-budget` — max proposals consumed per campaign
+- `--focus-symbol` — directed scheduling toward this symbol (#73); requires a target with a callgraph() hook
 
 ### `ios-research fuzz stats`
 
