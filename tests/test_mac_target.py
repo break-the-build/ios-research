@@ -407,6 +407,69 @@ def test_target_structure_mutate_hook_delegates():
     assert out is not None and out.startswith(b"\x89PNG")
 
 
+# --- CoreText font target (#187) --------------------------------------------
+
+def test_coretext_target_registered_with_font_formats():
+    t = create("mac:coretext")
+    assert t.mock is False
+    d = t.describe()
+    assert d["framework"] == "CoreText"
+    assert d["entry_point"] == "CTFontManagerCreateFontDescriptorsFromData"
+
+
+def test_coretext_seeds_are_sfnt_family():
+    seeds = _mac_seeds.seeds("coretext")
+    assert len(seeds) >= 4
+    magics = [s[:4] for s in seeds]
+    assert b"\x00\x01\x00\x00" in magics   # bare TrueType container
+    assert b"OTTO" in magics               # CFF-flavoured stub
+    assert b"ttcf" in magics               # collection header
+
+
+def test_sfnt_structure_mutation_is_deterministic_and_effective():
+    import random
+    seed = _mac_seeds.seeds("coretext")[1]   # sfnt with glyf/loca tables
+    a = _mac_seeds.structure_mutate("coretext", seed, random.Random(7))
+    b = _mac_seeds.structure_mutate("coretext", seed, random.Random(7))
+    assert a == b and isinstance(a, bytes)
+    changed = any(
+        _mac_seeds.structure_mutate("coretext", seed, random.Random(r)) != seed
+        for r in range(20))
+    assert changed
+
+
+def test_sfnt_structure_mutation_survives_corrupt_num_tables():
+    # regression: num_tables=0xFFFF must not overflow the 2-byte rewrite.
+    import random
+    corrupt = b"\x00\x01\x00\x00" + b"\xff\xff" + b"\x00" * 40
+    for r in range(50):
+        out = _mac_seeds.structure_mutate("coretext", corrupt, random.Random(r))
+        assert out is None or isinstance(out, bytes)
+
+
+def test_sfnt_magic_dispatch_covers_cff_and_collection():
+    import random
+    for magic in (b"OTTO" + b"\x00" * 40, b"true" + b"\x00" * 40,
+                  b"ttcf" + b"\x00" * 40):
+        out = _mac_seeds.structure_mutate("coretext", magic, random.Random(3))
+        assert out is not None
+
+
+def test_libfuzzer_command_honors_dictionary_and_max_len(tmp_path):
+    lf = tmp_path / "imageio_fuzzer"
+    _write_libfuzzer_stub(lf)
+    t = MacFuzzTarget("imageio", harness=str(lf))
+    cmd = t.build_libfuzzer_command(
+        "harness", "corpus", "artifacts", runs=10, workers=1,
+        dictionary="/tmp/x.dict", max_len=4096)
+    assert "-dict=/tmp/x.dict" in cmd
+    assert "-max_len=4096" in cmd
+    base = t.build_libfuzzer_command(
+        "harness", "corpus", "artifacts", runs=10, workers=1)
+    assert not any(a.startswith("-dict=") or a.startswith("-max_len=")
+                   for a in base)
+
+
 # --- campaign runner (#17) -------------------------------------------------
 
 def _load_campaign():

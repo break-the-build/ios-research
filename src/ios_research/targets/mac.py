@@ -56,6 +56,13 @@ _FRAMEWORKS = {
         "description": ("CoreGraphics PDF-decode fuzzing "
                         "(CGPDFDocumentCreateWithProvider + page render)"),
     },
+    "coretext": {
+        "framework": "CoreText",
+        "entry": "CTFontManagerCreateFontDescriptorsFromData",
+        "formats": ("ttf", "otf", "ttc"),
+        "description": ("CoreText font-parsing fuzzing "
+                        "(font descriptors from data + glyph outline decode)"),
+    },
     "selftest": {
         "framework": "SelfTest",
         "entry": "selftest_parser",
@@ -293,7 +300,9 @@ class MacFuzzTarget(Target):
                                 artifact_dir: str, *, runs: int,
                                 workers: int,
                                 max_total_time: float | None = None,
-                                value_profile: bool = False) -> list[str]:
+                                value_profile: bool = False,
+                                dictionary: str | None = None,
+                                max_len: int | None = None) -> list[str]:
         """Build the libFuzzer argv. Exposed for tests and campaign provenance.
 
         #30: ``value_profile`` opts into comparison/value-profile guidance
@@ -308,6 +317,10 @@ class MacFuzzTarget(Target):
                "-print_final_stats=1"]
         if value_profile:
             cmd.append("-use_value_profile=1")
+        if dictionary:
+            cmd.append(f"-dict={dictionary}")
+        if max_len:
+            cmd.append(f"-max_len={max_len}")
         if max_total_time is not None:
             cmd.append(f"-max_total_time={int(max_total_time)}")
         return cmd
@@ -389,7 +402,10 @@ class MacFuzzTarget(Target):
     def fuzz_corpus(self, seeds: list[bytes], *, runs: int = 100_000,
                     max_total_time: float | None = None, workers: int = 1,
                     artifact_dir: str | None = None,
-                    value_profile: bool = False
+                    value_profile: bool = False,
+                    dictionary: str | None = None,
+                    max_len: int | None = None,
+                    corpus_dir: str | None = None
                     ) -> tuple[list[tuple[bytes, ExecResult]], dict]:
         """Run libFuzzer's in-process persistent loop over a seeded corpus.
 
@@ -402,6 +418,10 @@ class MacFuzzTarget(Target):
         ``value_profile=True`` passes ``-use_value_profile=1`` (#30), enabling
         comparison/value-profile-guided mutation for builds compiled with
         ``-fsanitize-coverage=trace-cmp``.
+
+        ``dictionary`` is an optional libFuzzer token-dictionary path;
+        ``max_len`` bounds generated input size; ``corpus_dir`` persists the
+        fuzzing corpus across calls when given (otherwise a temp dir is used).
 
         Returns ``(unique_crashes, stats)`` where ``unique_crashes`` is a list of
         ``(crashing_input, ExecResult)`` deduped by signature. Requires a
@@ -424,7 +444,10 @@ class MacFuzzTarget(Target):
             owns_art = artifact_dir is None
             artifact_dir = artifact_dir or tempfile.mkdtemp(
                 prefix="ios-research-lf-art-")
-            corpus_dir = tempfile.mkdtemp(prefix="ios-research-lf-corpus-")
+            owns_corpus = corpus_dir is None
+            corpus_dir = corpus_dir or tempfile.mkdtemp(
+                prefix="ios-research-lf-corpus-")
+            os.makedirs(corpus_dir, exist_ok=True)
             try:
                 for i, s in enumerate(seeds or [b"\x00"]):
                     with open(os.path.join(corpus_dir, f"seed_{i:06d}"), "wb") as fh:
@@ -433,7 +456,8 @@ class MacFuzzTarget(Target):
                 cmd = self.build_libfuzzer_command(
                     harness, corpus_dir, artifact_dir, runs=runs,
                     workers=workers, max_total_time=max_total_time,
-                    value_profile=value_profile)
+                    value_profile=value_profile, dictionary=dictionary,
+                    max_len=max_len)
 
                 env = dict(os.environ)
                 env.setdefault("ASAN_OPTIONS", "detect_leaks=0")
@@ -475,10 +499,12 @@ class MacFuzzTarget(Target):
                     "artifacts": len(arts),
                     "unique_crashes": len(unique),
                     "value_profile": bool(value_profile),
+                    "corpus_dir": corpus_dir,
                 }
                 return unique, stats
             finally:
-                shutil.rmtree(corpus_dir, ignore_errors=True)
+                if owns_corpus:
+                    shutil.rmtree(corpus_dir, ignore_errors=True)
                 if owns_art:
                     shutil.rmtree(artifact_dir, ignore_errors=True)
         finally:
