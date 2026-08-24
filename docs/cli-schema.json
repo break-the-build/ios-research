@@ -945,6 +945,118 @@
         }
       }
     },
+    "evidence": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "import": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "kind",
+                "flags": [
+                  "--kind"
+                ],
+                "help": "crash-log | sysdiagnose | video | screenshot | syslog | other",
+                "required": true
+              },
+              {
+                "dest": "device_id",
+                "flags": [
+                  "--device-id"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "build",
+                "flags": [
+                  "--build"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "process",
+                "flags": [
+                  "--process"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "captured_at",
+                "flags": [
+                  "--captured-at"
+                ],
+                "help": "researcher-supplied ISO-8601 capture time",
+                "required": false
+              },
+              {
+                "dest": "redaction_ack",
+                "flags": [
+                  "--redaction-ack"
+                ],
+                "help": "confirm review/redaction responsibility for video/screenshot artifacts",
+                "required": false
+              },
+              {
+                "dest": "notes",
+                "flags": [
+                  "--notes"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "crash_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "verify": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "item_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "experiment": {
       "arguments": {
         "options": [],
@@ -982,6 +1094,14 @@
                   "--seed"
                 ],
                 "help": "",
+                "required": false
+              },
+              {
+                "dest": "delivery",
+                "flags": [
+                  "--delivery"
+                ],
+                "help": "researcher-declared input-delivery channel (reporting provenance, #106)",
                 "required": false
               }
             ],
@@ -1234,6 +1354,14 @@
                   "--max-cases"
                 ],
                 "help": "",
+                "required": false
+              },
+              {
+                "dest": "delivery",
+                "flags": [
+                  "--delivery"
+                ],
+                "help": "researcher-declared input-delivery channel (reporting provenance, #106)",
                 "required": false
               },
               {
@@ -1492,7 +1620,6 @@
         "positionals": []
       }
     },
-<<<<<<< HEAD
     "kernel": {
       "arguments": {
         "options": [],
@@ -1604,8 +1731,6 @@
         }
       }
     },
-=======
->>>>>>> origin/main
     "lockdown": {
       "arguments": {
         "options": [],
@@ -2332,6 +2457,59 @@
                 "required": false
               }
             ]
+          }
+        }
+      }
+    },
+    "sequence": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "fuzz": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "adapter",
+                "flags": [
+                  "--adapter"
+                ],
+                "help": "path to a user-declared workflow adapter module",
+                "required": true
+              },
+              {
+                "dest": "cases",
+                "flags": [
+                  "--cases"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "max_length",
+                "flags": [
+                  "--max-length"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": []
           }
         }
       }
