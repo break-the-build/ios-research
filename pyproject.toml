@@ -14,7 +14,7 @@ keywords = ["security-research", "fuzzing", "ios", "crash-triage", "cli"]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov>=4"]
+dev = ["pytest>=7", "pytest-cov>=4", "pytest-xdist>=3"]
 
 [project.scripts]
 ios-research = "ios_research.cli:main"

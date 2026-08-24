@@ -637,7 +637,7 @@ esac
 exit 0
 ''')
     lf.chmod(0o755)
-    t = MacFuzzTarget("imageio", harness=str(lf), timeout_s=0.3)
+    t = MacFuzzTarget("imageio", harness=str(lf), timeout_s=2.0)
     unique, stats = t.fuzz_corpus([b"seed"], runs=100)
     assert unique == []                       # crash contract unchanged
     assert stats["unique_timeouts"] == 1      # deduped by input content

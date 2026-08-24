@@ -37,12 +37,16 @@ def test_ios_env_package_imports_and_registers() -> None:
     except ImportError as exc:
         pytest.skip(f"tools/ package not importable from {REPO_ROOT}: {exc}")
 
-    ios_env = importlib.import_module("tools.experiment_loop.ios_env")
-
+    # Guard before importing tools.experiment_loop.ios_env: its modules do
+    # top-level `from experiment_loop...` imports, which hard-fail when the
+    # engine checkout exists but the engine package is not installed.
     base = pytest.importorskip(
         "experiment_loop.environments.base",
         reason="experiment-loop engine not installed/importable",
     )
+
+    ios_env = importlib.import_module("tools.experiment_loop.ios_env")
+
     registered = set(base.available_environments())
 
     # Exact registry names as declared by each module's `name` class attribute.
