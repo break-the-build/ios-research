@@ -46,10 +46,44 @@ def _wav(pcm: bytes = b"\x00\x00\x00\x00") -> bytes:
 
 _AIFF = (b"FORM" + struct.pack(">I", 4) + b"AIFF")
 
+def _sfnt(tables: list[tuple[bytes, bytes]], sfnt_version: bytes = b"\x00\x01\x00\x00") -> bytes:
+    """Minimal TrueType/OpenType container with the given (tag, payload) tables."""
+    head = struct.pack(">IIIIHHqqhhhhHHhhh",
+                       0x00010000, 0x00010000, 0, 0x5F0F3CF5, 3, 1000,
+                       0, 0, 0, 0, 1000, 1000, 0, 8, 2, 0, 0)
+    hhea = struct.pack(">IIHhHHHHHHHhhhhH",
+                       0x00010000, 800, 0, 0, 0, 1000, 0, 0, 1, 0, 0, 0,
+                       0, 0, 0, 4)
+    maxp = struct.pack(">IH", 0x00010000, 4)
+    cmap_stub = struct.pack(">HHHHI", 0, 1, 3, 1, 12) + struct.pack(">HHH", 6, 10, 65)
+    tables = [(b"head", head), (b"hhea", hhea), (b"maxp", maxp),
+              (b"cmap", cmap_stub)] + list(tables)
+    n = len(tables)
+    entry_selector = max(n.bit_length() - 1, 0)
+    header_size = 12 + 16 * n
+    offset = header_size
+    entries: list[bytes] = []
+    body: list[bytes] = []
+    for tag, payload in tables:
+        pad = (-len(payload)) % 4
+        entries.append(tag + b"\x00\x00" + struct.pack(">III", 0, offset, len(payload)))
+        body.append(payload + b"\x00" * pad)
+        offset += len(payload) + pad
+    return sfnt_version + struct.pack(">HHH", n, 16, entry_selector * 16) \
+        + b"".join(entries) + b"".join(body)
+
+
 _SEEDS = {
     "imageio": [_PNG_1x1, _GIF_1x1, _BMP_2x2, _TIFF, _ICO],
     "audiotoolbox": [_wav(), _AIFF],
     "coregraphics": [_PNG_1x1, b"%PDF-1.4\n%%EOF\n", bytes(64)],
+    "coretext": [
+        _sfnt([]),                                        # bare valid sfnt
+        _sfnt([(b"glyf", b"\x00\x00\x00\x00"),
+               (b"loca", b"\x00\x00\x00\x00\x00\x00")]),
+        b"OTTO" + b"\x00" * 60,                           # CFF-flavoured stub
+        b"ttcf" + struct.pack(">II", 0x00010000, 1) + b"\x00" * 52,
+    ],
     # Self-test markers trigger the harness's deliberate ASan bugs; the trailing
     # padding gives ddmin something to shrink while preserving the signature.
     "selftest": [b"OOB" + b"." * 24, b"WRT" + b"." * 24,
@@ -108,8 +142,48 @@ def _mutate_png(data: bytes, rng) -> bytes | None:
     return bytes(out)
 
 
+_SFNT_TAGS = (b"glyf", b"loca", b"head", b"hhea", "hmtx".encode(), b"maxp",
+              b"name", b"post", b"CFF ", b"cmap", b"fvar", b"gvar",
+              b"GSUB", b"GPOS", b"kern", b"morx")
+
+
+def _mutate_sfnt(data: bytes, rng) -> bytes | None:
+    """Perturb sfnt table directory / size fields to stress offset math."""
+    if len(data) < 12:
+        return None
+    out = bytearray(data)
+    num_tables = int.from_bytes(out[4:6], "big")
+    choice = rng.randrange(4)
+    if choice == 0 and num_tables:
+        # Corrupt a table entry's offset/length pair.
+        i = rng.randrange(num_tables)
+        base = 12 + 16 * i
+        if base + 16 <= len(out):
+            field = rng.randrange(2)
+            pos = base + 8 + 4 * field
+            new = rng.choice([0, 1, 0x7FFFFFFF, 0xFFFFFFFF])
+            out[pos:pos + 4] = int(new).to_bytes(4, "big")
+    elif choice == 1:
+        # Cap at 0xFFFF: a corrupted num_tables must not overflow the field.
+        out[4:6] = rng.choice([0, 1, min(num_tables + 1, 0xFFFF),
+                               0xFFFF]).to_bytes(2, "big")
+    elif choice == 2 and len(out) > 20:
+        i = 12 + rng.randrange(len(out) - 12)
+        out[i] ^= 1 << rng.randrange(8)
+    else:
+        # Splice a plausible table tag over an existing one.
+        tag = _SFNT_TAGS[rng.randrange(len(_SFNT_TAGS))]
+        if len(out) >= 20:
+            i = rng.randrange(max(1, min(8, len(out) - 4)))
+            out[i:i + 4] = tag
+    return bytes(out)
+
+
 def structure_mutate(key: str, data: bytes, rng) -> bytes | None:
     """Format-aware mutation; returns None to fall back to generic mutation."""
     if data[:len(_PNG_MAGIC)] == _PNG_MAGIC:
         return _mutate_png(data, rng)
+    magic4 = data[:4]
+    if magic4 in (b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf"):
+        return _mutate_sfnt(data, rng)
     return None
