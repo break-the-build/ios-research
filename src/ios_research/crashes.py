@@ -7,6 +7,8 @@ Crashes are deduplicated by their diagnostic *signature* within an experiment.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
@@ -74,6 +76,14 @@ class CrashStore:
             raise ValidationError(
                 f"crash '{crash_id}' is not in experiment '{experiment_id}'")
         return crash
+
+    @staticmethod
+    def ensure_safe_id(crash_id: str) -> None:
+        """Reject crafted IDs that could turn record paths into traversals."""
+        candidate = Path(crash_id)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise ValidationError(
+                "crash id must name a record inside the workspace")
 
     def save(self, crash: CrashRecord) -> None:
         self.ws.write_json(self._rel(crash.id), crash.to_dict())

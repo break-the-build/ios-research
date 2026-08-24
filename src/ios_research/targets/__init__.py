@@ -113,6 +113,12 @@ for _surface in DEVICE_SURFACES:
     register(f"ios-device:{_surface}",
              (lambda s: (lambda: IosDeviceTarget(s)))(_surface))
 
+# JavaScriptCore semantic profile (#46). The default executor is a
+# deterministic in-process mock so the pipeline runs anywhere; the opt-in
+# shell executor requires a user-built, authorized JSC binary.
+from .jsc import JSCSemanticTarget  # noqa: E402
+register("jsc:semantic", lambda: JSCSemanticTarget())
+
 # Kernel-boundary simulation target (mock = True). CI-safe: models XNU
 # mach_msg descriptor/bounds logic in-process; never touches a kernel (#68).
 from .machsim import MachMessageSimTarget  # noqa: E402

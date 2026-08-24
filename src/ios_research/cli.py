@@ -31,6 +31,8 @@ from .commands import (
     netip_cmd, wifiaware_cmd, pq3_cmd, continuity_cmd, ipc_cmd, xpc_cmd,
     docimp_cmd, signeddoc_cmd, proxapp_cmd, fsclient_cmd, geo_cmd,
     voiceassist_cmd, supply_cmd, nday_cmd, races_cmd,
+    evidence_cmd,
+    sequence_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -70,6 +72,8 @@ _REGISTRARS: list[Callable] = [
     report_cmd.register,
     research_cmd.register,
     matrix_cmd.register,
+    evidence_cmd.register,
+    sequence_cmd.register,
     detect_cmd.register,
     cve_cmd.register,
     engine_cmd.register,

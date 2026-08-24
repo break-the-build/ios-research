@@ -97,6 +97,9 @@ KIND_SURFACE_MAP = {
                   "entry_points": ["network"]},
     "lockeddevice": {"surface_kind": "framework-parser",
                      "entry_points": ["physical-access"]},
+    # JavaScriptCore semantic profile (#46): web-content parser surface.
+    "jsc": {"surface_kind": "framework-parser",
+            "entry_points": ["browser", "network-user-interaction"]},
     "mach": {"surface_kind": "mach-service",
              "entry_points": ["network"]},
 }
