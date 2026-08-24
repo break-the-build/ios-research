@@ -95,6 +95,11 @@ class FuzzSession:
     skipped_oversize: int = 0
     sched_modes: tuple = ()
     sched_calls: int = 0
+    llm_proposal_file: str = ""
+    llm_budget: int = 0
+    llm_cursor: int = 0
+    llm_round: int = 0
+    llm_stats: dict = field(default_factory=dict)
     started_at: str = ""
     updated_at: str = ""
 
@@ -191,7 +196,9 @@ class FuzzEngine:
                sanitizer_profile: str | None = None,
                mutator_plugin_path: str | None = None,
                max_input_bytes: int | None = None,
-               sched_modes: tuple = ()) -> FuzzSession:
+               sched_modes: tuple = (),
+               llm_proposal_file: str = "",
+               llm_budget: int = 0) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -233,6 +240,16 @@ class FuzzEngine:
         if sched_modes:
             from .races import validate_modes
             sched_modes = validate_modes(sched_modes)
+        if bool(llm_proposal_file) != (llm_budget > 0):
+            raise StateError(
+                "llm mutation requires both --llm-proposals and a positive "
+                "--llm-budget",
+                details={"llm_proposal_file": llm_proposal_file,
+                         "llm_budget": llm_budget})
+        llm_stats: dict = {}
+        if llm_proposal_file:
+            from .llmmutate import empty_stats
+            llm_stats = empty_stats()
         session = FuzzSession(
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
@@ -250,6 +267,9 @@ class FuzzEngine:
             max_input_bytes=(DEFAULT_MAX_INPUT_BYTES if max_input_bytes is None
                              else max(0, int(max_input_bytes))),
             sched_modes=tuple(sched_modes or ()),
+            llm_proposal_file=str(llm_proposal_file),
+            llm_budget=int(llm_budget),
+            llm_stats=llm_stats,
         )
         if tokens:
             self.ws.write_json(self._dict_rel(session.id), {
@@ -323,7 +343,21 @@ class FuzzEngine:
             from .grammar import PluginHost
             plugin_host = PluginHost().discover([session.mutator_plugin_path])
         unique = set(session.crash_ids)
+        crashes_before = len(session.crash_ids)
         executed_this = 0
+
+        # LLM-in-the-loop mutation (#71): proposals replace mutation for a
+        # bounded number of cases. The raw line cursor makes the stream
+        # resumable; proposals are untrusted data (hex bytes only).
+        llm_active = bool(session.llm_proposal_file) and \
+            session.llm_budget > 0
+        llm_iter = None
+        llm_exhausted = False
+        if llm_active:
+            from .llmmutate import FileProposalSource
+            session.llm_round += 1
+            source = FileProposalSource(session.llm_proposal_file)
+            llm_iter = source.proposals_from(session.llm_cursor)
 
         # Batched persistence: accumulate crash counts and corpus additions in
         # memory and flush once before returning, instead of writing per case.
@@ -345,6 +379,30 @@ class FuzzEngine:
             base = self._select_base(session, corpus, bases, i)
             mutated = None
             strategy = ""
+            llm_note = ""
+            if llm_active and not llm_exhausted and \
+                    session.llm_stats["proposals_used"] < session.llm_budget:
+                from .llmmutate import (validate_proposal_bytes,
+                                        repair_with_target)
+                try:
+                    next_line, proposal = next(llm_iter)  # type: ignore[union-attr]
+                except StopIteration:
+                    llm_exhausted = True
+                else:
+                    session.llm_cursor = next_line
+                    if proposal is None:
+                        session.llm_stats["proposals_invalid"] += 1
+                    else:
+                        decoded = validate_proposal_bytes(proposal.data)
+                        if decoded is None:
+                            session.llm_stats["proposals_invalid"] += 1
+                        else:
+                            mutated = repair_with_target(decoded, target)
+                            strategy = "llm-proposal"
+                            llm_note = proposal.note
+                            session.llm_stats["proposals_used"] += 1
+            if mutated is None and llm_active:
+                session.llm_stats["fallback_iterations"] += 1
             if plugin_host is not None and plugin_host.plugins:
                 rng = mutation.rng_for(session.seed, i)
                 if len(bases) > 1 and i % 4 == 3:
@@ -411,7 +469,10 @@ class FuzzEngine:
                     crash_first[crash_id] = (mutated, result, {
                         "parent_sha256": sha256_bytes(base),
                         "mutation": strategy, "seed": session.seed,
-                        "iteration": i})
+                        "iteration": i,
+                        **({"origin": "llm-proposal",
+                            "round": session.llm_round, "note": llm_note}
+                           if strategy == "llm-proposal" else {})})
                 if crash_id not in unique:
                     unique.add(crash_id)
                     session.crash_ids.append(crash_id)
@@ -432,6 +493,16 @@ class FuzzEngine:
         if corpus_dirty:
             self.corpus_store.save(corpus)
         self._flush_crashes(session, fmt, crash_counts, crash_first)
+
+        # Crash-aware round feedback (#71): summarize new signatures so the
+        # next proposal-generation round can be conditioned on them.
+        if llm_active:
+            new_sigs = session.crash_ids[crashes_before:]
+            if new_sigs:
+                from .llmmutate import summarize_round
+                rounds = session.llm_stats.setdefault("rounds", [])
+                rounds.append(summarize_round(session.llm_round, new_sigs))
+                session.llm_stats["rounds"] = rounds[-20:]
 
         if session.cursor >= session.max_cases:
             session.status = COMPLETED

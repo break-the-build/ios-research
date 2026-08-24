@@ -89,6 +89,15 @@ class Target:
         """Format-aware mutation. Return None to fall back to generic mutation."""
         return None
 
+    def repair(self, data: bytes) -> bytes:
+        """Best-effort normalization of an externally proposed input (#71).
+
+        LLM proposals arrive as untrusted bytes; targets that understand their
+        format may repair framing here so proposals reach deep parser paths
+        instead of being rejected at the header. Default is identity.
+        """
+        return data
+
     def coverage_features(self, data: bytes, result: ExecResult):
         """Return stable coverage feature IDs, or ``None`` when unavailable.
 

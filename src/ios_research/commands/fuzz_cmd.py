@@ -62,6 +62,13 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--max-input-bytes", type=int, default=None,
                          help="skip mutated inputs larger than this many bytes "
                               "(default 1048576; 0 disables the bound)")
+    p_start.add_argument("--llm-proposals", default=None,
+                         dest="llm_proposals",
+                         help="JSONL proposal file for LLM-in-the-loop "
+                              "mutation (#71); requires --llm-budget")
+    p_start.add_argument("--llm-budget", type=int, default=0,
+                         dest="llm_budget",
+                         help="max proposals consumed per campaign")
     p_start.add_argument("--sched-perturb", default=None, dest="sched_perturb",
                          help="comma-separated scheduling-perturbation modes "
                               "applied between cases (#70): "
@@ -147,6 +154,11 @@ def cmd_start(ctx, args) -> Result:
     max_input_bytes = getattr(args, "max_input_bytes", None)
     if max_input_bytes is None:
         max_input_bytes = cfg.get("limits.max_input_bytes")
+    llm_proposal_file = getattr(args, "llm_proposals", None) or ""
+    llm_budget = int(getattr(args, "llm_budget", 0) or 0)
+    if bool(llm_proposal_file) != (llm_budget > 0):
+        raise UsageError(
+            "--llm-proposals and a positive --llm-budget are required together")
     sched_modes = ()
     raw_sched = getattr(args, "sched_perturb", None)
     if raw_sched:
@@ -165,7 +177,9 @@ def cmd_start(ctx, args) -> Result:
                             mutator_plugin_path=getattr(
                                 args, "mutator_plugin", None),
                             max_input_bytes=max_input_bytes,
-                            sched_modes=sched_modes)
+                            sched_modes=sched_modes,
+                            llm_proposal_file=llm_proposal_file,
+                            llm_budget=llm_budget)
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 

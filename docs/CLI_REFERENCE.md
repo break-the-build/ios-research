@@ -416,6 +416,8 @@ Options:
 - `--duration` — wall-clock budget in seconds
 - `--workers`
 - `--chunk` — cases to execute this invocation (for resumable runs)
+- `--llm-proposals` — JSONL proposal file for LLM-in-the-loop mutation (#71); requires --llm-budget
+- `--llm-budget` — max proposals consumed per campaign
 
 ### `ios-research fuzz stats`
 

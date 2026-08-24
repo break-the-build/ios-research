@@ -1432,6 +1432,22 @@
                 "required": false
               },
               {
+                "dest": "llm_proposals",
+                "flags": [
+                  "--llm-proposals"
+                ],
+                "help": "JSONL proposal file for LLM-in-the-loop mutation (#71); requires --llm-budget",
+                "required": false
+              },
+              {
+                "dest": "llm_budget",
+                "flags": [
+                  "--llm-budget"
+                ],
+                "help": "max proposals consumed per campaign",
+                "required": false
+              },
+              {
                 "dest": "sched_perturb",
                 "flags": [
                   "--sched-perturb"
