@@ -30,7 +30,7 @@ from .commands import (
     proximity_cmd,
     netip_cmd, wifiaware_cmd, pq3_cmd, continuity_cmd, ipc_cmd, xpc_cmd,
     docimp_cmd, signeddoc_cmd, proxapp_cmd, fsclient_cmd, geo_cmd,
-    voiceassist_cmd, supply_cmd, nday_cmd,
+    voiceassist_cmd, supply_cmd, nday_cmd, races_cmd,
     evidence_cmd,
     sequence_cmd,
 )
@@ -63,6 +63,7 @@ _REGISTRARS: list[Callable] = [
     fuzz_cmd.register,
     crash_cmd.register,
     analyze_cmd.register,
+    races_cmd.register,
     diff_cmd.register,
     harness_cmd.register,
     spoints_cmd.register,
