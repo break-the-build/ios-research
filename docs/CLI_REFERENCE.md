@@ -936,3 +936,79 @@ Positional arguments:
 
 - `flag_id` (required)
 ### `ios-research version`
+
+### `ios-research xcode`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research xcode plan`
+
+Positional arguments:
+
+- `plan_subcommand` (required)
+
+### `ios-research xcode plan import`
+
+Positional arguments:
+
+- `path` (required)
+
+### `ios-research xcode plan list`
+
+### `ios-research xcode plan show`
+
+Positional arguments:
+
+- `plan_id` (required)
+
+### `ios-research xcode repro`
+
+Positional arguments:
+
+- `record_id` (required)
+
+Options:
+
+- `--plan`
+- `--failure-index`
+- `--project`
+- `--xcode-workspace`
+
+### `ios-research xcode test`
+
+Positional arguments:
+
+- `plan_id` (required)
+
+Options:
+
+- `--project`
+- `--xcode-workspace`
+- `--destination`
+- `--only-testing`
+- `--sanitizer`
+- `--result-bundle-path`
+- `--dry-run`
+- `--timeout`
+
+### `ios-research xcode xcresult`
+
+Positional arguments:
+
+- `xcr_subcommand` (required)
+
+### `ios-research xcode xcresult list`
+
+### `ios-research xcode xcresult parse`
+
+Positional arguments:
+
+- `path` (required)
+
+### `ios-research xcode xcresult show`
+
+Positional arguments:
+
+- `record_id` (required)
