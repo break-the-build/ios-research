@@ -34,6 +34,7 @@ SUBDIRS = (
     "findings",
     "matrices",
     "advisories",
+    "supply",
     "logs",
 )
 
