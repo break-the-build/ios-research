@@ -32,6 +32,7 @@ SUBDIRS = (
     "harnesses",
     "spoints",
     "findings",
+    "suites",
     "ndays",
     "matrices",
     "advisories",

@@ -29,6 +29,7 @@ _PREFIXES = {
     "campaign": "camp",
     "vdevice": "vdv",
     "custom": "cst",
+    "suite": "sui",
     "harness": "har",
     "spoints": "spt",
     "finding": "fin",

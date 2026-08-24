@@ -33,6 +33,7 @@ from .commands import (
     voiceassist_cmd, supply_cmd, nday_cmd, races_cmd,
     evidence_cmd,
     sequence_cmd,
+    suite_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -74,6 +75,7 @@ _REGISTRARS: list[Callable] = [
     matrix_cmd.register,
     evidence_cmd.register,
     sequence_cmd.register,
+    suite_cmd.register,
     detect_cmd.register,
     cve_cmd.register,
     engine_cmd.register,
