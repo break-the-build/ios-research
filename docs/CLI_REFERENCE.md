@@ -838,6 +838,41 @@ Options:
 Positional arguments:
 
 - `plan_id` (required)
+
+
+### `ios-research supply`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research supply audit`
+
+Options:
+
+- `--requirements` — path to requirements.txt-style text (required)
+
+### `ios-research supply list`
+
+### `ios-research supply scan`
+
+Positional arguments:
+
+- `path` (required)
+
+### `ios-research supply show`
+
+Positional arguments:
+
+- `record_id` (required)
+
+### `ios-research supply verify`
+
+Options:
+
+- `--lockfile` — path to the lockfile JSON (required)
+- `--root` — root directory lock paths resolve against
+
 ### `ios-research target`
 
 ### `ios-research target audio`
