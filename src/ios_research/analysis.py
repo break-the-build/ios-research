@@ -8,7 +8,7 @@ produces *indicators* and open questions to guide further authorized research.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields as dataclasses_fields
 from typing import Any
 
 from .clock import now_iso
@@ -130,7 +130,13 @@ class Analyzer:
         return Analysis(**self.ws.read_json(rel))
 
     def list(self) -> list[Analysis]:
-        return [Analysis(**d) for d in self.ws.list_json("analysis")]
+        fields = {f.name for f in dataclasses_fields(Analysis)}
+        out: list[Analysis] = []
+        for d in self.ws.list_json("analysis"):
+            if d.get("kind") not in (None, "analysis"):
+                continue
+            out.append(Analysis(**{k: v for k, v in d.items() if k in fields}))
+        return out
 
     def analyze(self, crash: CrashRecord) -> Analysis:
         # Ensure reproducibility is known (drives confidence).

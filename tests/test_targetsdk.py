@@ -184,6 +184,7 @@ def test_build_requires_source_present(tmp_path):
 
 # --- end-to-end (compiled C target; needs `cc` on PATH) -----------------------------
 
+@pytest.mark.native
 @pytest.mark.skipif(not _has_cc(), reason="requires a C compiler ('cc') on PATH")
 def test_c_target_end_to_end_crash_pipeline(workspace, tmp_path):
     """init -> build -> register -> execute: real ASan classifications."""
@@ -251,6 +252,7 @@ def test_c_target_reproducible_twice(workspace, tmp_path):
         == third.diagnostics.signature
 
 
+@pytest.mark.native
 @pytest.mark.skipif(not _has_cc(), reason="requires a C compiler ('cc') on PATH")
 def test_validate_target_full_pipeline(workspace, tmp_path):
     """validate proves seed health, crash parsing, and reproducibility."""
@@ -311,6 +313,7 @@ def test_register_manifest_rejects_invalid(workspace, tmp_path):
     assert not target_registry.is_registered("custom:badman")
 
 
+@pytest.mark.native
 def test_hydration_restores_registration_from_workspace(workspace, tmp_path):
     """A registered custom target resolves again in a 'fresh' process."""
     from ios_research.targetsdk import hydrate_manifests

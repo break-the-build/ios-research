@@ -12,14 +12,14 @@ TOOLS = Path(__file__).parents[1] / "tools" / "experiment_loop"
 sys.path.insert(0, str(TOOLS))
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-try:
-    import ios_env  # noqa: E402,F401  (registers all environments)
-    from experiment_loop.environments.base import get_environment  # noqa: E402
-except ImportError as _exc:  # engine checkout not installed (e.g. hosted CI)
-    pytest.skip(
-        f"experiment-loop environments unavailable: {_exc}",
-        allow_module_level=True,
-    )
+# The ios_env plugins build on the optional external experiment-loop harness
+# (a local editable install, not a PyPI dependency). Without it the module
+# cannot even be collected, which used to turn CI red on every push (#192).
+pytest.importorskip("experiment_loop",
+                    reason="optional experiment-loop harness not installed")
+
+import ios_env  # noqa: E402,F401  (registers all environments)
+from experiment_loop.environments.base import get_environment  # noqa: E402
 
 
 NEW_GOALS = [
