@@ -166,7 +166,11 @@ def test_research_stages_workers_equivalence(tmp_path):
         runs.append((orch, run))
         assert len(run.refs.get("crash_ids", [])) >= 2
     (o1, r1), (o2, r2) = runs
-    assert r1.stats == r2.stats
+    # fuzz_workers records configured concurrency (#209), not a result, and
+    # therefore legitimately differs between the two configurations above.
+    def result_stats(stats):
+        return {k: v for k, v in stats.items() if k != "fuzz_workers"}
+    assert result_stats(r1.stats) == result_stats(r2.stats)
     assert r1.refs["crash_ids"] == r2.refs["crash_ids"]
     # analysis_ids stay in crash-id order for any worker count.
     assert r1.refs["analysis_ids"] == r2.refs["analysis_ids"]

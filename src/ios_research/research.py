@@ -45,6 +45,10 @@ CREATED, RUNNING, PAUSED, COMPLETED, BLOCKED = \
 # Differential partners for targets that have a second "version".
 _DIFF_PARTNERS = {"mock:parser": "mock:parser-v2"}
 
+# Cap application happens at use sites, not here: triage fan-out and the
+# fuzz-stage worker record both cap max_workers at 6 (#200/#209), and the
+# fuzz engine itself executes serially today, so a recorded worker count is
+# configuration provenance until the executor work lands (#199).
 DEFAULT_LIMITS = {
     "max_runtime_seconds": 600,
     "max_workers": 8,
@@ -174,7 +178,7 @@ class ResearchOrchestrator:
         self.save(run)
 
     def _workers(self, run: ResearchRun) -> int:
-        """Effective triage fan-out width (#200): capped pool, never < 1."""
+        """Effective stage fan-out width (#200): capped pool, never < 1."""
         return max(1, min(int(run.limits.get("max_workers", 1)), 6))
 
     # stages --------------------------------------------------------------
@@ -215,17 +219,23 @@ class ResearchOrchestrator:
             config_hash=cfg_hash, seed=run.seed,
             params={"driver": "research", "run_id": run.id})
         engine = FuzzEngine(self.ws)
-        workers = min(1, run.limits["max_workers"])
+        # Record the configured fan-out honestly (#209) instead of silently
+        # clamping to 1: same cap policy as triage fan-out (_workers). The
+        # engine currently executes serially regardless of this value, so it
+        # is provenance — it reflects configuration intent, matching the
+        # field's documented purpose — until the executor work lands (#199).
+        effective = self._workers(run)
         from .config import Config
         session = engine.create(experiment_id=exp.id, target=run.target,
                                 corpus_id=run.refs["corpus_id"], seed=run.seed,
-                                workers=max(workers, 1), max_cases=run.max_cases,
+                                workers=effective, max_cases=run.max_cases,
                                 duration_s=None,
                                 strategy_weights=Config().get("fuzz.strategy_weights"))
         session = engine.advance(session)
         run.refs["experiment_id"] = exp.id
         run.refs["fuzz_session_id"] = session.id
         run.refs["crash_ids"] = list(session.crash_ids)
+        run.stats["fuzz_workers"] = effective
         run.stats["testcases_generated"] = session.cursor
         run.stats["outcomes"] = session.stats()["outcomes"]
         return f"{session.cursor} cases, {session.unique_crashes} unique crashes"
