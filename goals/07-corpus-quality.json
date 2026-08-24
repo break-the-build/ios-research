@@ -1,5 +1,5 @@
 {
-  "id": "iosr-corpus-quality-simulator-v1",
+  "id": "iosr-corpus-quality-simulator-v2",
   "objective": "Improve mock-target corpus behavior diversity and discovery efficiency",
   "environment": "ios_research_corpus",
   "primary_metric": "coverage_per_input",

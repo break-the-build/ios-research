@@ -1,0 +1,40 @@
+{
+  "_widening_note": "v2 widens start_n from low=2,high=8 to low=2,high=16 (step=1) and explicitly includes the untouched second knob min_chunk at its declared validated range 1..4. Supported by the bound environment: tools/experiment_loop/ios_env/minimizer.py:57-62 declare both knobs, and _param_ddmin accepts any start_n >= 2 (minimizer.py:28: n = max(2, start_n)) with n capped at len(data) in the doubling step (minimizer.py:41-43), so start_n up to 16 is valid for the ~56-byte padded crash seeds; min_chunk is consumed as a floor (minimizer.py:30: chunk = max(min_chunk, len(data) // n)) and 1..4 is its validated declared domain. min_chunk needs no env edit - it was already declared; only start_n high=8 -> high=16 in minimizer.py:58 activates the widening. The padding knob is deliberately NOT exposed (minimizer.py:52-55 comment) and stays excluded. Id bumped v1->v2 because Goal.stable_id ignores knob ranges and the declared id overrides it anyway, so resuming under -v1 would keep the saturated 'start_n=7 optimal' lesson and suppress exploration of the opened 9..16 region.",
+  "id": "iosr-testcase-minimization-simulator-v2",
+  "objective": "Minimize crash-inducing testcases while preserving deterministic reproduction",
+  "environment": "ios_research_minimizer",
+  "primary_metric": "median_input_reduction",
+  "metrics": [
+    {"name": "median_input_reduction", "direction": "maximize", "unit": "ratio"},
+    {"name": "reproduction_rate", "direction": "maximize", "unit": "ratio"},
+    {"name": "minimization_time_seconds", "direction": "minimize", "unit": "seconds"},
+    {"name": "remaining_semantic_structure", "direction": "maximize", "unit": "ratio"}
+  ],
+  "constraints": [
+    {
+      "metric": "reproduction_rate",
+      "op": ">=",
+      "value": 0.99,
+      "hard": true,
+      "description": "Minimization must preserve the original failure"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 6,
+    "max_parallel": 4,
+    "max_experiments_total": 60,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 20.0
+  },
+  "search_space": {
+    "note": "Declarative mirror of the intended env knob domains; ignored by experiment_loop.models.Goal.from_dict.",
+    "knobs": [
+      {"name": "start_n",  "kind": "int", "low": 2, "high": 16, "step": 1, "previous_high": 8, "change": "widened"},
+      {"name": "min_chunk", "kind": "int", "low": 1, "high": 4, "step": 1, "previous_high": 4, "change": "unchanged-included", "note": "Second knob, previously never varied by the loop; already declared at minimizer.py:60-61."}
+    ],
+    "excluded": [
+      {"candidate": "pad_bytes", "reason": "Deliberately not a knob per minimizer.py:52-55; exposing it would let the optimizer inflate reduction ratio by padding more."}
+    ]
+  }
+}

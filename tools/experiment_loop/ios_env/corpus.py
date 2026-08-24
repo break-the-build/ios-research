@@ -24,7 +24,7 @@ class IosResearchCorpusEnvironment(BaseEnvironment):
     cost_per_sample = 0.0
 
     knob_list = tuple(
-        Knob(name=f"weight_{s}", kind=KNOB_INT, default=1, low=0, high=3, step=1,
+        Knob(name=f"weight_{s}", kind=KNOB_INT, default=1, low=0, high=6, step=1,
              description=f"selection weight for the '{s}' mutation strategy")
         for s in STRATEGIES
     )
