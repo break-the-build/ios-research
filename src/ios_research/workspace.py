@@ -38,6 +38,7 @@ SUBDIRS = (
     "advisories",
     "races",
     "supply",
+    "xcode",
     "logs",
 )
 

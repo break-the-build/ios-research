@@ -33,6 +33,7 @@ from .commands import (
     voiceassist_cmd, supply_cmd, nday_cmd, races_cmd,
     evidence_cmd,
     sequence_cmd,
+    xcode_cmd,
     suite_cmd,
 )
 
@@ -90,6 +91,7 @@ _REGISTRARS: list[Callable] = [
     proximity_cmd.register,
     supply_cmd.register,
     nday_cmd.register,
+    xcode_cmd.register,
 ]
 
 
