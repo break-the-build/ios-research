@@ -186,6 +186,32 @@ class PluginHost:
             return None
         return blob, f"grammar:{plugin.plugin_id}@{plugin.version}"
 
+    def repair_bytes(self, data: bytes) -> bytes | None:
+        """Format-aware repair only (no mutation): parse -> repair -> serialize.
+
+        Used by the LLM-in-the-loop path (#71) to validate model-proposed
+        candidates. Returns ``None`` when no plugin accepts the input or
+        serialization fails; callers then keep the candidate as proposed.
+        """
+        plugin = self.plugin_for(data)
+        if plugin is None:
+            return None
+        _ok, node = self._call("parse", plugin, data)
+        if not _ok or node is None:
+            return None
+        repaired_ok, repaired = self._call("repair", plugin, node)
+        node_out = repaired if (repaired_ok and repaired is not None) else node
+        serialized_ok, blob = self._call("serialize", plugin, node_out)
+        if not serialized_ok or not isinstance(blob, (bytes, bytearray)):
+            return None
+        blob = bytes(blob)
+        if len(blob) > MAX_OUTPUT_BYTES:
+            self.fallbacks += 1
+            self.last_error = (f"{plugin.plugin_id}: repair output "
+                               f"exceeds {MAX_OUTPUT_BYTES} bytes")
+            return None
+        return blob
+
     def crossover_bytes(self, a: bytes, b: bytes,
                         rng) -> tuple[bytes, str] | None:
         """Structured crossover when both parents share a plugin format."""

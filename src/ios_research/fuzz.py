@@ -12,6 +12,7 @@ separately. It never generates exploit payloads.
 
 from __future__ import annotations
 
+import base64
 import time
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
@@ -24,7 +25,7 @@ from .corpus import CorpusStore, Corpus
 from .crashes import CrashStore
 from .dictionary import (DictionaryToken, load_dictionary, tokens_from_records,
                          tokens_to_records)
-from .errors import NotFoundError, StateError
+from .errors import NotFoundError, StateError, ValidationError
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
@@ -91,6 +92,16 @@ class FuzzSession:
     mutator_plugin_path: str = ""
     mutator_plugin_sha256: str = ""
     grammar_uses: int = 0
+    mutator_mode: str = ""
+    proposer_id: str = ""
+    llm_rounds: int = 0
+    llm_budget: int = 0
+    llm_rounds_done: int = 0
+    llm_cases_used: int = 0
+    llm_accepted: int = 0
+    llm_rejected: int = 0
+    llm_last_error: str = ""
+    llm_queue: list[dict] = field(default_factory=list)
     max_input_bytes: int = 0
     skipped_oversize: int = 0
     sched_modes: tuple = ()
@@ -133,6 +144,17 @@ class FuzzSession:
                 "path": self.mutator_plugin_path,
                 "sha256": self.mutator_plugin_sha256,
                 "grammar_uses": self.grammar_uses,
+            },
+            "llm_mutator": {
+                "mode": self.mutator_mode,
+                "proposer_id": self.proposer_id,
+                "rounds_requested": self.llm_rounds,
+                "rounds_done": self.llm_rounds_done,
+                "budget": self.llm_budget,
+                "cases_used": self.llm_cases_used,
+                "accepted": self.llm_accepted,
+                "rejected": self.llm_rejected,
+                "last_error": self.llm_last_error,
             },
             "max_input_bytes": self.max_input_bytes,
             "skipped_oversize": self.skipped_oversize,
@@ -191,7 +213,11 @@ class FuzzEngine:
                sanitizer_profile: str | None = None,
                mutator_plugin_path: str | None = None,
                max_input_bytes: int | None = None,
-               sched_modes: tuple = ()) -> FuzzSession:
+               sched_modes: tuple = (),
+               mutator_mode: str = "",
+               proposer_id: str = "",
+               llm_rounds: int = 0,
+               llm_budget: int = 0) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -233,6 +259,15 @@ class FuzzEngine:
         if sched_modes:
             from .races import validate_modes
             sched_modes = validate_modes(sched_modes)
+        if mutator_mode:
+            from .llmmutate import validate_budget
+            if mutator_mode != "llm":
+                raise ValidationError(
+                    f"unknown mutator mode '{mutator_mode}'")
+            if not proposer_id:
+                raise ValidationError(
+                    "mutator mode 'llm' requires a proposer identity")
+            validate_budget(llm_rounds, llm_budget)
         session = FuzzSession(
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
@@ -247,6 +282,10 @@ class FuzzEngine:
             sanitizer_profile=profile,
             mutator_plugin_path=str(mutator_plugin_path or ""),
             mutator_plugin_sha256=plugin_sha,
+            mutator_mode=mutator_mode,
+            proposer_id=proposer_id,
+            llm_rounds=int(llm_rounds),
+            llm_budget=int(llm_budget),
             max_input_bytes=(DEFAULT_MAX_INPUT_BYTES if max_input_bytes is None
                              else max(0, int(max_input_bytes))),
             sched_modes=tuple(sched_modes or ()),
@@ -299,8 +338,15 @@ class FuzzEngine:
         return features
 
     def advance(self, session: FuzzSession, *, max_new: int | None = None,
-                deadline: float | None = None) -> FuzzSession:
-        """Execute cases from the current cursor until a stop condition."""
+                deadline: float | None = None,
+                proposer=None) -> FuzzSession:
+        """Execute cases from the current cursor until a stop condition.
+
+        ``proposer`` (an optional :class:`~ios_research.llmmutate.Proposer`)
+        drives LLM-in-the-loop rounds (#71); it is never persisted, so a
+        resumed session drains its persisted proposal queue and falls back to
+        generic mutation without any model attached.
+        """
         if session.status in (COMPLETED, STOPPED):
             return session
         session.status = RUNNING
@@ -343,9 +389,27 @@ class FuzzEngine:
 
             i = session.cursor
             base = self._select_base(session, corpus, bases, i)
+            parent_sha: str | None = sha256_bytes(base)
             mutated = None
             strategy = ""
-            if plugin_host is not None and plugin_host.plugins:
+            if session.mutator_mode == "llm":
+                picked = self._take_llm_input(
+                    session, corpus, proposer, plugin_host, fmt,
+                    crash_counts, crash_first)
+                if picked is not None:
+                    mutated, proposal_round = picked
+                    strategy = f"llm:{session.proposer_id}@r{proposal_round}"
+                    session.llm_cases_used += 1
+                    parent_sha = None
+                    # Every executed proposal is a provenance-tagged corpus
+                    # entry so campaigns reproduce without the model (#71).
+                    if self.corpus_store.add_bytes(
+                            corpus, mutated, origin="llm", mutation=strategy,
+                            seed=session.seed, iteration=i,
+                            persist=False) is not None:
+                        corpus_dirty = True
+            if mutated is None and plugin_host is not None \
+                    and plugin_host.plugins:
                 rng = mutation.rng_for(session.seed, i)
                 if len(bases) > 1 and i % 4 == 3:
                     outcome = plugin_host.crossover_bytes(
@@ -387,7 +451,7 @@ class FuzzEngine:
                     session.coverage_retained_shas.append(sha)
                 if self.corpus_store.add_bytes(
                         corpus, mutated, origin="mutation",
-                        parent=sha256_bytes(base), mutation=strategy,
+                        parent=parent_sha, mutation=strategy,
                         seed=session.seed, iteration=i,
                         coverage_features=features,
                         coverage_new_features=new_features,
@@ -409,7 +473,7 @@ class FuzzEngine:
                 crash_counts[crash_id] = crash_counts.get(crash_id, 0) + 1
                 if crash_id not in crash_first:
                     crash_first[crash_id] = (mutated, result, {
-                        "parent_sha256": sha256_bytes(base),
+                        "parent_sha256": parent_sha,
                         "mutation": strategy, "seed": session.seed,
                         "iteration": i})
                 if crash_id not in unique:
@@ -419,7 +483,7 @@ class FuzzEngine:
                 # the manifest write until the end of the batch.
                 if self.corpus_store.add_bytes(
                         corpus, mutated, origin="mutation",
-                        parent=sha256_bytes(base), mutation=strategy,
+                        parent=parent_sha, mutation=strategy,
                         seed=session.seed, iteration=i, persist=False) is not None:
                     corpus_dirty = True
 
@@ -460,6 +524,176 @@ class FuzzEngine:
             return
         session.sched_calls += 1
 
+    # LLM-in-the-loop rounds (#71) -----------------------------------------
+    def _take_llm_input(self, session: FuzzSession, corpus: Corpus,
+                        proposer, plugin_host, fmt: str,
+                        crash_counts: dict[str, int],
+                        crash_first: dict[str, tuple]) -> tuple[bytes, int] | None:
+        """Pop the next validated model-proposed input, refilling on demand.
+
+        Returns ``(data, round)`` or ``None`` when the budget is spent, the
+        round budget is exhausted, or the queue is empty with no proposer
+        attached (a resumed campaign finishes without any model).
+        """
+        if session.llm_cases_used >= session.llm_budget:
+            return None
+        if not session.llm_queue:
+            if proposer is None or \
+                    session.llm_rounds_done >= session.llm_rounds:
+                return None
+            self._refill_llm_queue(session, corpus, proposer, plugin_host,
+                                   fmt, crash_counts, crash_first)
+        if not session.llm_queue:
+            return None
+        entry = session.llm_queue.pop(0)
+        return base64.b64decode(entry["d"]), entry["r"]
+
+    def _refill_llm_queue(self, session: FuzzSession, corpus: Corpus,
+                          proposer, plugin_host, fmt: str,
+                          crash_counts: dict[str, int],
+                          crash_first: dict[str, tuple]) -> None:
+        """Run one proposal round; isolate failures and validate candidates.
+
+        Candidates are size-bounded, format-repairable when a grammar plugin
+        accepts them, and deduplicated against the corpus and pending queue.
+        A proposer exception degrades to generic mutation for this iteration
+        instead of aborting the campaign. Crashes from earlier in this batch
+        are passed unflushed so they already steer the next round.
+        """
+        from . import llmmutate
+        proposal_round = session.llm_rounds_done + 1
+        remaining = session.llm_budget - session.llm_cases_used
+        rounds_left = max(session.llm_rounds - proposal_round + 1, 1)
+        per_round = min(-(-remaining // rounds_left),
+                        llmmutate.MAX_PROPOSALS_PER_ROUND)
+        context = self._llm_context(session, corpus, fmt,
+                                    round_index=proposal_round,
+                                    per_round=per_round,
+                                    crash_counts=crash_counts,
+                                    crash_first=crash_first)
+        session.llm_rounds_done = proposal_round
+        try:
+            raw = list(proposer.propose(context))
+        except Exception as exc:  # noqa: BLE001 - isolation boundary
+            session.llm_last_error = f"round {proposal_round}: {exc}"[:300]
+            return
+        seen = set(corpus.shas)
+        for entry in session.llm_queue:
+            seen.add(entry["s"])
+        accepted = rejected = 0
+        for item in raw[:llmmutate.MAX_PROPOSALS_PER_ROUND]:
+            checked = self._check_proposal(item, session, plugin_host, seen)
+            if checked is None:
+                rejected += 1
+                continue
+            blob, sha = checked
+            seen.add(sha)
+            if len(session.llm_queue) >= llmmutate.MAX_PROPOSALS_PER_ROUND:
+                rejected += 1
+                continue
+            session.llm_queue.append(
+                {"d": base64.b64encode(blob).decode("ascii"),
+                 "r": proposal_round, "s": sha})
+            accepted += 1
+        session.llm_accepted += accepted
+        session.llm_rejected += rejected
+
+    @staticmethod
+    def _check_proposal(item, session: FuzzSession, plugin_host,
+                        seen: set[str]) -> tuple[bytes, str] | None:
+        """Validate one raw candidate; ``None`` means rejected."""
+        if not isinstance(item, (bytes, bytearray)):
+            return None
+        blob = bytes(item)
+        if not blob:
+            return None
+        if session.max_input_bytes and len(blob) > session.max_input_bytes:
+            return None
+        if plugin_host is not None and plugin_host.plugins:
+            repaired = plugin_host.repair_bytes(blob)
+            if repaired is not None:
+                blob = repaired
+        if not blob:
+            return None
+        sha = sha256_bytes(blob)
+        if sha in seen:
+            return None
+        return blob, sha
+
+    def _llm_context(self, session: FuzzSession, corpus: Corpus, fmt: str,
+                     *, round_index: int, per_round: int,
+                     crash_counts: dict[str, int],
+                     crash_first: dict[str, tuple]) -> dict:
+        """Build the sanitized round context shipped to a proposer.
+
+        Stored crashes and crashes pending in this batch are merged (pending
+        wins), ordered deterministically by ``(last_seen, id)``, then the most
+        recent few are redacted into bounded summaries.
+        """
+        from . import llmmutate
+        origins: dict[str, int] = {}
+        sizes: list[int] = []
+        for tc in corpus.testcases:
+            origin = tc.get("origin", "")
+            origins[origin] = origins.get(origin, 0) + 1
+            sizes.append(tc.get("size", 0))
+        samples: list[str] = []
+        for tc in corpus.testcases[:2]:
+            try:
+                data = self.corpus_store.read_bytes(corpus, tc["sha256"])
+            except Exception:  # noqa: BLE001 - context must not fail a round
+                continue
+            samples.append(data[: llmmutate.MAX_SAMPLE_HEX // 2].hex())
+        roots = [str(self.ws.root)]
+        merged: dict[str, tuple[str, dict]] = {}
+        for crash in self.crash_store.list(
+                experiment_id=session.experiment_id):
+            example = b""
+            try:
+                if crash.minimized_sha256:
+                    example = self.crash_store.artifacts.get_bytes(
+                        crash.minimized_sha256)
+                else:
+                    example = self.crash_store.input_bytes(crash)
+            except Exception:  # noqa: BLE001 - few-shots are best-effort
+                example = b""
+            merged[crash.id] = (crash.last_seen, llmmutate.summarize_crash(
+                crash_id=crash.id, signature=crash.signature,
+                classification=crash.classification, detail=crash.detail,
+                count=crash.count, input_sha256=crash.input_sha256,
+                example_bytes=example, roots=roots))
+        for crash_id, (data, result, _lineage) in crash_first.items():
+            diag = result.diagnostics
+            merged[crash_id] = ("", llmmutate.summarize_crash(
+                crash_id=crash_id,
+                signature=diag.signature if diag else "sig_none",
+                classification=diag.classification_hint if diag else "UNKNOWN",
+                detail=result.detail,
+                count=crash_counts.get(crash_id, 1),
+                input_sha256=sha256_bytes(data),
+                example_bytes=data, roots=roots))
+        ordered = sorted(merged.items(), key=lambda kv: (kv[1][0], kv[0]))
+        return {
+            "schema": llmmutate.CONTEXT_SCHEMA_VERSION,
+            "round": round_index,
+            "target": session.target,
+            "format": fmt,
+            "seed": session.seed,
+            "corpus": {
+                "id": corpus.id,
+                "entries": len(corpus.testcases),
+                "origins": dict(sorted(origins.items())),
+                "mean_size": sum(sizes) // len(sizes) if sizes else 0,
+                "sample_hex": samples,
+            },
+            "budget": {"remaining": session.llm_budget
+                       - session.llm_cases_used,
+                       "per_round_hint": per_round},
+            "crashes": [entry[1][1]
+                        for entry in
+                        ordered[-llmmutate.MAX_FEEDBACK_CRASHES:]],
+        }
+
     def _flush_crashes(self, session: FuzzSession, fmt: str,
                        crash_counts: dict[str, int],
                        crash_first: dict[str, tuple]) -> None:
@@ -480,12 +714,14 @@ class FuzzEngine:
                         experiment_id=session.experiment_id)
 
     def resume(self, session: FuzzSession, *, max_new: int | None = None,
-               deadline: float | None = None) -> FuzzSession:
+               deadline: float | None = None,
+               proposer=None) -> FuzzSession:
         if session.status == COMPLETED:
             raise StateError(f"fuzz session '{session.id}' already completed")
         if session.status == STOPPED:
             raise StateError(f"fuzz session '{session.id}' was stopped")
-        return self.advance(session, max_new=max_new, deadline=deadline)
+        return self.advance(session, max_new=max_new, deadline=deadline,
+                            proposer=proposer)
 
     def pause(self, session: FuzzSession) -> FuzzSession:
         if session.status == RUNNING or session.status == PAUSED:

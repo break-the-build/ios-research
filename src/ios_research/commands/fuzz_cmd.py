@@ -66,6 +66,22 @@ def register(subparsers, parent) -> None:
                          help="comma-separated scheduling-perturbation modes "
                               "applied between cases (#70): "
                               "yield,priority,affinity,random-delay")
+    p_start.add_argument("--mutator", default=None,
+                         choices=["generic", "llm"],
+                         help="mutation driver: builtin generic (default) or "
+                              "LLM-in-the-loop proposals (#71)")
+    p_start.add_argument("--llm-rounds", type=int, default=None,
+                         dest="llm_rounds",
+                         help="proposal rounds for --mutator llm (#71)")
+    p_start.add_argument("--llm-budget", type=int, default=None,
+                         dest="llm_budget",
+                         help="total model-proposed cases for --mutator llm "
+                              "(#71)")
+    p_start.add_argument("--llm-proposer-cmd", default=None,
+                         dest="llm_proposer_cmd",
+                         help="user-declared local command template for "
+                              "--mutator llm: round context JSON on stdin, "
+                              "one base64 candidate per stdout line (#71)")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -115,6 +131,35 @@ def cmd_start(ctx, args) -> Result:
     if workers > max_workers:
         raise UsageError(f"workers={workers} exceeds limit {max_workers}")
 
+    # LLM-in-the-loop mutator (#71): resolve and validate before any state is
+    # created, so bad budgets/proposer configs fail as pure usage errors.
+    proposer = None
+    llm_rounds = llm_budget = 0
+    raw_mode = getattr(args, "mutator", None) or cfg.get("fuzz.mutator") or ""
+    if raw_mode == "generic":
+        raw_mode = ""
+    if raw_mode:
+        if raw_mode != "llm":
+            raise UsageError(f"unknown mutator mode '{raw_mode}'")
+        from .. import llmmutate
+        llm_rounds = args.llm_rounds if args.llm_rounds is not None \
+            else cfg.get("fuzz.llm_rounds", llmmutate.DEFAULT_LLM_ROUNDS)
+        llm_budget = args.llm_budget if args.llm_budget is not None \
+            else cfg.get("fuzz.llm_budget", llmmutate.DEFAULT_LLM_BUDGET)
+        llmmutate.validate_budget(
+            llm_rounds, llm_budget,
+            max_rounds=cfg.get("limits.max_llm_rounds",
+                               llmmutate.DEFAULT_MAX_LLM_ROUNDS),
+            max_budget=cfg.get("limits.max_llm_budget",
+                               llmmutate.DEFAULT_MAX_LLM_BUDGET))
+        template = getattr(args, "llm_proposer_cmd", None) \
+            or cfg.get("fuzz.llm_proposer_cmd")
+        if not template:
+            raise UsageError(
+                "--mutator llm needs a proposal source: pass "
+                "--llm-proposer-cmd (or set fuzz.llm_proposer_cmd)")
+        proposer = llmmutate.resolve_proposer(template)
+
     # Resolve or create corpus.
     corpus_store = CorpusStore(ws)
     if args.corpus:
@@ -140,7 +185,9 @@ def cmd_start(ctx, args) -> Result:
             config_hash=cfg.hash, seed=seed,
             params={"corpus": corpus.id, "max_cases": max_cases,
                     **({"delivery": args.delivery}
-                       if getattr(args, "delivery", None) else {})})
+                       if getattr(args, "delivery", None) else {}),
+                    **({"mutator": "llm", "llm_rounds": llm_rounds,
+                        "llm_budget": llm_budget} if proposer else {})})
 
     engine = FuzzEngine(ws)
     dictionary = getattr(args, "dictionary", None)
@@ -165,21 +212,33 @@ def cmd_start(ctx, args) -> Result:
                             mutator_plugin_path=getattr(
                                 args, "mutator_plugin", None),
                             max_input_bytes=max_input_bytes,
-                            sched_modes=sched_modes)
+                            sched_modes=sched_modes,
+                            mutator_mode="llm" if proposer else "",
+                            proposer_id=(proposer.proposer_id
+                                         if proposer else ""),
+                            llm_rounds=llm_rounds,
+                            llm_budget=llm_budget)
     deadline = time.monotonic() + args.duration if args.duration else None
-    session = engine.advance(session, max_new=args.chunk, deadline=deadline)
+    session = engine.advance(session, max_new=args.chunk, deadline=deadline,
+                             proposer=proposer)
 
     # Reflect fuzzing stats onto the experiment.
     experiment.status = "running" if session.status != "completed" else "completed"
     experiment.stats = session.stats()
     exp_store.save(experiment)
 
+    messages = [f"session {session.id}: {session.status} "
+                f"({session.cursor}/{session.max_cases} cases, "
+                f"{session.unique_crashes} unique crashes)"]
+    if proposer:
+        messages.append(
+            f"llm: rounds {session.llm_rounds_done}/{llm_rounds}, "
+            f"proposals {session.llm_cases_used}/{llm_budget} "
+            f"(proposer {session.proposer_id})")
     return Result(command="fuzz start",
                   data={"session": session.to_dict(), "stats": session.stats(),
                         "experiment_id": experiment.id},
-                  messages=[f"session {session.id}: {session.status} "
-                            f"({session.cursor}/{session.max_cases} cases, "
-                            f"{session.unique_crashes} unique crashes)"])
+                  messages=messages)
 
 
 def cmd_status(ctx, args) -> Result:
