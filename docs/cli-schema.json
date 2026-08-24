@@ -1448,6 +1448,14 @@
                 "required": false
               },
               {
+                "dest": "focus_symbol",
+                "flags": [
+                  "--focus-symbol"
+                ],
+                "help": "directed scheduling toward this symbol (#73); requires a target with a callgraph() hook",
+                "required": false
+              },
+              {
                 "dest": "sched_perturb",
                 "flags": [
                   "--sched-perturb"

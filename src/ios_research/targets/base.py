@@ -98,6 +98,24 @@ class Target:
         """
         return data
 
+    def callgraph(self):
+        """Optional static call graph for directed scheduling (#73).
+
+        Returns ``{"nodes": [names], "edges": [[caller, callee], ...]}`` or
+        ``None`` when the target cannot describe its structure. The framework
+        uses it only to bias corpus-base selection toward a focus symbol.
+        """
+        return None
+
+    def focus_symbol_for(self, data: bytes) -> str | None:
+        """Optional: which call-graph symbol an input exercises (#73).
+
+        Lets directed scheduling map corpus entries onto call-graph distances
+        without instrumentation. Return a symbol name from ``callgraph()``,
+        or ``None`` when unknown. Default is ``None``.
+        """
+        return None
+
     def coverage_features(self, data: bytes, result: ExecResult):
         """Return stable coverage feature IDs, or ``None`` when unavailable.
 
