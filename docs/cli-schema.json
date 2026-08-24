@@ -2823,6 +2823,152 @@
         }
       }
     },
+    "suite": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "benchmark": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "cases",
+                "flags": [
+                  "--cases"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "suite_version",
+                "flags": [
+                  "--suite-version"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "name",
+                "required": true
+              }
+            ]
+          }
+        },
+        "example": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "install": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "directory",
+                "required": true
+              }
+            ]
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "remove": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "version",
+                "flags": [
+                  "--version"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "name",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "version",
+                "flags": [
+                  "--version"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "name",
+                "required": true
+              }
+            ]
+          }
+        },
+        "validate": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "directory",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
     "supply": {
       "arguments": {
         "options": [],
