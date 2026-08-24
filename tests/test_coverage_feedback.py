@@ -105,10 +105,26 @@ def test_minimize_preserves_each_coverage_feature(workspace):
                     coverage_features=["target:shared", "target:one"])
     store.add_bytes(corpus, b"two", origin="seed",
                     coverage_features=["target:shared", "target:two"])
-    target = _NoCoverageTarget()
+
+    class _Counting:
+        def __init__(self, inner):
+            self.inner = inner
+            self.calls = 0
+
+        def execute(self, data):
+            self.calls += 1
+            return self.inner.execute(data)
+
+        def coverage_features(self, data, result):
+            return self.inner.coverage_features(data, result)
+
+    target = _Counting(_NoCoverageTarget())
     stats = store.minimize(corpus, target)
     minimized = store.get(corpus.id)
     features = {feature for tc in minimized.testcases
                 for feature in tc.get("coverage_features", ())}
     assert stats["coverage_features"] == 3
     assert features == {"target:shared", "target:one", "target:two"}
+    # Stored features skip the backfill pass; the behavior pass runs each
+    # testcase exactly once (#197).
+    assert target.calls == len(minimized.testcases)
