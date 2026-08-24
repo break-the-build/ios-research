@@ -20,9 +20,10 @@ from ios_research.fuzz import FuzzEngine
 
 @pytest.fixture(autouse=True)
 def _unregister_stub_target():
-    """Keep the in-test stub out of the global registry (suite pollution)."""
+    """Keep the in-test stubs out of the global registry (suite pollution)."""
     yield
     tgt._REGISTRY.pop("stub:directed", None)
+    tgt._REGISTRY.pop("stub:directed-retain", None)
 
 DIAMOND = {
     "nodes": ["a", "b", "c", "d", "e", "sink"],
@@ -255,3 +256,83 @@ def test_cli_fuzz_start_focus_symbol(ctx, capsys):
     focus = envelope["data"]["stats"]["focus"]
     assert focus["symbol"] == "copyin_ool_region"
     assert focus["targets_reachable"] >= 1
+
+
+# --- coverage-retained picks (#196) -----------------------------------------------------
+class _RetainedDirectedTarget(tgt.base.Target):
+    target_id = "stub:directed-retain"
+    kind = "parser"
+    description = "stub with callgraph + per-input coverage features"
+    formats = ("bin",)
+
+    def seeds(self):
+        return [b"A", b"B"]
+
+    def callgraph(self):
+        return {"nodes": ["entry", "sink"],
+                "edges": [["entry", "sink"]]}
+
+    def focus_symbol_for(self, data):
+        return "sink" if data[:1] == b"A" else "entry"
+
+    def coverage_features(self, data, result):
+        # Content-derived: every distinct input adds a novel feature, so each
+        # executed input is a retention candidate with recorded lineage.
+        return ("feat:" + data.hex(),)
+
+    def _run(self, data):
+        from ios_research.targets.base import ExecResult, Outcome
+        return ExecResult(outcome=Outcome.ACCEPTED, detail="ok",
+                          duration_ms=1)
+
+
+def test_directed_selects_coverage_retained_entry_bytes(ctx):
+    """Regression #196: in directed mode a weighted pick that resolves to a
+    coverage-retained sha must return THAT entry's bytes — the old code only
+    scanned fallback bases and silently mutated an unrelated round-robin
+    base instead."""
+    tgt.register("stub:directed-retain", lambda: _RetainedDirectedTarget())
+    store = CorpusStore(ctx.workspace())
+    corpus = store.create("dir-retain-corpus",
+                          target="stub:directed-retain")
+    for seed in (b"A" * 4, b"B" * 4):
+        store.add_bytes(corpus, seed, origin="seed")
+    experiment = ExperimentStore(ctx.workspace()).create(
+        target="stub:directed-retain", device="dev", os_version="1",
+        config_hash="h", seed=3, params={})
+    engine = FuzzEngine(ctx.workspace())
+    session = engine.create(experiment_id=experiment.id,
+                            target="stub:directed-retain",
+                            corpus_id=corpus.id, seed=3, workers=1,
+                            max_cases=32, duration_s=None,
+                            focus_symbol="sink")
+    session = engine.advance(session, max_new=8)
+    assert session.focus_distances and session.coverage_retained_shas
+
+    corpus = store.get(corpus.id)
+    retained_sha = session.coverage_retained_shas[0]
+    expected_bytes = store.read_bytes(corpus, retained_sha)
+    # The pick must be one the old code could not serve from fallback bases.
+    assert expected_bytes not in (b"A" * 4, b"B" * 4)
+
+    # Preload persisted counts so directed.weighted_selection deterministically
+    # resolves to the retained entry on the real scheduling path (no mocking):
+    # every other candidate carries an unbeatable count-per-weight ratio.
+    candidates = dict.fromkeys(list(session.focus_entry_distances)
+                               + session.coverage_retained_shas
+                               + session.base_shas)
+    for sha in candidates:
+        session.focus_counts[sha] = 0 if sha == retained_sha else 10 ** 6
+
+    target = tgt.create("stub:directed-retain")
+    bases = engine._bases(session, corpus)
+    selected = engine._select_base(session, corpus, bases, 0, target)
+    assert selected == expected_bytes
+
+    # End-to-end: the subsequent mutation is derived from the retained bytes
+    # and its recorded parent lineage names the retained sha.
+    session = engine.resume(session, max_new=2)
+    corpus = store.get(corpus.id)
+    children = [tc for tc in corpus.testcases
+                if tc.get("parent") == retained_sha]
+    assert children, "mutation of the retained entry was never recorded"

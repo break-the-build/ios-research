@@ -378,9 +378,14 @@ class FuzzEngine:
                 session.focus_counts.get(sha, 0) + 1
             if selection_weight(entry_distances.get(sha)) > 1:
                 session.focus_biased += 1
-            for data in fallback_bases:
-                if sha256_bytes(data) == sha:
-                    return data
+            # Honor the pick even when it resolves to a coverage-retained
+            # entry (#196): ``pairs`` already carries those bytes from disk,
+            # so mutating a different base here would silently discard the
+            # scheduled selection.
+            by_sha = {candidate_sha: data for candidate_sha, data in pairs}
+            picked = by_sha.get(sha)
+            if picked is not None:
+                return picked
             return fallback_bases[iteration % len(fallback_bases)]
         if session.coverage_available is not True:
             return fallback_bases[iteration % len(fallback_bases)]
