@@ -30,6 +30,12 @@ from . import research        # ios_research                 (goal 13)
 from . import agent           # ios_research_agent           (goals 14, 15)
 from . import reporting       # ios_research_reporting       (goal 17)
 from . import device_matching  # ios_research_device_matching (goal 18, issue #11)
+from . import bounty_readiness  # ios_research_bounty_readiness (goal 21)
+from . import detection_quality  # ios_research_detection     (goal 22)
+from . import cve_regression    # ios_research_cve_regression (goal 23)
+from . import pipeline_latency  # ios_research_pipeline_latency (goal 24)
 
 __all__ = ["fuzzer", "fuzzer_engine", "minimizer", "corpus", "crash_analysis",
-           "differential", "research", "agent", "reporting", "device_matching"]
+           "differential", "research", "agent", "reporting", "device_matching",
+           "bounty_readiness", "detection_quality", "cve_regression",
+           "pipeline_latency"]

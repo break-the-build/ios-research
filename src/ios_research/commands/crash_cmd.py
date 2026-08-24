@@ -25,6 +25,8 @@ def register(subparsers, parent) -> None:
     p_min = sub.add_parser("minimize", parents=[parent],
                            help="minimize a crash input (delta debugging)")
     p_min.add_argument("crash_id")
+    p_min.add_argument("--max-executions", type=int, default=None,
+                       help="bound total target executions during minimization")
     p_min.set_defaults(func=cmd_minimize)
 
     p_cls = sub.add_parser("classify", parents=[parent],
@@ -75,7 +77,8 @@ def cmd_minimize(ctx, args) -> Result:
     from ..triage import Triage
     triage = Triage(ctx.workspace())
     crash = triage.crashes.get(args.crash_id)
-    result = triage.minimize(crash)
+    result = triage.minimize(
+        crash, max_executions=getattr(args, "max_executions", None))
     msg = (f"minimized {result['original_size']} -> {result['minimized_size']} bytes"
            if result["minimized"] else f"not minimized: {result.get('reason')}")
     return Result(command="crash minimize", ok=result["minimized"],

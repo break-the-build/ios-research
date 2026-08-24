@@ -28,6 +28,9 @@ _PREFIXES = {
     "obstrace": "obs",
     "campaign": "camp",
     "vdevice": "vdv",
+    "harness": "har",
+    "spoints": "spt",
+    "finding": "fin",
 }
 
 

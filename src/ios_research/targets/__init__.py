@@ -27,6 +27,14 @@ def register(target_id: str, factory: Callable[[], Target]) -> None:
 
 def create(target_id: str) -> Target:
     from ..errors import NotFoundError
+    # Composite network-transport family: "net:<inner-target-id>" delivers
+    # inputs to the wrapped target over a loopback TCP socket (#57).
+    if target_id.startswith("net:"):
+        from ..nettransport import LoopbackTcpTarget
+        inner_id = target_id[len("net:"):]
+        if not inner_id or inner_id.startswith("net:"):
+            raise NotFoundError(f"invalid transport target '{target_id}'")
+        return LoopbackTcpTarget(create(inner_id))
     if target_id not in _REGISTRY:
         raise NotFoundError(
             f"unknown target '{target_id}'; known: {', '.join(sorted(_REGISTRY))}")
@@ -42,6 +50,10 @@ def list_targets() -> list[dict]:
 
 
 def is_registered(target_id: str) -> bool:
+    if target_id.startswith("net:"):
+        inner = target_id[len("net:"):]
+        return bool(inner) and not inner.startswith("net:") \
+            and inner in _REGISTRY
     return target_id in _REGISTRY
 
 
@@ -51,6 +63,38 @@ register("mock:parser-v2", lambda: MockParserV2Target())
 
 from .audio import AUDIO_TARGETS  # noqa: E402
 for _tid, _cls in AUDIO_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock Bluetooth frame-parser targets (mock = True). CI-safe by construction:
+# they parse bytes only and never touch a Bluetooth controller.
+from .bluetooth import BLUETOOTH_TARGETS  # noqa: E402
+for _tid, _cls in BLUETOOTH_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock Wi-Fi management-frame parser targets (mock = True). CI-safe by
+# construction: they parse bytes only and never touch a Wi-Fi radio.
+from .wifi import WIFI_TARGETS  # noqa: E402
+for _tid, _cls in WIFI_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock communication-message parser targets (#85; network zero-click
+# profiles). CI-safe by construction: they parse bytes only and never touch a
+# messaging transport, account, or network.
+from .messaging import MESSAGING_TARGETS  # noqa: E402
+for _tid, _cls in MESSAGING_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock locked-device surface targets (#86; physical-access profiles). CI-safe
+# by construction: they parse bytes only and never touch a device, accessory,
+# passcode, or stored data.
+from .lockeddevice import LOCKED_DEVICE_TARGETS  # noqa: E402
+for _tid, _cls in LOCKED_DEVICE_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock NFC/NDEF record parser targets (mock = True). CI-safe by construction:
+# they parse bytes only and never touch tag hardware or an RF field.
+from .nfc import NFC_TARGETS  # noqa: E402
+for _tid, _cls in NFC_TARGETS.items():
     register(_tid, (lambda c: (lambda: c()))(_cls))
 
 # Real macOS in-process fuzzing targets (mock = False). Opt-in: they require a
@@ -75,7 +119,84 @@ for _surface in DEVICE_SURFACES:
 from .jsc import JSCSemanticTarget  # noqa: E402
 register("jsc:semantic", lambda: JSCSemanticTarget())
 
+# Kernel-boundary simulation target (mock = True). CI-safe: models XNU
+# mach_msg descriptor/bounds logic in-process; never touches a kernel (#68).
+from .machsim import MachMessageSimTarget  # noqa: E402
+register("mach:sim", lambda: MachMessageSimTarget())
+
 __all__ = [
     "ExecResult", "Outcome", "Target", "Diagnostics",
     "register", "create", "list_targets", "is_registered",
 ]
+
+# Mock IP-stack input-path parser targets (mock = True). CI-safe by construction:
+# bytes-only parsing; no sockets or network access.
+from .netip import NETIP_TARGETS  # noqa: E402
+for _tid, _cls in NETIP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock Wi-Fi Aware frame-parser targets (mock = True). CI-safe by construction:
+# bytes-only parsing; no RF transmission or association.
+from .wifiaware import WIFIAWARE_TARGETS  # noqa: E402
+for _tid, _cls in WIFIAWARE_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock PQ3-style ratchet transcript targets (mock = True). Synthetic transcripts only;
+# no decryption or third-party traffic analysis.
+from .pq3 import PQ3_TARGETS  # noqa: E402
+for _tid, _cls in PQ3_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock Continuity beacon record targets (mock = True). Synthetic records only;
+# no tracking of third-party devices, no real-radio advertising.
+from .continuity import CONTINUITY_TARGETS  # noqa: E402
+for _tid, _cls in CONTINUITY_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock trust-boundary payload-envelope targets (mock = True). Decode modeling only;
+# no permission/TCC mechanics; templates intended for authorized owned apps.
+from .ipc import IPC_TARGETS  # noqa: E402
+for _tid, _cls in IPC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock XPC/Mach message-schema targets (mock = True). Local chain-tail tooling;
+# v1 sends nothing to system daemons (offline schema harvest only).
+from .xpc import XPC_TARGETS  # noqa: E402
+for _tid, _cls in XPC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock document-importer targets (mock = True). Bytes-only parsing;
+# no quarantine/launch simulation.
+from .docimp import DOCIMP_TARGETS  # noqa: E402
+for _tid, _cls in DOCIMP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock signed-document targets (mock = True). Verify-only structural parsing
+# of synthetic documents; no key material, no signing oracle.
+from .signeddoc import SIGNEDDOC_TARGETS  # noqa: E402
+for _tid, _cls in SIGNEDDOC_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock proximity application-protocol targets (mock = True). No real accessory
+# connections, no RF transmission; bytes-only parse modeling.
+from .proxapp import PROXAPP_TARGETS  # noqa: E402
+for _tid, _cls in PROXAPP_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock filesystem-client parser targets (mock = True). Bytes-only;
+# loopback templates only; nothing mounts against unowned hosts.
+from .fsclient import FSCLIENT_TARGETS  # noqa: E402
+for _tid, _cls in FSCLIENT_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock geodata/workout importer targets (mock = True). Synthetic coordinates;
+# parses bytes only; tracks no person or device.
+from .geo import GEO_TARGETS  # noqa: E402
+for _tid, _cls in GEO_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
+
+# Mock lockscreen voice-assistant record targets (mock = True). Text/intent
+# records only; never activates microphone or audio capture (SECURITY.md).
+from .voiceassist import VOICEASSIST_TARGETS  # noqa: E402
+for _tid, _cls in VOICEASSIST_TARGETS.items():
+    register(_tid, (lambda c: (lambda: c()))(_cls))
