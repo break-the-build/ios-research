@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 from .base import ExecResult, Outcome, Target
@@ -115,6 +116,11 @@ class MacFuzzTarget(Target):
         self._harness_override = harness
         self.timeout_s = timeout_s
         self._harness_path: Path | None = None
+        # Serializes prepare()/cleanup() mutations of `_harness_path` so that
+        # concurrent `execute()` calls on this shared instance (parallel ddmin
+        # rounds, threaded execute_batch in tools/mac_campaign/run.py) cannot
+        # interleave the cached-path updates.
+        self._lifecycle_lock = threading.Lock()
         self._coverage_by_input: dict[bytes, tuple[str, ...]] = {}
 
     # --- discovery -------------------------------------------------------
@@ -171,13 +177,21 @@ class MacFuzzTarget(Target):
 
     # --- lifecycle -------------------------------------------------------
     def prepare(self) -> None:
-        self._harness_path = self.resolve_harness()
+        with self._lifecycle_lock:
+            self._harness_path = self.resolve_harness()
 
     def cleanup(self) -> None:
-        self._harness_path = None
+        with self._lifecycle_lock:
+            self._harness_path = None
 
     def _run(self, data: bytes) -> ExecResult:
         harness = self._harness_path
+        if harness is None:
+            # Concurrent executes on a shared instance: another thread's
+            # cleanup() may have nulled the cached path between our prepare()
+            # and this read. Re-resolve (idempotent, cheap) instead of
+            # reporting a spurious "not built" abnormal result.
+            harness = self.resolve_harness()
         if harness is None:
             return ExecResult(
                 outcome=Outcome.ABNORMAL,
