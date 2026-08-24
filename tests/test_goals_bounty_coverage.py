@@ -12,8 +12,14 @@ TOOLS = Path(__file__).parents[1] / "tools" / "experiment_loop"
 sys.path.insert(0, str(TOOLS))
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-import ios_env  # noqa: E402,F401  (registers all environments)
-from experiment_loop.environments.base import get_environment  # noqa: E402
+try:
+    import ios_env  # noqa: E402,F401  (registers all environments)
+    from experiment_loop.environments.base import get_environment  # noqa: E402
+except ImportError as _exc:  # engine checkout not installed (e.g. hosted CI)
+    pytest.skip(
+        f"experiment-loop environments unavailable: {_exc}",
+        allow_module_level=True,
+    )
 
 
 NEW_GOALS = [
