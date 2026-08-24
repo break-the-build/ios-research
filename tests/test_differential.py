@@ -166,8 +166,15 @@ def test_run_reads_each_input_once_before_any_execution(workspace, monkeypatch):
     assert events[:n] == ["read"] * n          # all reads precede all executions
 
 
+# Wall-clock execution windows per side, recorded by _SlowStubTarget so
+# concurrency can be asserted deterministically even when a loaded runner
+# stretches individual executions.
+EXEC_WINDOWS: dict[str, list[tuple[float, float]]] = {"a": [], "b": []}
+
+
 class _SlowStubTarget(Target):
-    """Stub whose execute sleeps, so overlap between the two sides is measurable."""
+    """Stub whose execute sleeps and records its window, so overlap between
+    the two sides is provable without load-sensitive elapsed ratios."""
 
     target_id = "stub:diff-slow"
     kind = "stub"
@@ -177,12 +184,17 @@ class _SlowStubTarget(Target):
         self.tag = tag
 
     def _run(self, data: bytes) -> ExecResult:
+        started = perf_counter()
         time.sleep(0.04)
+        ended = perf_counter()
+        EXEC_WINDOWS[self.tag].append((started, ended))
         return ExecResult(outcome=Outcome.ACCEPTED, detail=self.tag,
                           duration_ms=40)
 
 
 def test_run_executes_sides_concurrently(workspace):
+    EXEC_WINDOWS["a"].clear()
+    EXEC_WINDOWS["b"].clear()
     target_registry.register("stub:diff-slow-a", lambda: _SlowStubTarget("a"))
     target_registry.register("stub:diff-slow-b", lambda: _SlowStubTarget("b"))
     try:
@@ -194,19 +206,19 @@ def test_run_executes_sides_concurrently(workspace):
         diff = engine.create(name="slow", target_a="stub:diff-slow-a",
                              target_b="stub:diff-slow-b", config_hash="cfg_x",
                              corpus_id=corpus.id)
-        start = perf_counter()
         summary = engine.run(diff)
-        elapsed = perf_counter() - start
 
         # Identical stub behavior on both sides: results stay precise.
         assert summary["testcases"] == 10
         assert summary["differing"] == 0
         assert summary["regressions"] == 0
 
-        serial_budget = 10 * 2 * 0.04          # fully serial wall-clock sum
-        assert elapsed < serial_budget * 0.75, (
-            f"elapsed {elapsed:.3f}s not below 0.75x serial "
-            f"({serial_budget * 0.75:.3f}s); sides are not overlapping")
+        # Deterministic overlap proof: at least one A-window intersects one
+        # B-window, which cannot happen if the sides ran strictly serially.
+        overlap = any(a_start < b_end and b_start < a_end
+                      for a_start, a_end in EXEC_WINDOWS["a"]
+                      for b_start, b_end in EXEC_WINDOWS["b"])
+        assert overlap, f"sides never overlapped; windows: {EXEC_WINDOWS}"
     finally:
         # Keep the global registry clean for the rest of the suite.
         target_registry._REGISTRY.pop("stub:diff-slow-a", None)

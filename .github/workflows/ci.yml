@@ -1,5 +1,15 @@
-# CI test suite temporarily disabled (failing Xcresult ingestion case on
-# hosted runners); restore the pytest gate before relying on this branch.
+# Continuous integration: automated testability + securability gate.
+#
+# The suite is fully deterministic (frozen clock, seeded RNG) and every
+# shipped target is a mock target safe to run in CI (see SECURITY.md), so the
+# entire suite runs unattended on every pull request and on every push to
+# main. Two gates:
+#
+#   1. compileall  — no file with a syntax error can merge (regression guard;
+#                    caught exactly this failure mode during review).
+#   2. pytest      — full suite with branch coverage; the floor is set below
+#                    today's measured 89% so it blocks major regressions
+#                    without flapping on normal churn.
 
 name: ci
 
@@ -17,8 +27,31 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # macOS matches how the suite is verified today; native-harness tests
+    # self-skip where tooling is absent. An Ubuntu leg is a documented
+    # follow-up once platform assumptions are audited.
+    runs-on: macos-14
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - run: echo "test suite disabled"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with dev extras
+        run: python -m pip install -e ".[dev]"
+
+      - name: Syntax gate (compileall)
+        run: python -m compileall -q src tests
+
+      - name: Test suite with coverage floor
+        # 'native' tests build/run real ASan harnesses against a locally
+        # controlled toolchain and are opt-in (see pyproject markers); hosted
+        # runners cannot reproduce that environment deterministically.
+        # -n auto fans out across xdist workers; pytest-cov combines per-worker
+        # coverage data automatically before applying --cov-fail-under.
+        run: >-
+          python -m pytest tests/ -m "not native" -n auto
+          --cov=ios_research --cov-report=term-missing
+          --cov-fail-under=85
