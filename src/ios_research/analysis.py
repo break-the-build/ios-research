@@ -8,12 +8,13 @@ produces *indicators* and open questions to guide further authorized research.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields as dataclasses_fields
 from typing import Any
 
 from .clock import now_iso
 from .crashes import CrashStore, CrashRecord
 from .ids import make_id
+from .parallel import map_ordered
 from .triage import Triage
 from .workspace import Workspace
 
@@ -130,7 +131,13 @@ class Analyzer:
         return Analysis(**self.ws.read_json(rel))
 
     def list(self) -> list[Analysis]:
-        return [Analysis(**d) for d in self.ws.list_json("analysis")]
+        fields = {f.name for f in dataclasses_fields(Analysis)}
+        out: list[Analysis] = []
+        for d in self.ws.list_json("analysis"):
+            if d.get("kind") not in (None, "analysis"):
+                continue
+            out.append(Analysis(**{k: v for k, v in d.items() if k in fields}))
+        return out
 
     def analyze(self, crash: CrashRecord) -> Analysis:
         # Ensure reproducibility is known (drives confidence).
@@ -196,5 +203,10 @@ class Analyzer:
         self.crashes.save(crash)
         return analysis
 
-    def analyze_batch(self) -> list[Analysis]:
-        return [self.analyze(crash) for crash in self.crashes.list()]
+    def analyze_batch(self, *, workers: int = 1) -> list[Analysis]:
+        """Analyze every crash in the workspace, in store (sorted-id) order.
+
+        ``workers > 1`` fans the per-crash analyses out over a thread pool
+        (#200); the returned list order is identical for any worker count.
+        """
+        return map_ordered(self.analyze, self.crashes.list(), workers)

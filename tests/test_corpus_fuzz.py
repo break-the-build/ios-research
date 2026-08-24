@@ -65,6 +65,53 @@ def test_corpus_minimize_keeps_one_per_behavior(workspace):
     assert stats["removed"] >= 1
 
 
+class _CountingTarget:
+    """Wrapper that counts execute() calls (issue #197 regression guard)."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.calls = 0
+
+    def execute(self, data):
+        self.calls += 1
+        return self.inner.execute(data)
+
+    def coverage_features(self, data, result):
+        return self.inner.coverage_features(data, result)
+
+
+def test_corpus_minimize_executes_each_testcase_once_without_metadata(workspace):
+    """No stored features: every testcase still executes exactly once (#197)."""
+    store = CorpusStore(workspace)
+    corpus = store.create("count-nometa")
+    store.add_bytes(corpus, b"zzzz", origin="seed")
+    store.add_bytes(corpus, b"yyyy", origin="seed")
+    store.add_bytes(corpus, DEFAULT_BASE, origin="seed")
+    store.add_bytes(corpus, b"MOCK\x01\x01\xff\xff", origin="seed")
+    n = len(corpus.testcases)
+    target = _CountingTarget(create("mock:parser"))
+    stats = store.minimize(corpus, target)
+    assert target.calls == n
+    assert stats["kept"] == stats["behaviors"]
+
+
+def test_corpus_minimize_executes_each_testcase_once_with_stored_metadata(workspace):
+    """All entries carry stored features: exactly one execute per testcase."""
+    store = CorpusStore(workspace)
+    corpus = store.create("count-meta")
+    store.add_bytes(corpus, b"one", origin="seed",
+                    coverage_features=["target:a", "target:b"])
+    store.add_bytes(corpus, b"two", origin="seed",
+                    coverage_features=["target:c"])
+    store.add_bytes(corpus, b"three", origin="seed",
+                    coverage_features=["target:c", "target:d"])
+    n = len(corpus.testcases)
+    target = _CountingTarget(create("mock:parser"))
+    stats = store.minimize(corpus, target)
+    assert target.calls == n
+    assert stats["coverage_features"] == 4
+
+
 def test_corpus_import_directory(workspace, tmp_path):
     store = CorpusStore(workspace)
     corpus = store.create("c3")

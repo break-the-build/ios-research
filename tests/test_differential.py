@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import time
+from time import perf_counter
+
+from ios_research import targets as target_registry
 from ios_research.corpus import CorpusStore
 from ios_research.differential import DifferentialEngine
 from ios_research.targets import create
-from ios_research.targets.base import Outcome
+from ios_research.targets.base import ExecResult, Outcome, Target
 
 
 def _make(workspace):
@@ -104,3 +108,118 @@ def test_differs_flag_covers_signature_only_differences(workspace):
     assert r["a"]["signature"] != r["b"]["signature"]
     assert r["differs"] is True                # signature-only difference counts
     assert r["is_regression"] is False         # same severity, not a regression
+
+
+# --- #202: single-pass corpus load + concurrent per-case execution ----------
+
+
+def test_results_order_matches_corpus_order(workspace):
+    # Results must come back in corpus.testcases order regardless of
+    # execution scheduling.
+    cs = CorpusStore(workspace)
+    corpus = cs.create("ordered")
+    shas = [cs.add_bytes(corpus, data, origin="seed").sha256
+            for data in (b"ORD\x01\x01\x00\x02aa", b"ORD\x02\x01\x00\x02bb",
+                         b"ORD\x03\x01\x00\x02cc")]
+    engine = DifferentialEngine(workspace)
+    diff = engine.create(name="ord", target_a="mock:parser",
+                         target_b="mock:parser-v2", config_hash="cfg_x",
+                         corpus_id=corpus.id)
+    engine.run(diff)
+    assert ([r["input_sha256"] for r in engine.results(diff)] == shas)
+
+
+def test_run_reads_each_input_once_before_any_execution(workspace, monkeypatch):
+    # One read per testcase (single pass), and every read completes before
+    # the first execution starts.
+    from ios_research.targets.mock import MockParserTarget, MockParserV2Target
+
+    engine, diff = _make(workspace)
+    n = len(engine.corpus_store.get(diff.corpus_id).testcases)
+
+    events: list[str] = []
+    orig_read = CorpusStore.read_bytes
+
+    def counting_read(self, corpus, sha256):
+        events.append("read")
+        return orig_read(self, corpus, sha256)
+
+    orig_v1 = MockParserTarget._run
+    orig_v2 = MockParserV2Target._run
+
+    def traced_v1(self, data):
+        events.append("exec")
+        return orig_v1(self, data)
+
+    def traced_v2(self, data):
+        events.append("exec")
+        return orig_v2(self, data)
+
+    monkeypatch.setattr(CorpusStore, "read_bytes", counting_read)
+    monkeypatch.setattr(MockParserTarget, "_run", traced_v1)
+    monkeypatch.setattr(MockParserV2Target, "_run", traced_v2)
+
+    summary = engine.run(diff)
+
+    assert summary["testcases"] == n
+    assert events.count("read") == n           # exactly one read per testcase
+    assert events[:n] == ["read"] * n          # all reads precede all executions
+
+
+# Wall-clock execution windows per side, recorded by _SlowStubTarget so
+# concurrency can be asserted deterministically even when a loaded runner
+# stretches individual executions.
+EXEC_WINDOWS: dict[str, list[tuple[float, float]]] = {"a": [], "b": []}
+
+
+class _SlowStubTarget(Target):
+    """Stub whose execute sleeps and records its window, so overlap between
+    the two sides is provable without load-sensitive elapsed ratios."""
+
+    target_id = "stub:diff-slow"
+    kind = "stub"
+    description = "slow stub for differential concurrency test"
+
+    def __init__(self, tag: str):
+        self.tag = tag
+
+    def _run(self, data: bytes) -> ExecResult:
+        started = perf_counter()
+        time.sleep(0.04)
+        ended = perf_counter()
+        EXEC_WINDOWS[self.tag].append((started, ended))
+        return ExecResult(outcome=Outcome.ACCEPTED, detail=self.tag,
+                          duration_ms=40)
+
+
+def test_run_executes_sides_concurrently(workspace):
+    EXEC_WINDOWS["a"].clear()
+    EXEC_WINDOWS["b"].clear()
+    target_registry.register("stub:diff-slow-a", lambda: _SlowStubTarget("a"))
+    target_registry.register("stub:diff-slow-b", lambda: _SlowStubTarget("b"))
+    try:
+        cs = CorpusStore(workspace)
+        corpus = cs.create("slow")
+        for i in range(10):
+            cs.add_bytes(corpus, f"slow-input-{i}".encode(), origin="seed")
+        engine = DifferentialEngine(workspace)
+        diff = engine.create(name="slow", target_a="stub:diff-slow-a",
+                             target_b="stub:diff-slow-b", config_hash="cfg_x",
+                             corpus_id=corpus.id)
+        summary = engine.run(diff)
+
+        # Identical stub behavior on both sides: results stay precise.
+        assert summary["testcases"] == 10
+        assert summary["differing"] == 0
+        assert summary["regressions"] == 0
+
+        # Deterministic overlap proof: at least one A-window intersects one
+        # B-window, which cannot happen if the sides ran strictly serially.
+        overlap = any(a_start < b_end and b_start < a_end
+                      for a_start, a_end in EXEC_WINDOWS["a"]
+                      for b_start, b_end in EXEC_WINDOWS["b"])
+        assert overlap, f"sides never overlapped; windows: {EXEC_WINDOWS}"
+    finally:
+        # Keep the global registry clean for the rest of the suite.
+        target_registry._REGISTRY.pop("stub:diff-slow-a", None)
+        target_registry._REGISTRY.pop("stub:diff-slow-b", None)

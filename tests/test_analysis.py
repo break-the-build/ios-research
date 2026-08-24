@@ -63,6 +63,23 @@ def test_analyze_batch_covers_all_crashes(workspace):
     assert len(analyses) == 2
 
 
+def test_list_ignores_foreign_record_kinds_in_analysis_dir(workspace):
+    # regression: analysis/ is a shared directory (novelty scans, surface
+    # plans, ...). Foreign records must not break or pollute list().
+    crash = _record(workspace, b"MOCK\x01\x01\xff\xff")
+    Analyzer(workspace).analyze(crash)
+    workspace.write_json("analysis/nov_54d2e50f1158.json",
+                         {"id": "nov_54d2e50f1158", "kind": "novelty-scan",
+                          "created_at": "2026-08-23T00:00:00Z",
+                          "advisories_loaded": 3})
+    workspace.write_json("analysis/sur_c3527d620553.json",
+                         {"id": "sur_c3527d620553", "kind": "surface-plan",
+                          "created_at": "2026-08-23T00:00:00Z"})
+    analyses = Analyzer(workspace).list()
+    assert len(analyses) == 1
+    assert analyses[0].crash_id == crash.id
+
+
 def test_uaf_has_reallocation_question(workspace):
     crash = _record(workspace, b"MOCK\x01\x01\x00\x02\xde\xad")
     analysis = Analyzer(workspace).analyze(crash)

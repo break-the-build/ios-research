@@ -8,6 +8,8 @@
 
 # Logs and local artifacts
 *.log
+# ...except hermetic test fixtures, which must ship with the repo
+!tests/fixtures/**/*.log
 artifacts/
 tmp/
 

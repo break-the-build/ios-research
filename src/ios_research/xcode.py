@@ -2,9 +2,10 @@
 
 Lets an authorized, source-available Apple-app target use native Xcode test
 plans: import a user-declared ``.xctestplan``, build (optionally run)
-``xcodebuild test`` commands with sanitizer options, parse ``xcresulttool``
-JSON exports into normalized diagnostics, and map a failure to a focused
-reproduction command.
+``xcodebuild test`` commands with sanitizer options, parse ``xcresult``
+bundle layouts (stdlib-only, tolerant) or ``xcresulttool`` JSON exports
+into normalized diagnostics, and map a failure or a minimized fuzz input
+to a focused reproduction command.
 
 Boundaries (mirroring the issue's acceptance criteria):
 - No system-process debugging, entitlement escalation, or privilege bypass:
@@ -19,6 +20,7 @@ Boundaries (mirroring the issue's acceptance criteria):
 from __future__ import annotations
 
 import json
+import plistlib
 import shutil
 import subprocess
 from dataclasses import dataclass, field, asdict
@@ -33,14 +35,70 @@ from .workspace import Workspace
 
 SCHEMA_VERSION = 1
 
-# Sanitizer/diagnostic options supported by xcodebuild test runs.
+# KNOWN-DIAGNOSTICS table: every diagnostic this adapter understands, mapped to
+# its ``xcodebuild`` flag. Anything outside the table is rejected with an
+# actionable VALIDATION error naming the supported set — a typo must never
+# silently disable a diagnostic.
 SANITIZER_FLAGS = {
     "address": ("-enableAddressSanitizer", "YES"),
     "thread": ("-enableThreadSanitizer", "YES"),
     "undefined-behavior": ("-enableUndefinedBehaviorSanitizer", "YES"),
     "main-thread-checker": ("-enableMainThreadChecker", "YES"),
+    "guard-malloc": ("-enableGuardMalloc", "YES"),
     "zombies": ("-enableZombieObjects", "YES"),
+    "code-coverage": ("-enableCodeCoverage", "YES"),
 }
+
+KNOWN_DIAGNOSTICS = tuple(sorted(SANITIZER_FLAGS))
+
+# Scheme-editor diagnostic switches found in .xctestplan ``defaultOptions``,
+# lowercased, mapped to their canonical name in the table above.
+_PLAN_DIAGNOSTIC_KEYS = {
+    "addresssanitizer": "address",
+    "threadsanitizer": "thread",
+    "undefinedbehaviorsanitizer": "undefined-behavior",
+    "mainthreadchecker": "main-thread-checker",
+    "guardmalloc": "guard-malloc",
+    "zombieobjects": "zombies",
+    "codecoverage": "code-coverage",
+}
+
+
+def _unsupported_diagnostic_error(source_path: str, name: str) -> ValidationError:
+    return ValidationError(
+        f"{source_path}: unsupported diagnostic '{name}'; supported "
+        f"diagnostics: {', '.join(KNOWN_DIAGNOSTICS)}")
+
+
+def validate_plan_diagnostics(plan_path: str,
+                              default_options: dict[str, Any] | None,
+                              declared: list[str] | None = None
+                              ) -> list[str]:
+    """Validate a plan's declared diagnostics against the known table.
+
+    Returns the canonical names of enabled diagnostics. Unknown *diagnostic-
+    looking* options (e.g. ``quantumSanitizer``) are actionable VALIDATION
+    errors; unrelated plan metadata (e.g. ``targetForVariableExpansion``) is
+    ignored.
+    """
+    enabled: list[str] = list(declared or [])
+    for key, value in (default_options or {}).items():
+        lowered = str(key).lower()
+        canonical = _PLAN_DIAGNOSTIC_KEYS.get(lowered)
+        if canonical is None:
+            looks_diagnostic = (lowered.endswith("sanitizer")
+                                or "checker" in lowered or "zombie" in lowered
+                                or "guard" in lowered or "coverage" in lowered)
+            if looks_diagnostic:
+                raise _unsupported_diagnostic_error(plan_path, str(key))
+            continue
+        if str(value).strip().upper() in ("YES", "TRUE", "1") \
+                and canonical not in enabled:
+            enabled.append(canonical)
+    unknown = [n for n in enabled if n not in SANITIZER_FLAGS]
+    if unknown:
+        raise _unsupported_diagnostic_error(plan_path, unknown[0])
+    return sorted(set(enabled))
 
 # Issue types this adapter normalizes; anything else is reported unrecognized.
 KNOWN_ISSUE_TYPES = {"Test Failure", "Crash", "Sanitizer"}
@@ -81,20 +139,29 @@ def parse_test_plan(path: str) -> dict[str, Any]:
         if not isinstance(entry, dict):
             raise ValidationError(f"{path}: testTargets[{i}] must be an object")
         target = entry.get("target") or {}
-        name = target.get("name") if isinstance(target, dict) else None
+        # Real plans carry the module as ``identifier`` next to a
+        # ``containerPath``; accept ``name`` too for hand-written plans.
+        name = None
+        if isinstance(target, dict):
+            name = target.get("name") or target.get("identifier")
         if not isinstance(name, str) or not name.strip():
             raise ValidationError(
                 f"{path}: testTargets[{i}].target.name is required")
         targets.append({"name": name,
                         "skipped": bool(entry.get("skipped", False))})
+    default_options = (raw.get("defaultOptions")
+                       if isinstance(raw.get("defaultOptions"), dict) else {})
+    declared = raw.get("ios_research_diagnostics") \
+        if isinstance(raw.get("ios_research_diagnostics"), list) else None
+    diagnostics = validate_plan_diagnostics(str(path), default_options,
+                                            declared)
     return {
         "schema_version": SCHEMA_VERSION,
         "name": plan_path.stem,
         "source_path": str(plan_path),
         "targets": targets,
-        "default_options": (raw.get("defaultOptions")
-                            if isinstance(raw.get("defaultOptions"), dict)
-                            else {}),
+        "diagnostics": diagnostics,
+        "default_options": default_options,
         "imported_at": now_iso(),
     }
 
@@ -143,8 +210,10 @@ def build_test_command(plan: dict[str, Any], *, project: str | None = None,
                        ) -> list[str]:
     """Construct an ``xcodebuild test`` argv from a normalized plan.
 
-    Pure function: returns the command without running it. Unknown sanitizer
+    Pure function: returns the command without running it. Unknown diagnostic
     names are rejected so a typo cannot silently disable a diagnostic.
+    Diagnostics declared in the imported plan are applied unless an explicit
+    ``sanitizers`` selection is given.
     """
     cmd = ["xcodebuild", "test"]
     if project:
@@ -158,7 +227,9 @@ def build_test_command(plan: dict[str, Any], *, project: str | None = None,
     cmd += ["-testPlan", plan["name"]]
     if destination:
         cmd += ["-destination", destination]
-    for name in sanitizers or []:
+    selected = sanitizers if sanitizers is not None \
+        else list(plan.get("diagnostics") or [])
+    for name in selected:
         flag = SANITIZER_FLAGS.get(name)
         if flag is None:
             raise ValidationError(
@@ -180,6 +251,46 @@ def map_repro_command(plan: dict[str, Any], *, failing_test: str,
     return build_test_command(
         plan, project=project, workspace_swift=workspace_swift,
         only_testing=[failing_test], sanitizers=sanitizers)
+
+
+def map_repro_from_input(plan: dict[str, Any], *, input_path: str,
+                         actions: list[str] | None = None,
+                         project: str | None = None,
+                         workspace_swift: str | None = None,
+                         sanitizers: list[str] | None = None,
+                         test: str | None = None) -> dict[str, Any]:
+    """Map a minimized fuzz input (+ optional action sequence) to a focused
+    ``xcodebuild`` reproduction command.
+
+    Pure function: constructs argv and metadata only; nothing executes. The
+    minimized input travels to the test runner via the documented
+    ``TEST_RUNNER_*`` environment convention, returned in ``environment`` for
+    the caller to apply at invocation time. The focused scope is ``test`` when
+    given, otherwise the plan's first active target.
+    """
+    fuzz_input = Path(input_path)
+    if not fuzz_input.is_file():
+        raise NotFoundError(f"fuzz input '{input_path}' not found")
+    focus = test or next(
+        (t["name"] for t in plan.get("targets", [])
+         if isinstance(t, dict) and not t.get("skipped")), None)
+    if not focus:
+        raise ValidationError(
+            "plan has no active test target to focus the reproduction on")
+    argv = build_test_command(
+        plan, project=project, workspace_swift=workspace_swift,
+        only_testing=[focus], sanitizers=sanitizers)
+    environment = {"TEST_RUNNER_FUZZ_INPUT": str(fuzz_input)}
+    if actions:
+        environment["TEST_RUNNER_ACTIONS"] = ",".join(actions)
+    return {
+        "command": argv,
+        "only_testing": focus,
+        "input_path": str(fuzz_input),
+        "input_sha256": sha256_bytes(fuzz_input.read_bytes()),
+        "actions": list(actions or []),
+        "environment": environment,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -220,8 +331,117 @@ class XcodebuildBackend:
 
 
 # ---------------------------------------------------------------------------
-# XCResult ingestion (xcresulttool JSON export format)
+# XCResult ingestion (bundle layout + xcresulttool JSON export format)
 # ---------------------------------------------------------------------------
+
+def tool_provenance() -> dict[str, Any]:
+    """Record local toolchain provenance without executing anything.
+
+    Only PATH resolution is performed, so this stays deterministic and safe in
+    CI; actual versions are captured when a real run happens.
+    """
+    return {"xcodebuild_path": shutil.which("xcodebuild"),
+            "xcrun_path": shutil.which("xcrun"),
+            "recorded_at": now_iso()}
+
+
+def _load_object_graph(data: bytes) -> tuple[dict[str, Any] | None, str]:
+    """Tolerantly decode a SupportFiles payload as plist or JSON."""
+    try:
+        graph = plistlib.loads(data)
+        if isinstance(graph, dict):
+            return graph, ""
+    except Exception:  # noqa: BLE001 - tolerant by design
+        pass
+    try:
+        graph = json.loads(data.decode("utf-8"))
+        if isinstance(graph, dict):
+            return graph, ""
+        return None, "object graph is not a JSON object"
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, f"not plist or JSON: {exc}"
+
+
+def parse_xcresult_bundle(path: str) -> dict[str, Any]:
+    """Parse an ``.xcresult`` *bundle directory* using only the stdlib.
+
+    Tolerant walker over the on-disk layout — ``Info.plist`` for provenance,
+    ``SupportFiles/*.xcresulttest`` object graphs (plist or JSON; delegated to
+    :func:`parse_xcresult_export` when recognizable), and plain log files.
+    Normalizes to ``{crashes[], logs[], coverage{}, provenance{}}``. No Xcode
+    tooling is required or invoked, which makes this the CI-safe ingestion path.
+    """
+    root = Path(path)
+    info = root / "Info.plist"
+    if not root.is_dir():
+        raise NotFoundError(f"xcresult bundle '{path}' not found")
+    if not info.is_file():
+        raise ValidationError(
+            f"{path}: not an .xcresult bundle (missing Info.plist); "
+            "export it to JSON with `xcrun xcresulttool get --format json` "
+            "and parse the JSON instead")
+    provenance: dict[str, Any] = {}
+    try:
+        with open(info, "rb") as fh:
+            meta = plistlib.load(fh)
+        provenance.update(
+            {str(k): v for k, v in meta.items()
+             if isinstance(v, (str, int, float, bool))})
+    except Exception as exc:  # noqa: BLE001 - actionable, not fatal
+        raise ValidationError(f"{info}: unreadable Info.plist ({exc})") from None
+
+    crashes: list[dict[str, Any]] = []
+    logs: list[dict[str, Any]] = []
+    coverage: dict[str, Any] = {}
+    unrecognized: dict[str, dict[str, str]] = {}
+
+    def merge_export(parsed: dict[str, Any]) -> None:
+        crashes.extend(parsed["failures"])
+        for key, value in (parsed.get("coverage") or {}).items():
+            if isinstance(value, dict) and isinstance(coverage.get(key), dict):
+                coverage[key].update(value)
+            else:
+                coverage[key] = value
+        provenance.update(parsed.get("environment") or {})
+        for item in parsed["unrecognized"]:
+            unrecognized.setdefault(item["issue_type"], item)
+
+    support = root / "SupportFiles"
+    if support.is_dir():
+        for entry in sorted(support.iterdir()):
+            if not entry.is_file():
+                continue
+            is_graph = (entry.suffix == ".xcresulttest"
+                        or entry.name in ("object_graph.json", "export.json"))
+            if is_graph:
+                data = entry.read_bytes()
+                graph, err = _load_object_graph(data)
+                if graph is not None:
+                    merge_export(parse_xcresult_export(graph,
+                                                       source=str(entry)))
+                else:
+                    logs.append({"name": entry.name, "bytes": len(data),
+                                 "note": err})
+            elif entry.suffix in (".log", ".txt"):
+                text = entry.read_text(encoding="utf-8", errors="replace")
+                logs.append({
+                    "name": entry.name,
+                    "bytes": len(text.encode("utf-8")),
+                    "excerpt": [line for line in text.splitlines()
+                                if line.strip()][:5],
+                })
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "source": str(root),
+        "crashes": crashes,
+        "logs": logs,
+        "coverage": coverage,
+        "provenance": provenance,
+        "unrecognized": sorted(unrecognized.values(),
+                               key=lambda u: u["issue_type"]),
+        "parsed_at": now_iso(),
+    }
+
 
 def _walk_values(node: Any) -> list[dict[str, Any]]:
     """Return the ``_values`` array of an xcresulttool object-graph node."""
@@ -392,13 +612,17 @@ def parse_xcresult_path(path: str, *, backend: XcodebuildBackend | None = None
                         ) -> tuple[dict[str, Any], bytes | None]:
     """Parse an ``.xcresult`` bundle or a pre-exported JSON file.
 
-    Bundles require ``xcrun xcresulttool`` (availability-gated); exported
-    JSON files parse anywhere and are the CI-safe path.
+    Bundle directories with the standard layout (``Info.plist``) parse
+    hermetically via :func:`parse_xcresult_bundle`; bundles without that
+    layout need ``xcrun xcresulttool`` (availability-gated). Exported JSON
+    files always parse anywhere.
     """
     bundle = Path(path)
     if not bundle.exists():
         raise NotFoundError(f"xcresult '{path}' not found")
     if bundle.is_dir():
+        if (bundle / "Info.plist").is_file():
+            return parse_xcresult_bundle(path), None
         backend = backend or XcodebuildBackend()
         if not backend.available():
             raise StateError(

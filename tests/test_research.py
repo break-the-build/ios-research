@@ -80,6 +80,41 @@ def test_max_testcases_limit_caps_cases(workspace):
     assert run.max_cases == 50
 
 
+def test_fuzz_stage_records_configured_workers(workspace):
+    from ios_research.fuzz import FuzzEngine
+
+    orch, run = _create(workspace)
+    run = orch.run(run)
+    assert run.status == COMPLETED
+    # DEFAULT_LIMITS advertises 8; use sites cap at 6.
+    assert run.stats["fuzz_workers"] == 6
+    session = FuzzEngine(workspace).get(run.refs["fuzz_session_id"])
+    assert session.workers == run.stats["fuzz_workers"]
+
+
+def test_fuzz_worker_cap_enforced_and_floor_respected(workspace):
+    from ios_research.fuzz import FuzzEngine
+
+    orch = ResearchOrchestrator(workspace)
+
+    _, capped = _create(workspace, name="cap", limits={"max_workers": 64})
+    capped = orch.run(capped)
+    assert capped.status == COMPLETED
+    assert capped.stats["fuzz_workers"] == 6
+    session = FuzzEngine(workspace).get(capped.refs["fuzz_session_id"])
+    assert session.workers == 6
+
+    for name, limits in (("zero", {"max_workers": 0}),
+                         ("absent", None)):
+        _, run = _create(workspace, name=name, limits=limits)
+        if limits is None:
+            # Exercise the absent-key path (bypasses create()'s merge).
+            run.limits.pop("max_workers")
+        run = orch.run(run)
+        assert run.status == COMPLETED
+        assert run.stats["fuzz_workers"] >= 1
+
+
 def test_cli_run_requires_confirmation(workspace):
     main(["research", "create", "--target", "mock:parser",
           "--json", "--workspace", str(workspace.root)])

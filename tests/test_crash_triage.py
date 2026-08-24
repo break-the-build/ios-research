@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 from ios_research.crashes import CrashStore
 from ios_research.corpus import CorpusStore
 from ios_research.targets import create
@@ -29,6 +32,100 @@ def test_ddmin_reduces_to_minimal_predicate():
 def test_ddmin_stops_when_irreducible():
     data = b"BUG"
     assert ddmin(data, lambda d: b"BUG" in d) == b"BUG"
+
+
+class _CountingPredicate:
+    """Thread-safe counting wrapper around a predicate."""
+
+    def __init__(self, fn):
+        self.fn = fn
+        self.count = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, data):
+        with self._lock:
+            self.count += 1
+        return self.fn(data)
+
+
+# --- ddmin workers>1: equivalence ------------------------------------------
+def test_ddmin_parallel_matches_serial_output_and_counts():
+    # Crash region planted at the FRONT of an even-length multi-KB buffer.
+    # Every round splits into two halves and keeps the front half, so the
+    # passing complement is always the last candidate of its wave and even
+    # the speculated dispatches line up: output AND execution counts are
+    # identical between workers=1 and workers=4.
+    data = b"BUG" + b"A" * 4093
+
+    serial_pred = _CountingPredicate(lambda d: b"BUG" in d)
+    par_pred = _CountingPredicate(lambda d: b"BUG" in d)
+    serial = ddmin(data, serial_pred, workers=1)
+    parallel = ddmin(data, par_pred, workers=4)
+
+    assert serial == parallel == b"BUG"
+    assert par_pred.count == serial_pred.count
+
+
+def test_ddmin_parallel_equivalence_single_byte_and_non_minimizable():
+    # Single-byte input: no rounds at all.
+    assert ddmin(b"X", lambda d: b"X" in d, workers=4) == b"X"
+
+    # Non-minimizable input (only the exact original passes): both modes walk
+    # every complement of every round, so output AND counts must match.
+    data = b"Q" * 64
+    pred = _CountingPredicate(lambda d: d == data)
+    serial = ddmin(data, pred, max_executions=10_000, workers=1)
+    total_serial = pred.count
+    pred2 = _CountingPredicate(lambda d: d == data)
+    parallel = ddmin(data, pred2, max_executions=10_000, workers=4)
+    assert serial == parallel == data
+    assert pred2.count == total_serial
+
+
+def test_ddmin_parallel_output_identical_on_mid_buffer_region():
+    # Region planted mid-buffer: some accepting rounds speculate past the
+    # first passing complement, so executed counts may exceed the serial run
+    # (bounded by workers-1 per wave); the minimized bytes must not differ.
+    data = b"A" * 2048 + b"BUG" + b"A" * 2048
+    serial = ddmin(data, lambda d: b"BUG" in d, workers=1)
+    parallel = ddmin(data, lambda d: b"BUG" in d, workers=4)
+    assert serial == parallel == b"BUG"
+
+
+def test_ddmin_parallel_faster_than_serial():
+    def slow_has_bug(d):
+        time.sleep(0.01)
+        return b"BUG" in d
+
+    data = b"BUG" + b"A" * 1500
+    start = time.perf_counter()
+    ddmin(data, slow_has_bug, workers=1)
+    t_serial = time.perf_counter() - start
+
+    start = time.perf_counter()
+    out = ddmin(data, slow_has_bug, workers=4)
+    t_parallel = time.perf_counter() - start
+
+    assert out == b"BUG"
+    # Generous margin to stay flake-free; subprocess-style waits (sleep here)
+    # release the GIL so 4 workers overlap nearly perfectly.
+    assert t_parallel < t_serial * 0.8
+
+
+def test_ddmin_respects_budget_with_parallel_workers():
+    data = b"Q" * 256
+    pred = _CountingPredicate(lambda d: d == data)  # never minimizable
+    result = ddmin(data, pred, max_executions=7, workers=4)
+    assert result == data          # best-so-far return on exhaustion
+    assert pred.count == 7         # hard cap: no more than budget invocations
+
+
+def test_minimize_accepts_workers_kwarg(workspace):
+    data = b"MOCK\x01\x01\xff\xff" + b"C" * 300
+    crash = _record(workspace, data)
+    result = Triage(workspace).minimize(crash, workers=4)
+    assert result["minimized"] is True
+    assert result["minimized_size"] < result["original_size"]
 
 
 # --- reproduce ------------------------------------------------------------

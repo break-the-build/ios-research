@@ -33,6 +33,49 @@ class MachMessageSimTarget(Target):
         )
         return [machmsg.pack(base)]
 
+    def focus_symbol_for(self, data: bytes) -> str | None:
+        """Map an input to the modeled call path it exercises (#73)."""
+        status, _detail, msg = machmsg.parse(data)
+        by_status = {
+            "err_short_header": "mach_msg",
+            "err_size_underflow": "ipc_kmsg_alloc",
+            "err_truncated_body": "ipc_kmsg_alloc",
+            "err_complex_empty": "descriptor_walk",
+            "err_descriptor_bounds": "descriptor_walk",
+            "err_ool_overflow": "copyin_ool_region",
+            "err_right_overflow": "ipc_right_copyin",
+        }
+        symbol = by_status.get(status)
+        if symbol:
+            return symbol
+        if msg is not None and b"\xde\xad" in msg.payload \
+                and msg.ool_regions:
+            return "map_reuse_page"
+        return "mach_msg"
+
+    def callgraph(self):
+        """Static model of the simulated IPC call paths (#73).
+
+        Symbols mirror those used in this target's crash diagnostics so
+        directed campaigns can focus on e.g. ``copyin_ool_region``.
+        """
+        return {
+            "nodes": ["mach_msg", "ipc_kmsg_alloc", "ipc_kmsg_copyin",
+                      "descriptor_walk", "copyin_ool_region",
+                      "vm_map_copyin", "ipc_right_copyin",
+                      "ipc_kmsg_copyout", "map_reuse_page"],
+            "edges": [
+                ["mach_msg", "ipc_kmsg_alloc"],
+                ["mach_msg", "ipc_kmsg_copyin"],
+                ["ipc_kmsg_copyin", "descriptor_walk"],
+                ["descriptor_walk", "copyin_ool_region"],
+                ["copyin_ool_region", "vm_map_copyin"],
+                ["ipc_kmsg_copyin", "ipc_right_copyin"],
+                ["mach_msg", "ipc_kmsg_copyout"],
+                ["ipc_kmsg_copyout", "map_reuse_page"],
+            ],
+        }
+
     def structure_mutate(self, data: bytes, rng):
         """Format-aware mutation: perturb header fields, keep packability."""
         try:

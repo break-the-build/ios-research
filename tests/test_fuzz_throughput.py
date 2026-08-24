@@ -7,12 +7,13 @@ produces the same crashes, counts, and corpus as per-case writes.
 
 from __future__ import annotations
 
-from ios_research import mutation
+from ios_research import mutation, targets
 from ios_research.config import DEFAULT_CONFIG
 from ios_research.corpus import CorpusStore
 from ios_research.crashes import CrashStore
 from ios_research.experiment import ExperimentStore
 from ios_research.fuzz import FuzzEngine, DEFAULT_BASE
+from ios_research.targets.base import ExecResult, Outcome, Target
 
 W = DEFAULT_CONFIG["fuzz"]["strategy_weights"]
 
@@ -111,3 +112,151 @@ def test_resume_still_matches_single_run(tmp_path):
     counts1 = {c.id: c.count for c in e1.crash_store.list()}
     counts2 = {c.id: c.count for c in e2.crash_store.list()}
     assert sum(counts1.values()) == sum(counts2.values())
+
+
+# --- per-advance scheduling caches (#198) ---------------------------------
+class _NovelCoverageTarget(Target):
+    target_id = "test:novel-coverage"
+    kind = "parser"
+    description = "reports a novel coverage feature for every distinct input"
+    formats = ("bin",)
+
+    def seeds(self):
+        return [b"A"]
+
+    def coverage_features(self, data, result):
+        return ("feat:" + data.hex(),)
+
+    def _run(self, data):
+        return ExecResult(outcome=Outcome.ACCEPTED, detail="ok", duration_ms=1)
+
+
+class _NovelDirectedTarget(_NovelCoverageTarget):
+    target_id = "test:novel-directed"
+    description = "directed stub with a callgraph and per-input novel features"
+
+    def seeds(self):
+        return [b"A", b"B"]
+
+    def callgraph(self):
+        return {"nodes": ["entry", "sink"],
+                "edges": [["entry", "sink"]]}
+
+    def focus_symbol_for(self, data):
+        return "sink"
+
+
+def _novel_run(workspace, *, target, corpus_name, seed_count, max_cases,
+               focus_symbol=""):
+    exp = ExperimentStore(workspace).create(
+        target=target, device="mock:device", os_version="17.0",
+        config_hash="c", seed=19)
+    store = CorpusStore(workspace)
+    corpus = store.create(corpus_name)
+    for n in range(seed_count):
+        store.add_bytes(corpus, bytes([65 + n]) * 4, origin="seed")
+    engine = FuzzEngine(workspace)
+    session = engine.create(experiment_id=exp.id, target=target,
+                            corpus_id=corpus.id, seed=19, workers=1,
+                            max_cases=max_cases, duration_s=None,
+                            focus_symbol=focus_symbol)
+    return store, engine, session
+
+
+def test_retained_entry_is_selectable_within_same_advance(workspace):
+    """Index freshness (#198): once an input is retained mid-run it must be
+    selectable on a later case of the SAME advance() call."""
+    targets.register("test:novel-coverage", lambda: _NovelCoverageTarget())
+    try:
+        _, engine, session = _novel_run(
+            workspace, target="test:novel-coverage", corpus_name="freshness",
+            seed_count=1, max_cases=40)
+        session = engine.advance(session)
+    finally:
+        targets._REGISTRY.pop("test:novel-coverage", None)
+    # Fair schedule: every retained entry starts at selection count 0, so the
+    # first retention is immediately the least-selected candidate and must be
+    # picked while the run continues (a stale per-advance index would hide it).
+    assert set(session.coverage_selection_counts) & \
+        set(session.coverage_retained_shas)
+
+
+def test_directed_resume_equivalence_with_midrun_retention(tmp_path):
+    """Directed-mode equivalence fixture (#198): with retained entries present,
+    pause/resume must reproduce the identical base-selection sequence of one
+    single advance() call."""
+    from ios_research import __version__
+    from ios_research.workspace import Workspace
+
+    targets.register("test:novel-directed", lambda: _NovelDirectedTarget())
+    try:
+        snapshots = []
+        for name, chunks in (("single", None), ("split", (17, 23))):
+            ws = Workspace(tmp_path / name / ".ios-research")
+            ws.init(framework_version=__version__, created_at="t")
+            _, engine, session = _novel_run(
+                ws, target="test:novel-directed", corpus_name="dir-fresh",
+                seed_count=2, max_cases=60, focus_symbol="sink")
+            if chunks:
+                session = engine.advance(session, max_new=chunks[0])
+                session = engine.resume(session, max_new=chunks[1])
+                session = engine.resume(session)
+            else:
+                session = engine.advance(session)
+            snapshots.append((
+                dict(session.outcomes),
+                list(session.coverage_features),
+                list(session.coverage_retained_shas),
+                dict(session.coverage_selection_counts),
+                dict(session.focus_counts),
+                dict(session.focus_entry_distances),
+                session.focus_biased,
+                session.cursor))
+    finally:
+        targets._REGISTRY.pop("test:novel-directed", None)
+    assert snapshots[0] == snapshots[1]
+    # Sanity: the run actually retained inputs mid-run and used every case.
+    assert snapshots[0][-1] == 60
+    assert snapshots[0][2]
+
+
+class _CountingCorpusStore(CorpusStore):
+    """CorpusStore that counts hot-loop disk reads."""
+
+    def __init__(self, workspace):
+        super().__init__(workspace)
+        self.read_calls: list[str] = []
+
+    def read_bytes(self, corpus, sha256):
+        self.read_calls.append(sha256)
+        return super().read_bytes(corpus, sha256)
+
+
+def test_selection_reads_scale_with_distinct_shas_not_cases(tmp_path):
+    """Scaling smoke test (#198): read_bytes call count per advance() equals
+    the number of DISTINCT input shas seeded/selected -- never one read per
+    executed case -- and stays flat when the corpus grows 1x -> 4x."""
+    from ios_research import __version__
+    from ios_research.workspace import Workspace
+
+    targets.register("test:novel-coverage", lambda: _NovelCoverageTarget())
+    try:
+        read_totals = []
+        for k in (1, 4):
+            ws = Workspace(tmp_path / f"k{k}" / ".ios-research")
+            ws.init(framework_version=__version__, created_at="t")
+            counting = _CountingCorpusStore(ws)
+            _, engine, session = _novel_run(
+                ws, target="test:novel-coverage", corpus_name=f"reads-{k}",
+                seed_count=k, max_cases=80)
+            engine.corpus_store = counting
+            session = engine.advance(session)
+            assert session.cursor == 80
+            # Each sha is read at most once per advance(): no repeated reads.
+            assert len(counting.read_calls) == len(set(counting.read_calls))
+            # Bounded by corpus size (bases seeded once), not by case count.
+            assert len(counting.read_calls) <= k
+            read_totals.append(len(counting.read_calls))
+    finally:
+        targets._REGISTRY.pop("test:novel-coverage", None)
+    assert read_totals == [1, 4]

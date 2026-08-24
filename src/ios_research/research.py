@@ -28,6 +28,7 @@ from .differential import DifferentialEngine
 from .experiment import ExperimentStore
 from .fuzz import FuzzEngine, DEFAULT_BASE
 from .ids import make_id
+from .parallel import TRIAGE_MINIMIZE_LOCK, map_ordered
 from .triage import Triage
 from .workspace import Workspace
 
@@ -44,6 +45,10 @@ CREATED, RUNNING, PAUSED, COMPLETED, BLOCKED = \
 # Differential partners for targets that have a second "version".
 _DIFF_PARTNERS = {"mock:parser": "mock:parser-v2"}
 
+# Cap application happens at use sites, not here: triage fan-out and the
+# fuzz-stage worker record both cap max_workers at 6 (#200/#209), and the
+# fuzz engine itself executes serially today, so a recorded worker count is
+# configuration provenance until the executor work lands (#199).
 DEFAULT_LIMITS = {
     "max_runtime_seconds": 600,
     "max_workers": 8,
@@ -172,6 +177,10 @@ class ResearchOrchestrator:
                                   "status": "blocked", "note": note}
         self.save(run)
 
+    def _workers(self, run: ResearchRun) -> int:
+        """Effective stage fan-out width (#200): capped pool, never < 1."""
+        return max(1, min(int(run.limits.get("max_workers", 1)), 6))
+
     # stages --------------------------------------------------------------
     def _stage_discover_environment(self, run: ResearchRun) -> str:
         run.refs["environment"] = {
@@ -210,17 +219,23 @@ class ResearchOrchestrator:
             config_hash=cfg_hash, seed=run.seed,
             params={"driver": "research", "run_id": run.id})
         engine = FuzzEngine(self.ws)
-        workers = min(1, run.limits["max_workers"])
+        # Record the configured fan-out honestly (#209) instead of silently
+        # clamping to 1: same cap policy as triage fan-out (_workers). The
+        # engine currently executes serially regardless of this value, so it
+        # is provenance — it reflects configuration intent, matching the
+        # field's documented purpose — until the executor work lands (#199).
+        effective = self._workers(run)
         from .config import Config
         session = engine.create(experiment_id=exp.id, target=run.target,
                                 corpus_id=run.refs["corpus_id"], seed=run.seed,
-                                workers=max(workers, 1), max_cases=run.max_cases,
+                                workers=effective, max_cases=run.max_cases,
                                 duration_s=None,
                                 strategy_weights=Config().get("fuzz.strategy_weights"))
         session = engine.advance(session)
         run.refs["experiment_id"] = exp.id
         run.refs["fuzz_session_id"] = session.id
         run.refs["crash_ids"] = list(session.crash_ids)
+        run.stats["fuzz_workers"] = effective
         run.stats["testcases_generated"] = session.cursor
         run.stats["outcomes"] = session.stats()["outcomes"]
         return f"{session.cursor} cases, {session.unique_crashes} unique crashes"
@@ -236,34 +251,51 @@ class ResearchOrchestrator:
         return f"{run.stats['unique_crashes']} unique after signature dedup"
 
     def _stage_minimize(self, run: ResearchRun) -> str:
-        triage = Triage(self.ws)
-        minimized = 0
-        for cid in run.refs.get("crash_ids", []):
-            result = triage.minimize(triage.crashes.get(cid))
-            if result.get("minimized"):
-                minimized += 1
+        workers = self._workers(run)
+
+        def minimize_one(cid: str) -> bool:
+            # Fresh instances per item; the regression-corpus tail of
+            # minimize is serialized process-wide (see parallel.py).
+            triage = Triage(self.ws)
+            with TRIAGE_MINIMIZE_LOCK:
+                result = triage.minimize(triage.crashes.get(cid),
+                                         workers=workers)
+            return bool(result.get("minimized"))
+
+        results = map_ordered(minimize_one, run.refs.get("crash_ids", []),
+                              workers)
+        minimized = sum(1 for ok in results if ok)
         run.stats["minimized_crashes"] = minimized
         return f"minimized {minimized} crash input(s)"
 
     def _stage_reproduce(self, run: ResearchRun) -> str:
-        triage = Triage(self.ws)
-        reproduced = 0
-        for cid in run.refs.get("crash_ids", []):
-            if triage.reproduce(triage.crashes.get(cid))["reproduced"]:
-                reproduced += 1
+        workers = self._workers(run)
+
+        def reproduce_one(cid: str) -> bool:
+            triage = Triage(self.ws)
+            return triage.reproduce(triage.crashes.get(cid))["reproduced"]
+
+        results = map_ordered(reproduce_one, run.refs.get("crash_ids", []),
+                              workers)
+        reproduced = sum(1 for ok in results if ok)
         run.stats["reproducible_crashes"] = reproduced
         return f"{reproduced} reproducible crash(es)"
 
     def _stage_analyze(self, run: ResearchRun) -> str:
-        analyzer = Analyzer(self.ws)
-        crashes = CrashStore(self.ws)
-        analysis_ids, memsafety = [], 0
-        for cid in run.refs.get("crash_ids", []):
-            analysis = analyzer.analyze(crashes.get(cid))
-            analysis_ids.append(analysis.id)
-            if analysis.memory_safety_classification in (
-                    "spatial", "temporal", "type-confusion"):
-                memsafety += 1
+        workers = self._workers(run)
+
+        def analyze_one(cid: str):
+            analyzer = Analyzer(self.ws)
+            crash = CrashStore(self.ws).get(cid)
+            return analyzer.analyze(crash)
+
+        results = map_ordered(analyze_one, run.refs.get("crash_ids", []),
+                              workers)
+        analysis_ids = [a.id for a in results]
+        memsafety = sum(
+            1 for a in results
+            if a.memory_safety_classification in (
+                "spatial", "temporal", "type-confusion"))
         run.refs["analysis_ids"] = analysis_ids
         run.stats["memory_safety_issues"] = memsafety
         return f"analyzed {len(analysis_ids)}; {memsafety} memory-safety issue(s)"
