@@ -93,6 +93,8 @@ class FuzzSession:
     grammar_uses: int = 0
     max_input_bytes: int = 0
     skipped_oversize: int = 0
+    sched_modes: tuple = ()
+    sched_calls: int = 0
     started_at: str = ""
     updated_at: str = ""
 
@@ -188,7 +190,8 @@ class FuzzEngine:
                value_profile: bool = False,
                sanitizer_profile: str | None = None,
                mutator_plugin_path: str | None = None,
-               max_input_bytes: int | None = None) -> FuzzSession:
+               max_input_bytes: int | None = None,
+               sched_modes: tuple = ()) -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -227,6 +230,9 @@ class FuzzEngine:
             raise StateError(
                 f"mutator plugin path does not exist: {mutator_plugin_path}",
                 details={"path": str(mutator_plugin_path)})
+        if sched_modes:
+            from .races import validate_modes
+            sched_modes = validate_modes(sched_modes)
         session = FuzzSession(
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
@@ -243,6 +249,7 @@ class FuzzEngine:
             mutator_plugin_sha256=plugin_sha,
             max_input_bytes=(DEFAULT_MAX_INPUT_BYTES if max_input_bytes is None
                              else max(0, int(max_input_bytes))),
+            sched_modes=tuple(sched_modes or ()),
         )
         if tokens:
             self.ws.write_json(self._dict_rel(session.id), {
@@ -363,6 +370,7 @@ class FuzzEngine:
                 session.cursor += 1
                 executed_this += 1
                 continue
+            self._perturb_target(target, session, i)
             result = target.execute(mutated)
             session.outcomes[result.outcome] = \
                 session.outcomes.get(result.outcome, 0) + 1
@@ -430,6 +438,27 @@ class FuzzEngine:
         session.unique_crashes = len(session.crash_ids)
         self.save(session)
         return session
+
+    def _perturb_target(self, target, session: FuzzSession,
+                        iteration: int) -> None:
+        """Apply the session's scheduling-perturbation schedule, if any.
+
+        Deterministic: the mode for case ``i`` is ``sched_modes[i % len]``.
+        Targets without an optional ``perturb`` hook (and sessions without
+        modes) are untouched; a failing perturbation never breaks a campaign
+        and is not counted.
+        """
+        modes = session.sched_modes
+        if not modes:
+            return
+        perturb = getattr(target, "perturb", None)
+        if not callable(perturb):
+            return
+        try:
+            perturb(modes[iteration % len(modes)], iteration)
+        except Exception:
+            return
+        session.sched_calls += 1
 
     def _flush_crashes(self, session: FuzzSession, fmt: str,
                        crash_counts: dict[str, int],

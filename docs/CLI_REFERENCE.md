@@ -638,6 +638,32 @@ Positional arguments:
 
 - `run_id` (required)
 >>>>>>> origin/main
+### `ios-research races`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research races import`
+
+Options:
+
+- `--report` (required) — path to a saved TSan report text file
+- `--target` — target id the report came from
+- `--input-sha` — sha256 of the triggering input, if known
+
+### `ios-research races list`
+
+Options:
+
+- `--kind` — filter by race kind (e.g. 'data race')
+
+### `ios-research races show`
+
+Positional arguments:
+
+- `race_id` (required)
+
 ### `ios-research report`
 
 ### `ios-research report bounty-export`
