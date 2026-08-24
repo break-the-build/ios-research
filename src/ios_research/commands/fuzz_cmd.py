@@ -62,17 +62,21 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--max-input-bytes", type=int, default=None,
                          help="skip mutated inputs larger than this many bytes "
                               "(default 1048576; 0 disables the bound)")
+    p_start.add_argument("--llm-proposals", default=None,
+                         dest="llm_proposals",
+                         help="JSONL proposal file for LLM-in-the-loop "
+                              "mutation (#71); requires --llm-budget")
+    p_start.add_argument("--llm-budget", type=int, default=0,
+                         dest="llm_budget",
+                         help="max proposals consumed per campaign")
+    p_start.add_argument("--focus-symbol", default=None,
+                         dest="focus_symbol",
+                         help="directed scheduling toward this symbol (#73); "
+                              "requires a target with a callgraph() hook")
     p_start.add_argument("--sched-perturb", default=None, dest="sched_perturb",
                          help="comma-separated scheduling-perturbation modes "
                               "applied between cases (#70): "
                               "yield,priority,affinity,random-delay")
-    p_start.add_argument("--targets-of-interest", default=None,
-                         dest="targets_of_interest",
-                         help="comma-separated finding ids to direct energy "
-                              "toward (AFLGo-style distance scheduling, #73)")
-    p_start.add_argument("--callgraph", default=None,
-                         help="path to a schema-1 call-graph JSON document "
-                              "used to compute directed distances (#73)")
     p_start.set_defaults(func=cmd_start)
 
     for action in ("status", "stats"):
@@ -154,18 +158,17 @@ def cmd_start(ctx, args) -> Result:
     max_input_bytes = getattr(args, "max_input_bytes", None)
     if max_input_bytes is None:
         max_input_bytes = cfg.get("limits.max_input_bytes")
+    llm_proposal_file = getattr(args, "llm_proposals", None) or ""
+    llm_budget = int(getattr(args, "llm_budget", 0) or 0)
+    if bool(llm_proposal_file) != (llm_budget > 0):
+        raise UsageError(
+            "--llm-proposals and a positive --llm-budget are required together")
     sched_modes = ()
     raw_sched = getattr(args, "sched_perturb", None)
     if raw_sched:
         from ..races import validate_modes
         sched_modes = validate_modes(
             mode.strip() for mode in raw_sched.split(",") if mode.strip())
-    raw_toi = getattr(args, "targets_of_interest", None)
-    targets_of_interest = [t.strip() for t in (raw_toi or "").split(",")
-                           if t.strip()] if raw_toi else None
-    callgraph = getattr(args, "callgraph", None) or None
-    if targets_of_interest is not None and not targets_of_interest:
-        raise UsageError("--targets-of-interest requires at least one id")
     session = engine.create(experiment_id=experiment.id, target=target_id,
                             corpus_id=corpus.id, seed=seed, workers=workers,
                             max_cases=max_cases, duration_s=args.duration,
@@ -179,24 +182,16 @@ def cmd_start(ctx, args) -> Result:
                                 args, "mutator_plugin", None),
                             max_input_bytes=max_input_bytes,
                             sched_modes=sched_modes,
-                            targets_of_interest=targets_of_interest,
-                            callgraph_path=callgraph)
+                            llm_proposal_file=llm_proposal_file,
+                            llm_budget=llm_budget,
+                            focus_symbol=str(getattr(args, "focus_symbol",
+                                                     None) or ""))
     deadline = time.monotonic() + args.duration if args.duration else None
     session = engine.advance(session, max_new=args.chunk, deadline=deadline)
 
     # Reflect fuzzing stats onto the experiment.
     experiment.status = "running" if session.status != "completed" else "completed"
     experiment.stats = session.stats()
-    # Directed objective provenance (#73): persisted on the experiment so
-    # matrix reproduction can report per-target reliability.
-    if session.directed_objectives:
-        experiment.params = dict(experiment.params, directed={
-            "targets_of_interest": list(targets_of_interest or []),
-            "callgraph": callgraph or "",
-            "objectives": session.directed_objectives,
-            "target_functions": list(session.directed_target_functions),
-            "focus_function": session.directed_focus_function,
-        })
     exp_store.save(experiment)
 
     return Result(command="fuzz start",

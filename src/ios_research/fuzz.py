@@ -24,7 +24,7 @@ from .corpus import CorpusStore, Corpus
 from .crashes import CrashStore
 from .dictionary import (DictionaryToken, load_dictionary, tokens_from_records,
                          tokens_to_records)
-from .errors import NotFoundError, StateError, ValidationError
+from .errors import NotFoundError, StateError
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
@@ -95,12 +95,16 @@ class FuzzSession:
     skipped_oversize: int = 0
     sched_modes: tuple = ()
     sched_calls: int = 0
-    directed_objectives: list[dict] = field(default_factory=list)
-    directed_target_functions: list[str] = field(default_factory=list)
-    directed_function_distance: dict[str, float] = field(default_factory=dict)
-    directed_feature_distance: dict[str, float] = field(default_factory=dict)
-    directed_focus_function: str = ""
-    directed_scheduled_cases: int = 0
+    llm_proposal_file: str = ""
+    llm_budget: int = 0
+    llm_cursor: int = 0
+    llm_round: int = 0
+    llm_stats: dict = field(default_factory=dict)
+    focus_symbol: str = ""
+    focus_distances: dict = field(default_factory=dict)
+    focus_entry_distances: dict = field(default_factory=dict)
+    focus_counts: dict = field(default_factory=dict)
+    focus_biased: int = 0
     started_at: str = ""
     updated_at: str = ""
 
@@ -134,6 +138,13 @@ class FuzzSession:
                 "value_profile": self.value_profile,
                 "token_uses": self.token_uses,
             },
+            "focus": {
+                "symbol": self.focus_symbol,
+                "targets_reachable": sum(
+                    1 for d in self.focus_distances.values() if d == 0),
+                "biased_selections": self.focus_biased,
+                "selection_counts": dict(self.focus_counts),
+            } if self.focus_symbol else {},
             "sanitizer_profile": self.sanitizer_profile,
             "mutator_plugin": {
                 "path": self.mutator_plugin_path,
@@ -142,20 +153,7 @@ class FuzzSession:
             },
             "max_input_bytes": self.max_input_bytes,
             "skipped_oversize": self.skipped_oversize,
-            "directed": {
-                "objectives": list(self.directed_objectives),
-                "target_functions": list(self.directed_target_functions),
-                "focus_function": self.directed_focus_function,
-                "engine_args": self.directed_engine_args(),
-                "scheduled_cases": self.directed_scheduled_cases,
-                "active": bool(self.directed_feature_distance),
-            },
         }
-
-    def directed_engine_args(self, *, engine: str = "libfuzzer") -> list[str]:
-        """External-engine arguments realizing the directed objective (#73)."""
-        from .directed import focus_arguments
-        return focus_arguments(self.directed_focus_function, engine=engine)
 
 
 class FuzzEngine:
@@ -199,42 +197,6 @@ class FuzzEngine:
             return None
         return sorted(sessions, key=lambda s: s.updated_at)[-1]
 
-    # directed greybox (#73) ----------------------------------------------
-    def _directed_plan(self, targets_of_interest: list[str] | None,
-                       callgraph_path: str | None) -> dict[str, Any]:
-        """Resolve ``--targets-of-interest`` into a persisted distance plan.
-
-        Finding ids resolve through the findings store (unknown ids fail with
-        :class:`NotFoundError`). A call-graph document turns the resolved
-        locations into AFLGo-style function distances; without one the
-        objective is still recorded but the schedule stays inactive.
-        """
-        from .directed import (build_plan, CallGraph,
-                               objectives_from_findings)
-        from .findings import FindingsStore
-        empty = {"objectives": [], "target_functions": [],
-                 "function_distance": {}, "feature_distance": {},
-                 "focus_function": ""}
-        ids = [t.strip() for t in (targets_of_interest or []) if t.strip()]
-        if callgraph_path and not ids:
-            raise ValidationError(
-                "--callgraph requires --targets-of-interest")
-        if not ids:
-            return empty
-        findings = [FindingsStore(self.ws).get(fid) for fid in ids]
-        objectives = objectives_from_findings(findings)
-        if not callgraph_path:
-            return {"objectives": objectives, "target_functions": [],
-                    "function_distance": {}, "feature_distance": {},
-                    "focus_function": ""}
-        plan = build_plan(CallGraph.load(callgraph_path), objectives)
-        if not plan["target_functions"]:
-            raise ValidationError(
-                "no target of interest resolved to a call-graph function",
-                details={"targets_of_interest": ids,
-                         "callgraph": str(callgraph_path)})
-        return plan
-
     # lifecycle -----------------------------------------------------------
     def create(self, *, experiment_id: str, target: str, corpus_id: str,
                seed: int, workers: int, max_cases: int,
@@ -247,8 +209,9 @@ class FuzzEngine:
                mutator_plugin_path: str | None = None,
                max_input_bytes: int | None = None,
                sched_modes: tuple = (),
-               targets_of_interest: list[str] | None = None,
-               callgraph_path: str | None = None) -> FuzzSession:
+               llm_proposal_file: str = "",
+               llm_budget: int = 0,
+               focus_symbol: str = "") -> FuzzSession:
         now = now_iso()
         session_id = make_id("experiment", "fuzz", experiment_id, target,
                              corpus_id, str(seed), str(max_cases), now)
@@ -290,7 +253,16 @@ class FuzzEngine:
         if sched_modes:
             from .races import validate_modes
             sched_modes = validate_modes(sched_modes)
-        plan = self._directed_plan(targets_of_interest, callgraph_path)
+        if bool(llm_proposal_file) != (llm_budget > 0):
+            raise StateError(
+                "llm mutation requires both --llm-proposals and a positive "
+                "--llm-budget",
+                details={"llm_proposal_file": llm_proposal_file,
+                         "llm_budget": llm_budget})
+        llm_stats: dict = {}
+        if llm_proposal_file:
+            from .llmmutate import empty_stats
+            llm_stats = empty_stats()
         session = FuzzSession(
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
@@ -308,11 +280,10 @@ class FuzzEngine:
             max_input_bytes=(DEFAULT_MAX_INPUT_BYTES if max_input_bytes is None
                              else max(0, int(max_input_bytes))),
             sched_modes=tuple(sched_modes or ()),
-            directed_objectives=plan["objectives"],
-            directed_target_functions=plan["target_functions"],
-            directed_function_distance=plan["function_distance"],
-            directed_feature_distance=plan["feature_distance"],
-            directed_focus_function=plan["focus_function"],
+            llm_proposal_file=str(llm_proposal_file),
+            llm_budget=int(llm_budget),
+            llm_stats=llm_stats,
+            focus_symbol=str(focus_symbol or ""),
         )
         if tokens:
             self.ws.write_json(self._dict_rel(session.id), {
@@ -327,9 +298,90 @@ class FuzzEngine:
                  for sha in session.base_shas]
         return bases or [DEFAULT_BASE]
 
+    def _ensure_focus_distances(self, session: FuzzSession, target) -> None:
+        """One-time distance computation for directed scheduling (#73).
+
+        Requires the target's optional ``callgraph`` hook; without it (or with
+        an empty result) focus stays recorded but scheduling is unchanged.
+        """
+        if not session.focus_symbol or session.focus_distances:
+            return
+        graph_doc = getattr(target, "callgraph", None)
+        if not callable(graph_doc):
+            return
+        try:
+            doc = graph_doc()
+            if not doc:
+                return
+            from .directed import load_callgraph, target_distances
+            graph = load_callgraph(doc)
+            session.focus_distances = target_distances(
+                graph, {session.focus_symbol})
+        except Exception:  # optional guidance must never break a campaign
+            session.focus_distances = {}
+
+    def _focus_entry_distances(self, session: FuzzSession,
+                               pairs: list[tuple[str, bytes]], target) -> dict:
+        """Map corpus entries to call-graph distances via the target hook.
+
+        The target's optional ``focus_symbol_for(data)`` says which modeled
+        symbol an input exercises; combined with symbol-level distances this
+        yields per-input weights. Results are cached on the session (by input
+        sha) so pause/resume reproduces identical scheduling.
+        """
+        cached = session.focus_entry_distances
+        symbol_for = getattr(target, "focus_symbol_for", None)
+        for sha, data in pairs:
+            if sha in cached:
+                continue
+            distance = None
+            if callable(symbol_for):
+                try:
+                    symbol = symbol_for(data)
+                except Exception:
+                    symbol = None
+                if symbol is not None:
+                    distance = session.focus_distances.get(symbol)
+            cached[sha] = distance
+        return cached
+
     def _select_base(self, session: FuzzSession, corpus: Corpus,
-                     fallback_bases: list[bytes], iteration: int) -> bytes:
+                     fallback_bases: list[bytes], iteration: int,
+                     target=None) -> bytes:
         """Select a coverage corpus entry deterministically when available."""
+        from .hashing import sha256_bytes
+        if session.focus_distances and fallback_bases:
+            # Directed scheduling applies on both the coverage and fallback
+            # paths (#73): weight each candidate by the distance of the
+            # symbol its input exercises (via the target hook).
+            from .directed import selection_weight, weighted_selection
+            pairs: list[tuple[str, bytes]] = []
+            seen = set()
+            for data in fallback_bases:
+                sha = sha256_bytes(data)
+                if sha not in seen:
+                    seen.add(sha)
+                    pairs.append((sha, data))
+            if session.coverage_available is True:
+                entries = {tc["sha256"]: tc for tc in corpus.testcases}
+                for sha in session.base_shas + session.coverage_retained_shas:
+                    if sha in entries and sha not in seen:
+                        seen.add(sha)
+                        pairs.append((sha,
+                                      self.corpus_store.read_bytes(corpus,
+                                                                   sha)))
+            entry_distances = self._focus_entry_distances(session, pairs,
+                                                          target)
+            candidates = [(sha, entry_distances.get(sha)) for sha, _ in pairs]
+            sha = weighted_selection(candidates, session.focus_counts)
+            session.focus_counts[sha] = \
+                session.focus_counts.get(sha, 0) + 1
+            if selection_weight(entry_distances.get(sha)) > 1:
+                session.focus_biased += 1
+            for data in fallback_bases:
+                if sha256_bytes(data) == sha:
+                    return data
+            return fallback_bases[iteration % len(fallback_bases)]
         if session.coverage_available is not True:
             return fallback_bases[iteration % len(fallback_bases)]
         shas = list(dict.fromkeys(session.base_shas + session.coverage_retained_shas))
@@ -342,27 +394,9 @@ class FuzzEngine:
         available = [sha for sha in shas if sha in entries]
         if not available:
             return fallback_bases[iteration % len(fallback_bases)]
-        if session.directed_feature_distance:
-            # Directed greybox (#73): distance-weighted smooth fair
-            # scheduling.  Energy per input decays exponentially with its
-            # AFLGo distance to the objectives; dividing the selection count
-            # by the energy keeps long-run shares proportional to energy while
-            # never starving distant inputs.
-            from .directed import energy_weight, input_distance
-            weights = {
-                sha: energy_weight(input_distance(
-                    session.directed_feature_distance,
-                    entries[sha].get("coverage_features") or ()))
-                for sha in available}
-            sha = min(available, key=lambda value: (
-                session.coverage_selection_counts.get(value, 0)
-                / weights[value],
-                entries[value]["size"], value))
-            session.directed_scheduled_cases += 1
-        else:
-            sha = min(available, key=lambda value: (
-                session.coverage_selection_counts.get(value, 0),
-                entries[value]["size"], value))
+        sha = min(available, key=lambda value: (
+            session.coverage_selection_counts.get(value, 0),
+            entries[value]["size"], value))
         session.coverage_selection_counts[sha] = \
             session.coverage_selection_counts.get(sha, 0) + 1
         return self.corpus_store.read_bytes(corpus, sha)
@@ -390,6 +424,7 @@ class FuzzEngine:
         target = targets.create(session.target)
         fmt = target.formats[0] if target.formats else target.kind
         struct_fn = target.structure_mutate
+        self._ensure_focus_distances(session, target)
         tokens = self.tokens_for(session)
         strategies: tuple[str, ...] = mutation.STRATEGIES
         if tokens:
@@ -404,7 +439,21 @@ class FuzzEngine:
             from .grammar import PluginHost
             plugin_host = PluginHost().discover([session.mutator_plugin_path])
         unique = set(session.crash_ids)
+        crashes_before = len(session.crash_ids)
         executed_this = 0
+
+        # LLM-in-the-loop mutation (#71): proposals replace mutation for a
+        # bounded number of cases. The raw line cursor makes the stream
+        # resumable; proposals are untrusted data (hex bytes only).
+        llm_active = bool(session.llm_proposal_file) and \
+            session.llm_budget > 0
+        llm_iter = None
+        llm_exhausted = False
+        if llm_active:
+            from .llmmutate import FileProposalSource
+            session.llm_round += 1
+            source = FileProposalSource(session.llm_proposal_file)
+            llm_iter = source.proposals_from(session.llm_cursor)
 
         # Batched persistence: accumulate crash counts and corpus additions in
         # memory and flush once before returning, instead of writing per case.
@@ -423,9 +472,33 @@ class FuzzEngine:
                 break
 
             i = session.cursor
-            base = self._select_base(session, corpus, bases, i)
+            base = self._select_base(session, corpus, bases, i, target)
             mutated = None
             strategy = ""
+            llm_note = ""
+            if llm_active and not llm_exhausted and \
+                    session.llm_stats["proposals_used"] < session.llm_budget:
+                from .llmmutate import (validate_proposal_bytes,
+                                        repair_with_target)
+                try:
+                    next_line, proposal = next(llm_iter)  # type: ignore[union-attr]
+                except StopIteration:
+                    llm_exhausted = True
+                else:
+                    session.llm_cursor = next_line
+                    if proposal is None:
+                        session.llm_stats["proposals_invalid"] += 1
+                    else:
+                        decoded = validate_proposal_bytes(proposal.data)
+                        if decoded is None:
+                            session.llm_stats["proposals_invalid"] += 1
+                        else:
+                            mutated = repair_with_target(decoded, target)
+                            strategy = "llm-proposal"
+                            llm_note = proposal.note
+                            session.llm_stats["proposals_used"] += 1
+            if mutated is None and llm_active:
+                session.llm_stats["fallback_iterations"] += 1
             if plugin_host is not None and plugin_host.plugins:
                 rng = mutation.rng_for(session.seed, i)
                 if len(bases) > 1 and i % 4 == 3:
@@ -492,7 +565,10 @@ class FuzzEngine:
                     crash_first[crash_id] = (mutated, result, {
                         "parent_sha256": sha256_bytes(base),
                         "mutation": strategy, "seed": session.seed,
-                        "iteration": i})
+                        "iteration": i,
+                        **({"origin": "llm-proposal",
+                            "round": session.llm_round, "note": llm_note}
+                           if strategy == "llm-proposal" else {})})
                 if crash_id not in unique:
                     unique.add(crash_id)
                     session.crash_ids.append(crash_id)
@@ -513,6 +589,16 @@ class FuzzEngine:
         if corpus_dirty:
             self.corpus_store.save(corpus)
         self._flush_crashes(session, fmt, crash_counts, crash_first)
+
+        # Crash-aware round feedback (#71): summarize new signatures so the
+        # next proposal-generation round can be conditioned on them.
+        if llm_active:
+            new_sigs = session.crash_ids[crashes_before:]
+            if new_sigs:
+                from .llmmutate import summarize_round
+                rounds = session.llm_stats.setdefault("rounds", [])
+                rounds.append(summarize_round(session.llm_round, new_sigs))
+                session.llm_stats["rounds"] = rounds[-20:]
 
         if session.cursor >= session.max_cases:
             session.status = COMPLETED
