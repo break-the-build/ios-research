@@ -16,12 +16,15 @@ unless ``authorization.ack`` is true: the SDK only ever builds and runs local,
 user-declared targets on the researcher's own machine (see ``SECURITY.md``);
 there is no device bypass, persistence or exploit capability here.
 
-Templates carry deliberately triggerable ASan-detectable bugs keyed on byte
-markers ("OOB"/"WRT"/"UAF", modeled on ``tools/harness/mac_fuzz_harness.c``
-HARNESS_TARGET_SELFTEST) so ``target validate`` can prove that real crash
-reports flow through the standard pipeline. C/C++ templates also expose a
-libFuzzer-compatible ``LLVMFuzzerTestOneInput``; Swift/Obj-C fall back to a
-simple argv-based driver because Apple clang ships no libFuzzer runtime.
+Templates are plain-text package assets under
+``ios_research/target_templates/<language>/`` (harness source, default
+manifest, README snippet). They carry deliberately triggerable ASan-detectable
+bugs keyed on byte markers ("OOB"/"WRT"/"UAF", modeled on
+``tools/harness/mac_fuzz_harness.c`` HARNESS_TARGET_SELFTEST) so ``target
+validate`` can prove that real crash reports flow through the standard
+pipeline. C/C++ templates also expose a libFuzzer-compatible
+``LLVMFuzzerTestOneInput``; Swift/Obj-C fall back to a simple argv-based
+driver because Apple clang ships no libFuzzer runtime.
 """
 
 from __future__ import annotations
@@ -209,312 +212,59 @@ def manifest_sha256(path: str | Path) -> str:
 
 
 # --- templates -----------------------------------------------------------------
+#
+# Templates ship as plain-text package assets under
+# ``ios_research/target_templates/<language>/``: one byte-input harness
+# source, a default ``target-manifest.json`` carrying ``{name}``/``{out}``
+# placeholders, and a README snippet. They are read via ``Path(__file__)``
+# (stdlib-only, no implicit scanning) and materialized by
+# :func:`init_template`; nothing in the asset directory is executable Python.
 
-_C_HARNESS = r"""/*
- * Custom ios-research target harness ({name}) — C, byte input.
- *
- * Deliberately triggerable ASan findings keyed on byte markers (modeled on
- * tools/harness/mac_fuzz_harness.c HARNESS_TARGET_SELFTEST) so
- * `ios-research target validate` can prove real crash parsing end to end:
- *   input contains "OOB" -> heap-buffer-overflow READ
- *   input contains "WRT" -> heap-buffer-overflow WRITE
- *   input contains "UAF" -> heap-use-after-free READ
- * Anything else is parsed cleanly. Authorized/own-machine research only.
- */
-#include <stdint.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+_TEMPLATES_DIR = Path(__file__).resolve().parent / "target_templates"
 
-static int contains(const uint8_t *d, size_t n, const char *s) {
-    size_t len = strlen(s);
-    if (n < len) return 0;
-    for (size_t i = 0; i + len <= n; i++) {
-        if (memcmp(d + i, s, len) == 0) return 1;
-    }
-    return 0;
-}
 
-static int parse_record(const uint8_t *data, size_t size) {
-    uint8_t *buf = (uint8_t *)malloc(16);
-    if (!buf) return 0;
-    memset(buf, 0, 16);
-    if (contains(data, size, "OOB")) {
-        volatile uint8_t x = buf[16 + (size & 0x3F)];  /* heap OOB read  */
-        (void)x;
-    } else if (contains(data, size, "WRT")) {
-        buf[64] = 0x41;                                /* heap OOB write */
-    } else if (contains(data, size, "UAF")) {
-        free(buf);
-        volatile uint8_t y = buf[0];                   /* use-after-free */
-        (void)y;
-        buf = NULL;
-    }
-    if (buf) free(buf);
-    return 1;
-}
+def _template_dir(language: str) -> Path:
+    """Directory holding the template assets for ``language``."""
+    if language not in LANGUAGES:
+        raise ValidationError(
+            f"unknown language '{language}'; expected one of "
+            f"{', '.join(LANGUAGES)}")
+    path = _TEMPLATES_DIR / language
+    if not path.is_dir():  # pragma: no cover - packaging defect
+        raise ValidationError(f"template assets missing for '{language}'")
+    return path
 
-/* libFuzzer-compatible entry point (used when built with -fsanitize=fuzzer;
- * see docs/TARGET-SDK.md for the two build modes). */
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    return parse_record(data, size) ? 0 : 0;
-}
-
-#ifndef HARNESS_SDK_NO_MAIN
-/* Standalone driver: Apple clang ships no libFuzzer runtime, so the default
- * build links this main instead. Runs each argv file through the entry point;
- * ASan reports go to stderr and exit non-zero (exitcode=99). */
-int main(int argc, char **argv) {
-    static uint8_t blob[1 << 20];
-    for (int i = 1; i < argc; i++) {
-        FILE *fh = fopen(argv[i], "rb");
-        if (!fh) { perror(argv[i]); return 2; }
-        size_t n = fread(blob, 1, sizeof(blob), fh);
-        fclose(fh);
-        (void)LLVMFuzzerTestOneInput(blob, n);
-    }
-    return 0;
-}
-#endif /* HARNESS_SDK_NO_MAIN */
-"""
-
-_CPP_HARNESS = r"""/*
- * Custom ios-research target harness ({name}) — C++, byte input.
- *
- * Same marker scheme as the C template (OOB/WRT/UAF -> distinct ASan
- * classifications) so `target validate` can prove real crash parsing.
- * Authorized/own-machine research only.
- */
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cstddef>
-
-static bool contains(const uint8_t *d, size_t n, const char *s) {
-    size_t len = std::strlen(s);
-    if (n < len) return false;
-    for (size_t i = 0; i + len <= n; i++) {
-        if (std::memcmp(d + i, s, len) == 0) return true;
-    }
-    return false;
-}
-
-static int parse_record(const uint8_t *data, size_t size) {
-    auto *buf = static_cast<uint8_t *>(std::malloc(16));
-    if (!buf) return 0;
-    std::memset(buf, 0, 16);
-    if (contains(data, size, "OOB")) {
-        volatile uint8_t x = buf[16 + (size & 0x3F)];  /* heap OOB read  */
-        static_cast<void>(x);
-    } else if (contains(data, size, "WRT")) {
-        buf[64] = 0x41;                                /* heap OOB write */
-    } else if (contains(data, size, "UAF")) {
-        std::free(buf);
-        volatile uint8_t y = buf[0];                   /* use-after-free */
-        static_cast<void>(y);
-        buf = nullptr;
-    }
-    if (buf) std::free(buf);
-    return 1;
-}
-
-/* libFuzzer-compatible entry point (see docs/TARGET-SDK.md). */
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    return parse_record(data, size) ? 0 : 0;
-}
-
-#ifndef HARNESS_SDK_NO_MAIN
-/* Standalone driver (Apple clang ships no libFuzzer runtime). */
-int main(int argc, char **argv) {
-    static uint8_t blob[1 << 20];
-    for (int i = 1; i < argc; i++) {
-        std::FILE *fh = std::fopen(argv[i], "rb");
-        if (!fh) { std::perror(argv[i]); return 2; }
-        size_t n = std::fread(blob, 1, sizeof(blob), fh);
-        std::fclose(fh);
-        (void)LLVMFuzzerTestOneInput(blob, n);
-    }
-    return 0;
-}
-#endif /* HARNESS_SDK_NO_MAIN */
-"""
-
-_SWIFT_HARNESS = r"""/*
- * Custom ios-research target harness ({name}) — Swift, byte input.
- *
- * Platform fallback driver: Apple's toolchain ships no libFuzzer runtime, so
- * this template uses a simple argv-based `run_one_input` main instead of a
- * libFuzzer entry point (docs/TARGET-SDK.md). Same OOB/WRT/UAF marker scheme
- * as the C template; build with -sanitize=address (the declared sanitizer
- * profile) so the findings are caught and reported. Authorized research only.
- */
-import Foundation
-
-func contains(_ data: [UInt8], _ marker: [UInt8]) -> Bool {
-    guard marker.count <= data.count else { return false }
-    return data.contains(marker)
-}
-
-func parseRecord(_ data: [UInt8]) -> Int32 {
-    guard let raw = malloc(16) else { return 1 }
-    memset(raw, 0, 16)
-    let buf = raw.assumingMemoryBound(to: UInt8.self)
-    let oob = Array("OOB".utf8), wrt = Array("WRT".utf8), uaf = Array("UAF".utf8)
-    if contains(data, oob) {
-        let v = buf[16 + (data.count & 0x3F)]      // heap OOB read (ASan)
-        _ = v
-    } else if contains(data, wrt) {
-        buf[64] = 0x41                             // heap OOB write (ASan)
-    } else if contains(data, uaf) {
-        free(raw)
-        let v = buf[0]                             // use-after-free (ASan)
-        _ = v
-        return 0
-    }
-    free(raw)
-    return 0
-}
-
-func runOneInput(_ path: String) -> Int32 {
-    guard let data = FileManager.default.contents(atPath: path) else {
-        FileHandle.standardError.write(Data("cannot read \(path)\n".utf8))
-        return 2
-    }
-    return parseRecord([UInt8](data))
-}
-
-// Driver: `harness <file>` — one input per process, like the libFuzzer mode.
-let args = CommandLine.arguments
-if args.count < 2 {
-    FileHandle.standardError.write(Data("usage: harness <input-file>\n".utf8))
-    exit(2)
-}
-exit(runOneInput(args[1]))
-"""
-
-_OBJC_HARNESS = r"""/*
- * Custom ios-research target harness ({name}) — Objective-C, byte input.
- *
- * Platform fallback: plain Objective-C (no Foundation dependency) with an
- * argv-based driver because Apple clang ships no libFuzzer runtime. Same
- * OOB/WRT/UAF marker scheme as the C template. Authorized research only.
- */
-#include <stdint.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-static int contains(const uint8_t *d, size_t n, const char *s) {
-    size_t len = strlen(s);
-    if (n < len) return 0;
-    for (size_t i = 0; i + len <= n; i++) {
-        if (memcmp(d + i, s, len) == 0) return 1;
-    }
-    return 0;
-}
-
-static int parse_record(const uint8_t *data, size_t size) {
-    uint8_t *buf = (uint8_t *)malloc(16);
-    if (!buf) return 0;
-    memset(buf, 0, 16);
-    if (contains(data, size, "OOB")) {
-        volatile uint8_t x = buf[16 + (size & 0x3F)];  /* heap OOB read  */
-        (void)x;
-    } else if (contains(data, size, "WRT")) {
-        buf[64] = 0x41;                                /* heap OOB write */
-    } else if (contains(data, size, "UAF")) {
-        free(buf);
-        volatile uint8_t y = buf[0];                   /* use-after-free */
-        (void)y;
-        buf = NULL;
-    }
-    if (buf) free(buf);
-    return 1;
-}
-
-/* Standalone driver (Apple clang ships no libFuzzer runtime). */
-int main(int argc, char **argv) {
-    static uint8_t blob[1 << 20];
-    for (int i = 1; i < argc; i++) {
-        FILE *fh = fopen(argv[i], "rb");
-        if (!fh) { perror(argv[i]); return 2; }
-        size_t n = fread(blob, 1, sizeof(blob), fh);
-        fclose(fh);
-        (void)parse_record(blob, n);
-    }
-    return 0;
-}
-"""
-
-# Per-language template assets: source file name, source text, build command
-# (argv, "{out}" placeholder; sanitizer flags come from the declared profile).
-_TEMPLATES = {
-    "c": {
-        "source": "harness.c",
-        "body": _C_HARNESS,
-        "build_cmd": ["cc", "-g", "-O1", "-fno-omit-frame-pointer",
-                      "-DHARNESS_SDK_STANDALONE", "harness.c", "-o", "{out}"],
-    },
-    "cpp": {
-        "source": "harness.cpp",
-        "body": _CPP_HARNESS,
-        "build_cmd": ["c++", "-g", "-O1", "-fno-omit-frame-pointer",
-                      "-DHARNESS_SDK_STANDALONE", "harness.cpp", "-o", "{out}"],
-    },
-    # Swift/Obj-C document the supported-platform fallback: Apple ships no
-    # libFuzzer runtime, so they use the argv driver; the sanitizer flags are
-    # supplied by the declared profile at build time.
-    "swift": {
-        "source": "harness.swift",
-        "body": _SWIFT_HARNESS,
-        "build_cmd": ["swiftc", "-g", "-Onone", "harness.swift",
-                      "-o", "{out}"],
-    },
-    "objc": {
-        "source": "harness.m",
-        "body": _OBJC_HARNESS,
-        "build_cmd": ["cc", "-g", "-O1", "-fno-omit-frame-pointer",
-                      "-x", "objective-c", "harness.m", "-o", "{out}"],
-    },
-}
 
 CLEAN_SEED = b"clean-seed-no-marker\n"
 
 
 def default_manifest(name: str, language: str, *,
                      acknowledge: bool = False) -> TargetManifest:
-    """The manifest a fresh template gets for ``name``/``language``."""
-    tpl = _TEMPLATES[language]
-    return TargetManifest(
-        name=name,
-        language=language,
-        source=tpl["source"],
-        build_cmd=list(tpl["build_cmd"]),
-        output_path="build/harness",
-        seeds=["seeds"],
-        dictionary=None,
-        sanitizer_profile="asan-ubsan",
-        timeout_s=DEFAULT_TIMEOUT_S,
-        schema_version=MANIFEST_SCHEMA_VERSION,
-        authorization_ack=bool(acknowledge),
-    )
+    """The manifest a fresh template gets for ``name``/``language``.
+
+    Parsed from the language's ``target-manifest.json`` asset so the shipped
+    file stays the single source of truth for the default build profile.
+    """
+    raw = json.loads((_template_dir(language) / "target-manifest.json")
+                     .read_text(encoding="utf-8"))
+    raw["name"] = name
+    auth = raw.get("authorization")
+    if not isinstance(auth, dict):
+        auth = {}
+        raw["authorization"] = auth
+    auth["ack"] = bool(acknowledge)
+    return TargetManifest.from_dict(raw)
 
 
 def init_template(language: str, dest_dir: str | Path, name: str, *,
                   acknowledge: bool = False) -> Path:
     """Write one language template project; returns the manifest path.
 
-    Layout: ``<dest>/target-manifest.json``, the harness source, and a
-    ``seeds/`` directory holding one clean seed. Refuses to overwrite an
-    existing non-empty destination (deterministic, no clobbering).
+    Layout: ``<dest>/target-manifest.json``, the harness source, a README
+    snippet, and a ``seeds/`` directory holding one clean seed. Refuses to
+    overwrite an existing non-empty destination (deterministic, no
+    clobbering).
     """
-    if language not in LANGUAGES:
-        raise ValidationError(
-            f"unknown language '{language}'; expected one of "
-            f"{', '.join(LANGUAGES)}")
     if not NAME_RE.match(name or ""):
         raise ValidationError(
             f"invalid target name '{name}': must match "
@@ -524,12 +274,19 @@ def init_template(language: str, dest_dir: str | Path, name: str, *,
         raise ValidationError(
             f"destination '{dest}' exists and is not empty; "
             f"choose a fresh --dest directory")
-    tpl = _TEMPLATES[language]
+    tpl_dir = _template_dir(language)
     manifest = default_manifest(name, language, acknowledge=acknowledge)
 
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / tpl["source"]).write_text(tpl["body"].replace("{name}", name),
-                                      encoding="utf-8")
+    source_name = manifest.source
+    (dest / source_name).write_text(
+        (tpl_dir / source_name).read_text(encoding="utf-8")
+        .replace("{name}", name),
+        encoding="utf-8")
+    (dest / "README.md").write_text(
+        (tpl_dir / "README.md").read_text(encoding="utf-8")
+        .replace("{name}", name),
+        encoding="utf-8")
     seeds_dir = dest / "seeds"
     seeds_dir.mkdir(exist_ok=True)
     (seeds_dir / "seed_0.bin").write_bytes(CLEAN_SEED)

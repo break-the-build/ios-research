@@ -115,6 +115,11 @@ def cmd_start(ctx, args) -> Result:
     cfg = ctx.config()
     target_id = args.target or cfg.get("default_target")
     if not targets.is_registered(target_id):
+        # Custom-target SDK (#33): registrations persist as workspace records;
+        # rehydrate them so 'register once' works across CLI processes.
+        from ..targetsdk import hydrate_manifests
+        hydrate_manifests(ws)
+    if not targets.is_registered(target_id):
         raise UsageError(f"unknown target '{target_id}'")
     _require_available(targets.create(target_id), target_id)
     seed = args.seed if args.seed is not None else cfg.get("fuzz.seed", 0)

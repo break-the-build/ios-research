@@ -183,6 +183,10 @@ def test_build_requires_source_present(tmp_path):
 
 
 # --- end-to-end (compiled C target; needs `cc` on PATH) -----------------------------
+#
+# Marked ``native`` per repo convention (tests/test_mac_target.py): CI runs
+# with ``-m "not native"`` and deselects these; locally they still self-skip
+# when no C compiler is on PATH.
 
 @pytest.mark.native
 @pytest.mark.skipif(not _has_cc(), reason="requires a C compiler ('cc') on PATH")
@@ -234,6 +238,7 @@ def test_c_target_end_to_end_crash_pipeline(workspace, tmp_path):
         target_registry._REGISTRY.pop(target_id, None)
 
 
+@pytest.mark.native
 @pytest.mark.skipif(not _has_cc(), reason="requires a C compiler ('cc') on PATH")
 def test_c_target_reproducible_twice(workspace, tmp_path):
     """The same crashing input yields the same signature on repeated runs."""
@@ -274,6 +279,7 @@ def test_validate_target_full_pipeline(workspace, tmp_path):
     assert d["build_provenance"]["compiler"]
 
 
+@pytest.mark.native
 @pytest.mark.skipif(not _has_cc(), reason="requires a C compiler ('cc') on PATH")
 def test_validate_target_unacked_manifest_fails_stable(tmp_path):
     manifest_path = init_template("c", tmp_path / "unacked", "unacked")
@@ -357,3 +363,196 @@ def test_unbuilt_target_reports_blocker(tmp_path):
     res = target.execute(b"data")
     assert res.outcome == Outcome.ABNORMAL
     assert "target build" in res.detail
+
+
+# --- template assets (plain-text files shipped with the package) ----------------------
+
+def test_template_assets_ship_for_every_language():
+    from ios_research.targetsdk import _TEMPLATES_DIR
+    for language in ("c", "cpp", "swift", "objc"):
+        d = _TEMPLATES_DIR / language
+        assert d.is_dir(), language
+        assert (d / "target-manifest.json").is_file(), language
+        assert (d / "README.md").is_file(), language
+        assert any(p.name.startswith("harness.") for p in d.iterdir()), language
+        raw = json.loads(
+            (d / "target-manifest.json").read_text(encoding="utf-8"))
+        assert raw["name"] == "{name}"           # substituted at init time
+        assert raw["language"] == language
+        assert "{out}" in raw["build_cmd"]
+        # Templates ship unacknowledged: the researcher must opt in.
+        assert raw["authorization"]["ack"] is False
+
+
+def test_init_writes_readme_snippet(tmp_path):
+    dest = tmp_path / "readme"
+    manifest_path = init_template("objc", dest, "readme")
+    readme = (manifest_path.parent / "README.md").read_text(encoding="utf-8")
+    assert "{name}" not in readme and "readme" in readme   # substituted
+    for marker in ("OOB", "WRT", "UAF"):
+        assert marker in readme                            # marker table
+    assert "authorization" in readme                       # ack guidance
+
+
+def test_init_templates_are_fully_valid_once_acknowledged(tmp_path):
+    """Every shipped template produces a valid manifest once ack is set."""
+    for language in ("c", "cpp", "swift", "objc"):
+        dest = tmp_path / f"valid-{language}"
+        manifest_path = init_template(language, dest, f"v{language}",
+                                      acknowledge=True)
+        manifest, _raw = load_manifest(manifest_path)   # raises if invalid
+        assert manifest.name == f"v{language}"
+        assert validate_manifest(manifest) == []
+
+
+# --- CLI error paths (stable JSON envelopes) --------------------------------------------
+
+def _run_cli(argv, workspace_root):
+    """Run ``main`` against a workspace; return ``(exit_code, envelope)``."""
+    import contextlib
+    import io
+
+    from ios_research.cli import main
+    buf = io.StringIO()
+    full = [*argv, "--json", "--workspace", str(workspace_root)]
+    with contextlib.redirect_stdout(buf):
+        code = main(full)
+    return code, json.loads(buf.getvalue())
+
+
+def test_cli_target_init_happy_and_usage_error(workspace, tmp_path):
+    from ios_research.errors import ExitCode
+    dest = tmp_path / "cli-init"
+    code, env = _run_cli(["target", "init", "--language", "cpp",
+                          "--dest", str(dest), "--name", "clisdk"],
+                         workspace.root)
+    assert code == ExitCode.OK and env["ok"] is True
+    assert env["command"] == "target init"
+    assert env["data"]["manifest_path"].endswith("target-manifest.json")
+    assert (dest / "harness.cpp").is_file()
+
+    # Invalid --language never reaches a handler: argparse exits USAGE.
+    with pytest.raises(SystemExit) as exc:
+        _run_cli(["target", "init", "--language", "rust",
+                  "--dest", str(tmp_path / "nope"), "--name", "x"],
+                 workspace.root)
+    assert exc.value.code == ExitCode.USAGE
+
+
+def test_cli_target_build_unavailable_toolchain_is_state_error(
+        workspace, tmp_path, monkeypatch):
+    from ios_research.errors import ExitCode
+    monkeypatch.setenv("CC", "/nonexistent/cc")
+    manifest_path = init_template("c", tmp_path / "cli-build", "clibuild")
+    _flip_ack(manifest_path)
+    code, env = _run_cli(["target", "build", str(manifest_path)],
+                         workspace.root)
+    assert code == ExitCode.STATE
+    assert env["ok"] is False
+    assert "/nonexistent/cc" in env["error"]
+    assert "PATH" in env["error"]
+
+
+def test_cli_target_validate_unacked_is_validation_error(workspace, tmp_path):
+    from ios_research.errors import ExitCode
+    manifest_path = init_template("c", tmp_path / "cli-validate",
+                                  "clivalid")   # ships unacknowledged
+    code, env = _run_cli(["target", "validate", str(manifest_path)],
+                         workspace.root)
+    assert code == ExitCode.VALIDATION
+    assert env["ok"] is False
+    assert "authorization.ack" in env["error"]
+
+
+def test_cli_target_register_invalid_is_validation_error(workspace, tmp_path):
+    from ios_research.errors import ExitCode
+    manifest_path = init_template("cpp", tmp_path / "cli-reg",
+                                  "clireg")     # unacknowledged
+    code, env = _run_cli(["target", "register", str(manifest_path)],
+                         workspace.root)
+    assert code == ExitCode.VALIDATION
+    assert env["ok"] is False
+    assert not target_registry.is_registered("custom:clireg")
+
+
+def test_cli_register_then_show_works_without_compiler(workspace, tmp_path):
+    """Registration/describe need only a valid manifest — no toolchain."""
+    from ios_research.errors import ExitCode
+    manifest_path = init_template("swift", tmp_path / "cli-show", "clishow",
+                                  acknowledge=True)
+    code, env = _run_cli(["target", "register", str(manifest_path)],
+                         workspace.root)
+    assert code == ExitCode.OK
+    assert env["data"]["target_id"] == "custom:clishow"
+    record = workspace.read_json("targets/custom-clishow.json")
+    assert record["environment"]["platform"]
+    try:
+        code, env = _run_cli(["target", "show", "custom:clishow"],
+                             workspace.root)
+        assert code == ExitCode.OK
+        desc = env["data"]["target"]
+        assert desc["available"] is False
+        assert "not built" in desc["blocker"]
+        assert desc["entry_point"] == "argv file driver"  # Swift fallback
+    finally:
+        target_registry._REGISTRY.pop("custom:clishow", None)
+
+
+def test_fuzz_start_hydrates_registration_from_workspace(workspace, tmp_path):
+    """'Register once': fuzz start resolves custom targets in a new process.
+
+    Simulates a fresh CLI process by dropping the runtime registry entry.
+    Hydration succeeds, so the run gets past the USAGE gate and fails later
+    with the stable STATE 'not available' error (the target was never built).
+    """
+    from ios_research.errors import ExitCode
+    manifest_path = init_template("c", tmp_path / "fz", "fuzzhyd",
+                                  acknowledge=True)
+    target_id = register_manifest(workspace, manifest_path)
+    target_registry._REGISTRY.pop(target_id, None)   # fresh-process simulation
+
+    import contextlib
+    import io
+
+    from ios_research.cli import main
+    buf = io.StringIO()
+    argv = ["fuzz", "start", "--target", target_id, "--max-cases", "1",
+            "--json", "--workspace", str(workspace.root)]
+    with contextlib.redirect_stdout(buf):
+        code = main(argv)
+    envelope = json.loads(buf.getvalue())
+    # Hydrated (no longer 'unknown'); unavailable because never built.
+    assert code == ExitCode.STATE and envelope["ok"] is False
+    assert "not available" in envelope["error"]
+    assert "target build" in envelope["data"]["blocker"]
+    target_registry._REGISTRY.pop(target_id, None)
+
+
+def test_fuzz_start_unknown_target_still_usage_after_hydration(workspace):
+    """Workspaces without registration records keep the USAGE contract."""
+    from ios_research.errors import ExitCode
+    import contextlib
+    import io
+
+    from ios_research.cli import main
+    buf = io.StringIO()
+    argv = ["fuzz", "start", "--target", "custom:never-registered",
+            "--json", "--workspace", str(workspace.root)]
+    with contextlib.redirect_stdout(buf):
+        code = main(argv)
+    assert code == ExitCode.USAGE
+
+
+def test_triage_construction_hydrates_registrations(workspace, tmp_path):
+    """crash reproduce/minimize resolve custom targets in later processes."""
+    from ios_research.triage import Triage
+    manifest_path = init_template("c", tmp_path / "tg", "triagehyd",
+                                  acknowledge=True)
+    target_id = register_manifest(workspace, manifest_path)
+    try:
+        target_registry._REGISTRY.pop(target_id, None)
+        assert not target_registry.is_registered(target_id)
+        Triage(workspace)   # must rehydrate as a side effect of construction
+        assert target_registry.is_registered(target_id)
+    finally:
+        target_registry._REGISTRY.pop(target_id, None)

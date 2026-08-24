@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "{name}",
+  "language": "swift",
+  "source": "harness.swift",
+  "build_cmd": ["swiftc", "-g", "-Onone", "harness.swift", "-o", "{out}"],
+  "output_path": "build/harness",
+  "seeds": ["seeds"],
+  "dictionary": null,
+  "sanitizer_profile": "asan-ubsan",
+  "timeout_s": 10.0,
+  "authorization": {"ack": false}
+}
