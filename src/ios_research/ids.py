@@ -26,6 +26,8 @@ _PREFIXES = {
     "spoints": "spt",
     "finding": "fin",
     "race": "rac",
+    "supply": "sup",
+    "nday": "ndy",
 }
 
 

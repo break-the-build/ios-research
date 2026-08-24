@@ -30,7 +30,7 @@ from .commands import (
     proximity_cmd,
     netip_cmd, wifiaware_cmd, pq3_cmd, continuity_cmd, ipc_cmd, xpc_cmd,
     docimp_cmd, signeddoc_cmd, proxapp_cmd, fsclient_cmd, geo_cmd,
-    voiceassist_cmd, races_cmd,
+    voiceassist_cmd, supply_cmd, nday_cmd, races_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -82,6 +82,8 @@ _REGISTRARS: list[Callable] = [
     lockdown_cmd.register,
     oracle_cmd.register,
     proximity_cmd.register,
+    supply_cmd.register,
+    nday_cmd.register,
 ]
 
 
