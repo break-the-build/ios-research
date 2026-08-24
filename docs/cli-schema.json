@@ -10,6 +10,7 @@
     "findings": ".ios-research/findings/<finding_id>.json",
     "fuzz_sessions": ".ios-research/fuzz/<session_id>.json",
     "harnesses": ".ios-research/harnesses/<candidate_id>.json",
+    "ndays": ".ios-research/ndays/<diff_id>.json",
     "reports": ".ios-research/reports/<report_id>/",
     "research": ".ios-research/research/<research_id>.json",
     "spoints": ".ios-research/spoints/<report_id>.json",
@@ -1820,6 +1821,111 @@
               {
                 "help": "",
                 "name": "matrix_id",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "nday": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "campaign": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reachable",
+                "flags": [
+                  "--reachable"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "nday_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "diff": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "name",
+                "flags": [
+                  "--name"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "symbols_a",
+                "flags": [
+                  "--symbols-a"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "symbols_b",
+                "flags": [
+                  "--symbols-b"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": []
+          }
+        },
+        "list": {
+          "arguments": {
+            "options": [],
+            "positionals": []
+          }
+        },
+        "prioritize": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "reachable",
+                "flags": [
+                  "--reachable"
+                ],
+                "help": "",
+                "required": true
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "nday_id",
+                "required": true
+              }
+            ]
+          }
+        },
+        "show": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "nday_id",
                 "required": true
               }
             ]

@@ -591,6 +591,48 @@ Positional arguments:
 
 - `matrix_id` (required)
 
+### `ios-research nday`
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research nday campaign`
+
+Positional arguments:
+
+- `nday_id` (required)
+
+Options:
+
+- `--reachable`
+
+### `ios-research nday diff`
+
+Options:
+
+- `--name`
+- `--symbols-a`
+- `--symbols-b`
+
+### `ios-research nday list`
+
+### `ios-research nday prioritize`
+
+Positional arguments:
+
+- `nday_id` (required)
+
+Options:
+
+- `--reachable`
+
+### `ios-research nday show`
+
+Positional arguments:
+
+- `nday_id` (required)
+
 ### `ios-research net`
 
 Positional arguments:
