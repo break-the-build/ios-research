@@ -345,11 +345,35 @@ class FuzzEngine:
             cached[sha] = distance
         return cached
 
+    def _cached_input_bytes(self, corpus: Corpus, sha: str,
+                            cache: dict[str, bytes] | None) -> bytes:
+        """Corpus input bytes, served through the per-advance cache (#198).
+
+        On a miss the bytes are read from disk once and memoized for the rest
+        of the ``advance()`` call; the cache is never shared across calls, so
+        nothing can go stale across pause/resume boundaries.
+        """
+        if cache is None:
+            return self.corpus_store.read_bytes(corpus, sha)
+        data = cache.get(sha)
+        if data is None:
+            data = self.corpus_store.read_bytes(corpus, sha)
+            cache[sha] = data
+        return data
+
     def _select_base(self, session: FuzzSession, corpus: Corpus,
                      fallback_bases: list[bytes], iteration: int,
-                     target=None) -> bytes:
-        """Select a coverage corpus entry deterministically when available."""
-        from .hashing import sha256_bytes
+                     target=None, *,
+                     bytes_by_sha: dict[str, bytes] | None = None,
+                     entries_index: dict[str, dict] | None = None,
+                     fallback_shas: list[str] | None = None) -> bytes:
+        """Select a coverage corpus entry deterministically when available.
+
+        ``bytes_by_sha``, ``entries_index``, and ``fallback_shas`` are optional
+        per-advance scheduling caches (#198) owned by the caller; when omitted
+        (direct callers, tests) each is computed locally with identical
+        results.
+        """
         if session.focus_distances and fallback_bases:
             # Directed scheduling applies on both the coverage and fallback
             # paths (#73): weight each candidate by the distance of the
@@ -357,19 +381,20 @@ class FuzzEngine:
             from .directed import selection_weight, weighted_selection
             pairs: list[tuple[str, bytes]] = []
             seen = set()
-            for data in fallback_bases:
-                sha = sha256_bytes(data)
+            if fallback_shas is None:
+                fallback_shas = [sha256_bytes(data) for data in fallback_bases]
+            for sha, data in zip(fallback_shas, fallback_bases):
                 if sha not in seen:
                     seen.add(sha)
                     pairs.append((sha, data))
             if session.coverage_available is True:
-                entries = {tc["sha256"]: tc for tc in corpus.testcases}
+                entries = entries_index if entries_index is not None else {
+                    tc["sha256"]: tc for tc in corpus.testcases}
                 for sha in session.base_shas + session.coverage_retained_shas:
                     if sha in entries and sha not in seen:
                         seen.add(sha)
-                        pairs.append((sha,
-                                      self.corpus_store.read_bytes(corpus,
-                                                                   sha)))
+                        pairs.append((sha, self._cached_input_bytes(
+                            corpus, sha, bytes_by_sha)))
             entry_distances = self._focus_entry_distances(session, pairs,
                                                           target)
             candidates = [(sha, entry_distances.get(sha)) for sha, _ in pairs]
@@ -395,7 +420,8 @@ class FuzzEngine:
         # Fair, stable power schedule: least selected, then smaller input,
         # then content hash.  It is fully persisted in the session, so a
         # pause/resume sequence selects exactly the same parents as one run.
-        entries = {tc["sha256"]: tc for tc in corpus.testcases}
+        entries = entries_index if entries_index is not None else {
+            tc["sha256"]: tc for tc in corpus.testcases}
         available = [sha for sha in shas if sha in entries]
         if not available:
             return fallback_bases[iteration % len(fallback_bases)]
@@ -404,7 +430,7 @@ class FuzzEngine:
             entries[value]["size"], value))
         session.coverage_selection_counts[sha] = \
             session.coverage_selection_counts.get(sha, 0) + 1
-        return self.corpus_store.read_bytes(corpus, sha)
+        return self._cached_input_bytes(corpus, sha, bytes_by_sha)
 
     def _features(self, target, data: bytes, result, session: FuzzSession):
         """Read optional adapter features without changing target semantics."""
@@ -426,6 +452,17 @@ class FuzzEngine:
         session.status = RUNNING
         corpus = self.corpus_store.get(session.corpus_id)
         bases = self._bases(session, corpus)
+        # Per-advance scheduling caches (#198): strictly scoped to this call
+        # (seeded here, discarded on return) so resume behavior is unchanged
+        # while per-case selection avoids repeated disk reads, hashing, and
+        # manifest scans.
+        bytes_by_sha: dict[str, bytes] = {}
+        fallback_shas = [sha256_bytes(data) for data in bases]
+        for sha, data in zip(fallback_shas, bases):
+            if sha not in bytes_by_sha:
+                bytes_by_sha[sha] = data
+        entries_index = {tc["sha256"]: tc for tc in corpus.testcases}
+        known_feature_set = set(session.coverage_features)
         target = targets.create(session.target)
         fmt = target.formats[0] if target.formats else target.kind
         struct_fn = target.structure_mutate
@@ -477,7 +514,10 @@ class FuzzEngine:
                 break
 
             i = session.cursor
-            base = self._select_base(session, corpus, bases, i, target)
+            base = self._select_base(session, corpus, bases, i, target,
+                                     bytes_by_sha=bytes_by_sha,
+                                     entries_index=entries_index,
+                                     fallback_shas=fallback_shas)
             mutated = None
             strategy = ""
             llm_note = ""
@@ -535,23 +575,28 @@ class FuzzEngine:
                 session.outcomes.get(result.outcome, 0) + 1
 
             features = self._features(target, mutated, result, session)
-            known_features = set(session.coverage_features)
             new_features = tuple(feature for feature in (features or ())
-                                 if feature not in known_features)
+                                 if feature not in known_feature_set)
             if new_features:
-                session.coverage_features = sorted(known_features | set(new_features))
+                known_feature_set.update(new_features)
+                session.coverage_features = sorted(known_feature_set)
                 session.cases_since_new_feature = 0
                 sha = sha256_bytes(mutated)
                 if sha not in session.coverage_retained_shas:
                     session.coverage_retained_shas.append(sha)
-                if self.corpus_store.add_bytes(
+                    bytes_by_sha.setdefault(sha, mutated)
+                added = self.corpus_store.add_bytes(
                         corpus, mutated, origin="mutation",
                         parent=sha256_bytes(base), mutation=strategy,
                         seed=session.seed, iteration=i,
                         coverage_features=features,
                         coverage_new_features=new_features,
-                        persist=False) is not None:
+                        persist=False)
+                if added is not None:
                     corpus_dirty = True
+                    # Keep the selection index fresh so the new entry is
+                    # selectable on the very next case of this advance().
+                    entries_index[added.sha256] = added.to_dict()
 
             if result.outcome == Outcome.ABNORMAL:
                 # Harness/tooling failures are operational evidence, not a
@@ -561,6 +606,7 @@ class FuzzEngine:
                 session.last_abnormal_detail = result.detail[:500]
 
             if result.outcome == Outcome.CRASH:
+                parent_sha = sha256_bytes(base)
                 signature = result.diagnostics.signature \
                     if result.diagnostics else "sig_none"
                 crash_id = make_id("crash", session.experiment_id, signature)
@@ -568,7 +614,7 @@ class FuzzEngine:
                 crash_counts[crash_id] = crash_counts.get(crash_id, 0) + 1
                 if crash_id not in crash_first:
                     crash_first[crash_id] = (mutated, result, {
-                        "parent_sha256": sha256_bytes(base),
+                        "parent_sha256": parent_sha,
                         "mutation": strategy, "seed": session.seed,
                         "iteration": i,
                         **({"origin": "llm-proposal",
@@ -579,11 +625,14 @@ class FuzzEngine:
                     session.crash_ids.append(crash_id)
                 # Preserve the crashing input in the corpus with lineage; defer
                 # the manifest write until the end of the batch.
-                if self.corpus_store.add_bytes(
+                added = self.corpus_store.add_bytes(
                         corpus, mutated, origin="mutation",
-                        parent=sha256_bytes(base), mutation=strategy,
-                        seed=session.seed, iteration=i, persist=False) is not None:
+                        parent=parent_sha, mutation=strategy,
+                        seed=session.seed, iteration=i, persist=False)
+                if added is not None:
                     corpus_dirty = True
+                    bytes_by_sha.setdefault(sha256_bytes(mutated), mutated)
+                    entries_index[added.sha256] = added.to_dict()
 
             session.cursor += 1
             if features is not None:
