@@ -1,0 +1,49 @@
+{
+  "_widening_note": "No supported widening exists for this environment, so the search space is unchanged. Evidence: crash_analysis.py:66-73 declares the complete knob set (sig_frames KNOB_INT 0..4, use_exception KNOB_BOOL, use_access KNOB_BOOL) and run() reads only these three config keys (crash_analysis.py:101-103), so any additional knob would be a phantom the env never consumes. sig_frames cannot go above 4 meaningfully: mock:parser crash stacks carry at most 3 frames (mock.py:95,102,109,116,123,136 symbol lists; diagnostics.py:61-62 builds one frame per symbol), so frames=4 already captures every stack and _signature slices defensively (crash_analysis.py:26-27). No similarity-threshold mechanism exists to expose: _signature composes exact-match string parts (crash_analysis.py:24-33). The collapse guardrails are kept byte-identical. Id intentionally NOT bumped (stays -v1): per the bump rule, a fresh knowledge base is warranted only when the search space changes; here it does not, so lineage with the existing -v1 KB is preserved.",
+  "id": "iosr-crash-deduplication-simulator-v1",
+  "objective": "Maximize accurate crash deduplication while minimizing false merges and false splits",
+  "environment": "ios_research_crash_analysis",
+  "primary_metric": "deduplication_f1",
+  "metrics": [
+    {"name": "deduplication_f1", "direction": "maximize", "unit": "ratio"},
+    {"name": "false_merge_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "false_split_rate", "direction": "minimize", "unit": "ratio"},
+    {"name": "analysis_latency_ms", "direction": "minimize", "unit": "ms"}
+  ],
+  "constraints": [
+    {
+      "metric": "false_merge_rate",
+      "op": "<=",
+      "value": 0.02,
+      "hard": true,
+      "description": "Distinct vulnerabilities must not be collapsed"
+    },
+    {
+      "metric": "false_split_rate",
+      "op": "<=",
+      "value": 0.05,
+      "hard": true,
+      "description": "Equivalent crashes should normally be grouped"
+    }
+  ],
+  "safety_rules": ["max-knobs:3"],
+  "budget": {
+    "max_experiments_per_batch": 6,
+    "max_parallel": 4,
+    "max_experiments_total": 60,
+    "max_cost_usd": 100.0,
+    "max_cost_usd_per_batch": 20.0
+  },
+  "search_space": {
+    "note": "Declarative mirror of the env knob domains; unchanged - the domain is fully enumerated and partially constraint-disqualified, not under-declared.",
+    "knobs": [
+      {"name": "sig_frames",    "kind": "int",  "low": 0, "high": 4, "step": 1, "previous_high": 4, "change": "none-supported"},
+      {"name": "use_exception", "kind": "bool", "values": [true, false], "change": "none-supported"},
+      {"name": "use_access",    "kind": "bool", "values": [true, false], "change": "none-supported"}
+    ],
+    "excluded": [
+      {"candidate": "similarity_threshold", "reason": "_signature has exact-match semantics over composed parts (crash_analysis.py:24-33); no threshold code path exists in the env to back such a knob."},
+      {"candidate": "collect budget (140 iterations, crash_analysis.py:91)", "reason": "Hard-coded in _collect; run() ignores unknown config keys, so declaring it would create an inert phantom knob."}
+    ]
+  }
+}
