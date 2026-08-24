@@ -33,6 +33,9 @@ def register(subparsers, parent) -> None:
     p_run.add_argument("--seed", type=int, default=0)
     p_run.add_argument("--max-cases", type=int, default=200)
     p_run.add_argument("--no-minimize", action="store_true")
+    p_run.add_argument("--workers", type=int, default=1,
+                       help="thread pool width for post-fuzz crash triage "
+                            "(default 1 = serial)")
     p_run.set_defaults(func=cmd_run)
 
     p_exp = sub.add_parser("experiment", parents=[parent],
@@ -82,7 +85,8 @@ def cmd_run(ctx, args) -> Result:
     from ..agent import Agent
     target = _resolve_target(ctx, args.target)
     data = Agent(ctx).run(target=target, seed=args.seed,
-                          max_cases=args.max_cases, minimize=not args.no_minimize)
+                          max_cases=args.max_cases,
+                          minimize=not args.no_minimize, workers=args.workers)
     return Result(command="agent run", data=data,
                   messages=[f"experiment {data['experiment_id']}: "
                             f"{data['unique_crashes']} unique crashes"])

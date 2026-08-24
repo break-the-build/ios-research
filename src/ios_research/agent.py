@@ -19,6 +19,7 @@ from .crashes import CrashStore
 from .devices import get as get_device
 from .experiment import ExperimentStore
 from .fuzz import FuzzEngine, DEFAULT_BASE
+from .parallel import TRIAGE_MINIMIZE_LOCK, map_ordered
 from .schema import build_cli_schema
 from .triage import Triage
 from . import targets
@@ -48,8 +49,13 @@ class Agent:
         return build_cli_schema()
 
     def run(self, *, target: str, seed: int, max_cases: int,
-            minimize: bool = True) -> dict[str, Any]:
-        """Bounded end-to-end pipeline: fuzz -> triage -> analyze -> summarize."""
+            minimize: bool = True, workers: int = 1) -> dict[str, Any]:
+        """Bounded end-to-end pipeline: fuzz -> triage -> analyze -> summarize.
+
+        ``workers`` fans the per-crash triage out over a thread pool (#200);
+        crash summaries are returned in ``session.crash_ids`` order for any
+        worker count, and ``workers <= 1`` runs the original serial loop.
+        """
         cfg = self.ctx.config()
         device = get_device(cfg.get("default_device"))
         exp = ExperimentStore(self.ws).create(
@@ -65,21 +71,25 @@ class Agent:
                                 strategy_weights=cfg.get("fuzz.strategy_weights"))
         session = engine.advance(session)
 
-        triage = Triage(self.ws)
-        analyzer = Analyzer(self.ws)
-        crash_summaries = []
-        for crash_id in session.crash_ids:
+        def triage_crash(crash_id: str) -> dict[str, Any]:
+            # Fresh store/triage/analyzer instances per item: they are cheap
+            # and are then never shared across threads (see parallel.py).
+            triage = Triage(self.ws)
+            analyzer = Analyzer(self.ws)
             crash = triage.crashes.get(crash_id)
             triage.reproduce(crash)
             if minimize:
-                triage.minimize(crash)
+                with TRIAGE_MINIMIZE_LOCK:
+                    triage.minimize(crash, workers=workers)
             analysis = analyzer.analyze(triage.crashes.get(crash_id))
-            crash_summaries.append({
+            return {
                 "crash_id": crash_id,
                 "classification": crash.classification,
                 "indicator": analysis.exploitability_classification,
                 "confidence": analysis.confidence,
-            })
+            }
+
+        crash_summaries = map_ordered(triage_crash, session.crash_ids, workers)
 
         return {
             "experiment_id": exp.id,
