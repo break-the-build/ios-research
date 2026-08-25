@@ -127,12 +127,20 @@ class Workspace:
         return self.root / name
 
     # -- json helpers ------------------------------------------------------
-    def write_json(self, rel: str, obj: Any) -> Path:
+    def write_json(self, rel: str, obj: Any, *, compact: bool = False) -> Path:
+        """Atomically write deterministic JSON.
+
+        Large, machine-owned manifests may opt into compact encoding. Human
+        authored records retain the indented default for reviewability.
+        """
         dest = self._contained(self.root / rel)
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._contained(
             dest.with_suffix(dest.suffix + ".tmp"))
-        tmp.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n",
+        rendered = json.dumps(
+            obj, sort_keys=True,
+            **({"separators": (",", ":")} if compact else {"indent": 2}))
+        tmp.write_text(rendered + "\n",
                        encoding="utf-8")
         os.replace(tmp, dest)  # atomic write to avoid artifact corruption
         return dest

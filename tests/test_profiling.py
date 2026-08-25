@@ -20,6 +20,7 @@ def test_profile_campaign_reports_required_stages():
     assert result["stages"]["mutation"]["calls"] == 20
     assert result["stages"]["target_execution"]["calls"] == 20
     assert result["stages"]["sanitizer_report_parsing"]["calls"] == 0
+    assert result["persistence_breakdown"]["input_writes"]["calls"] > 0
 
 
 def test_profile_campaign_rejects_non_mock_target():

@@ -25,5 +25,10 @@ decode time, sanitizer startup, and disk I/O should remain in their existing
 native/toolchain boundary unless their own measurements show a different
 bottleneck.
 
+`benchmark profile` also reports a persistence breakdown: input writes, corpus
+manifests, crash records, session checkpoints, and other metadata. Corpus
+manifests use compact deterministic JSON to reduce metadata serialization and
+I/O; this does not alter their data model or resume semantics.
+
 Any acceleration prototype must sit behind a stable interface and include
 parity, deterministic-output, and representative-workload comparison tests.
