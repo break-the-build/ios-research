@@ -70,22 +70,6 @@ def _wav(pcm: bytes = b"\x00\x00\x00\x00") -> bytes:
 
 _AIFF = (b"FORM" + struct.pack(">I", 4) + b"AIFF")
 
-# Tiny Annex-B elementary-stream fragments for the VideoToolbox target.  These
-# are deliberately self-contained fixtures, derived from the public H.264/AVC
-# and H.265/HEVC NAL-unit framing specifications: a four-byte start code plus
-# parameter-set / IDR headers and short payloads.  They are not complete media
-# files; keeping them small lets mutations exercise parameter-set parsing and
-# rejection paths without shipping third-party media samples.
-_H264_ANNEX_B = (
-    b"\x00\x00\x00\x01\x67\x42\x00\x1e\xf4\x0b\x04\xb2"
-    b"\x00\x00\x00\x01\x68\xce\x06\xe2"
-    b"\x00\x00\x00\x01\x65\x88\x84\x00")
-_HEVC_ANNEX_B = (
-    b"\x00\x00\x00\x01\x40\x01\x0c\x01\xff"
-    b"\x00\x00\x00\x01\x42\x01\x01\x01\x60"
-    b"\x00\x00\x00\x01\x44\x01\xc0\x73\xc0"
-    b"\x00\x00\x00\x01\x26\x01\xaf")
-
 def _sfnt(tables: list[tuple[bytes, bytes]], sfnt_version: bytes = b"\x00\x01\x00\x00") -> bytes:
     """Minimal TrueType/OpenType container with the given (tag, payload) tables."""
     head = struct.pack(">IIIIHHqqhhhhHHhhh",
@@ -116,7 +100,6 @@ def _sfnt(tables: list[tuple[bytes, bytes]], sfnt_version: bytes = b"\x00\x01\x0
 _SEEDS = {
     "imageio": [_PNG_1x1, _GIF_1x1, _BMP_2x2, _TIFF, _ICO],
     "audiotoolbox": [_wav(), _AIFF],
-    "videotoolbox": [_H264_ANNEX_B, _HEVC_ANNEX_B],
     "coregraphics": [_PNG_1x1, b"%PDF-1.4\n%%EOF\n", bytes(64)],
     "coretext": [
         _sfnt([]),                                        # bare valid sfnt
