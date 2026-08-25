@@ -75,6 +75,16 @@ def test_correlation_uses_researcher_timestamp(workspace, tmp_path, crash):
     assert isinstance(good["correlation"].get("delta_seconds"), float)
 
 
+def test_correlation_accepts_rfc3339_z_suffix_on_all_python_versions(
+        workspace, tmp_path, crash):
+    store = EvidenceStore(workspace)
+    log = tmp_path / "utc.log"
+    log.write_bytes(b"LOG")
+    item = store.import_file(crash.id, log, "syslog",
+                             captured_at="2026-08-01T12:00:00Z")
+    assert isinstance(item["correlation"].get("delta_seconds"), float)
+
+
 def test_unknown_kind_and_missing_file_rejected(workspace, tmp_path, crash):
     store = EvidenceStore(workspace)
     with pytest.raises(ValidationError):

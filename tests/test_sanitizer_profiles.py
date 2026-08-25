@@ -175,7 +175,11 @@ def test_session_rejects_unusable_profile_before_campaign(workspace):
     engine = FuzzEngine(workspace)
     import sys
     unsupported = "msan" if sys.platform == "darwin" else "nonexistent-x"
-    with pytest.raises(StateError):
+    # MSan is a known-but-unsupported profile on macOS (a state error). Linux
+    # supports it, so use an unknown profile there and assert its validation
+    # error instead; this keeps the test's fail-closed intent portable.
+    error = StateError if sys.platform == "darwin" else ValidationError
+    with pytest.raises(error):
         engine.create(
             experiment_id=exp.id, target="mock:parser",
             corpus_id=_corpus(workspace, "mock:parser"), seed=1, workers=1,

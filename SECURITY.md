@@ -71,3 +71,19 @@ The forbidden list is load-bearing. To keep it that way:
 Use this framework only against systems and targets you are authorized to test.
 Reports it generates are intended for responsible disclosure to the affected
 vendor (e.g. Apple Product Security).
+
+## Reporting framework vulnerabilities
+
+For a vulnerability in *ios-research itself*, use GitHub's private
+vulnerability-reporting flow for this repository rather than a public issue.
+Include the affected version/commit, a minimal reproduction, impact, and any
+mitigation already known. Do not include third-party target data, credentials,
+or unpublished findings. Maintainers aim to acknowledge a private report within
+seven days and will coordinate disclosure, remediation, and a release timeline
+with the reporter. Supported versions are the latest released version and the
+current `main` branch until a release support policy is expanded.
+
+Good-faith research conducted within this repository's published safety and
+authorization boundaries is welcome. The project will not seek legal action for
+such research; this does not authorize testing of systems or data owned by a
+third party.

@@ -1,0 +1,24 @@
+name: Reproducible research result
+description: Share a safe, authorized, reproducible framework result.
+labels: [documentation]
+body:
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and authorization
+      description: Do not name a private target or disclose an unpublished vulnerability.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction record
+      description: Commit, target class, toolchain, configuration, seed, corpus provenance, and redacted outputs.
+    validations:
+      required: true
+  - type: textarea
+    id: conclusion
+    attributes:
+      label: Observed result and appropriately scoped conclusion
+    validations:
+      required: true
