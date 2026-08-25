@@ -53,7 +53,7 @@ Every command supports `--json` for a stable, machine-readable envelope.
 | `nfc:{ndef,isodep,tagcmd}` | Mock NFC/NDEF record parsers sharing a defect model (bytes-only; no tag hardware access) |
 | `messaging:{sms,mime,link-preview}` | Mock communication-message parsers (network zero-click profiles #85); shared defect model (bytes-only; no messaging transport or network access) |
 | `lockeddevice:{lockdownd,mfi-auth,notification}` | Mock locked-device surface parsers (physical-access profiles #86); shared defect model (bytes-only; no device, accessory, or data access) |
-| `mac:{imageio,audiotoolbox,coregraphics}` | **Real** macOS in-process libFuzzer/ASan targets (`mock = False`); opt-in, require a built harness — see [docs/MAC-FUZZING.md](docs/MAC-FUZZING.md) |
+| `mac:{imageio,audiotoolbox,coregraphics,coretext,videotoolbox}` | **Real** macOS in-process libFuzzer/ASan targets (`mock = False`); opt-in, require a built harness — see [docs/MAC-FUZZING.md](docs/MAC-FUZZING.md) |
 | `ios-device:{file,imageio,audiotoolbox,coregraphics}` | **Real** black-box on-device targets (`mock = False`); stage an input to a USB-attached, *authorized* iPhone and harvest the resulting `.ips` crash log — **confirmation, not analysis**. Opt-in, require a connected device + `libimobiledevice` — see [docs/ON-DEVICE-TARGET.md](docs/ON-DEVICE-TARGET.md) |
 | `voiceassist:{siri-suggestion,callkit-intent}` | Mock lockscreen intent-record parsers (text-only; never activates audio input) |
 | `geo:{gpx,fit,geojson,tile-proto}` | Mock geodata/workout import parsers with range oracles (synthetic coords) |
@@ -67,6 +67,11 @@ Every command supports `--json` for a stable, machine-readable envelope.
 | `pq3:{handshake,rekey}` | Mock ratchet session-transcript parsers with epoch-ordering oracles (synthetic vectors only) |
 | `wifiaware:{publish,subscribe,datapath}` | Mock Wi-Fi Aware frame parsers sharing a defect model (bytes-only; no radio access) |
 | `netip:{mdns-record,dhcpv6-opt,icmp6-info,edns}` | Mock IP-stack input-path parsers sharing a defect model (bytes-only; no sockets) |
+| `jsc:semantic` | JavaScriptCore semantic fuzzing profile (mock executor by default; shell executor opt-in) |
+| `mach:sim` | XNU Mach `msg_send` boundary model with offline build/unpack tooling (no kernel calls) |
+
+`ios-research target list` is the authoritative, always-current inventory
+(71 targets at last count); the table above is the guided tour.
 
 New authorized research-device targets plug in behind the same interface — see
 [docs/RESEARCH-DEVICE.md](docs/RESEARCH-DEVICE.md). For real crashes without a
@@ -118,23 +123,29 @@ See [docs/CVE-REGRESSION.md](docs/CVE-REGRESSION.md).
 The full CLI is described in a machine-readable schema
 ([docs/cli-schema.json](docs/cli-schema.json), or `ios-research agent inspect`).
 After changing CLI registration, regenerate the committed schema with
-`ios-research agent schema`; the test suite verifies it remains current.
-See [AGENTS.md](AGENTS.md) for the operating contract and recommended workflow.
+`ios-research agent schema` and the human reference with
+`python tools/gen_cli_reference.py`; the test suite verifies both remain
+current. See [AGENTS.md](AGENTS.md) for the operating contract and recommended
+workflow.
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) / [FINAL_ARCHITECTURE.md](FINAL_ARCHITECTURE.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md) — layered design and module map
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · [GOVERNANCE.md](GOVERNANCE.md)
 - [ROADMAP.md](ROADMAP.md) · [CHANGELOG.md](CHANGELOG.md) · [docs/RELEASES.md](docs/RELEASES.md)
 - [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) · [docs/RESPONSIBLE-RESEARCH-STARTER.md](docs/RESPONSIBLE-RESEARCH-STARTER.md)
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — profiling and Rust acceleration criteria
 - [docs/PERFORMANCE-BASELINE.md](docs/PERFORMANCE-BASELINE.md) — current measured mock baseline
 - [Community Discussions](https://github.com/break-the-build/ios-research/discussions) · [docs/COMMUNITY-HEALTH.md](docs/COMMUNITY-HEALTH.md)
-- [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) — full command reference
+- [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) — full command reference (generated)
 - [SECURITY.md](SECURITY.md) / [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
 - [docs/CVE-REGRESSION.md](docs/CVE-REGRESSION.md) — patch-regression validation
 - [TEST_REPORT.md](TEST_REPORT.md) — test counts and branch coverage
-- [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/PHASE-STATUS.md](docs/PHASE-STATUS.md)
+- [docs/PHASE-STATUS.md](docs/PHASE-STATUS.md) — build-phase history
+- Research notes: [research/RESEARCH-LOG.md](research/RESEARCH-LOG.md),
+  [research/findings/](research/findings/),
+  [research/ATTACK-SURFACE-MAP.md](research/ATTACK-SURFACE-MAP.md),
+  [research/IOS-SECURITY-OVERVIEW.md](research/IOS-SECURITY-OVERVIEW.md)
 
 ## Development
 

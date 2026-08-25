@@ -1,16 +1,29 @@
 # Test Report
 
-Generated during phase 10 (final audit); refreshed after the security-hardening
-and detection/CVE change sets.
+Refreshed 2026-08-25 from a local run of the full suite (the original report
+was generated during the phase-10 final audit and has been updated as the
+suite grew).
 
 ## Summary
 
-- **Result:** 796 passed, 1 skipped
-- **Coverage:** ~89% across `ios_research` (52 test modules)
-- **Runner:** `pytest` (Python 3.14), deterministic via a frozen clock
+- **Result:** 1,691 tests across 110 test modules; full suite green in CI
+  (Ubuntu + macOS × Python 3.10/3.12, `-m "not native"`)
+- **Coverage:** ~89% (branch coverage enabled) across `ios_research`
+  (~15.3k statements); CI enforces a hard floor of 85%
+- **Runner:** `pytest` — deterministic via a frozen clock
+  (`IOS_RESEARCH_FROZEN_TIME`); native-harness tests are opt-in via the
+  `native` marker and require a real macOS toolchain
 - **Command:** `pytest --cov=ios_research --cov-report=term-missing`
 
+Known flake: `test_goals_bounty_coverage.py::TestPipelineLatencyEnv::test_more_stages_cost_more_time`
+compares wall-clock means of sub-second pipeline runs and can invert under
+heavy machine load.
+
 ## Test suites
+
+The repo carries 110 test modules covering every command group and target
+family (`pytest --collect-only -q | tail -1` for the live count). The original
+phase suites below are retained for history:
 
 | Suite | Focus |
 |-------|-------|
@@ -26,19 +39,13 @@ and detection/CVE change sets.
 | `test_research.py` | 12-stage orchestration, resume equivalence, resource limits, confirmation gate |
 | `test_integration_cli.py` | end-to-end CLI artifact chain + final-verification command sweep |
 | `test_regression.py` | replay regression corpus; known inputs still crash with recorded signature |
-| `test_mutation_weights.py` | configurable strategy weighting; byte-identical to uniform when unset |
-| `test_fuzz_throughput.py` | batched-persistence equivalence; memoized pool; crash-count batching |
-| `test_command_handlers.py` | CLI handlers (corpus/audio/agent/research/diff/report/config) via `main` |
-| `test_logging_output.py` | structured logging levels/redaction/file output; `Result` renderer |
-| `test_edge_paths.py` | context/report/fuzz error-handling and control-transition edge paths |
-| `test_detection.py` | YARA-style detection engine, built-in signature rules, detect CLI |
-| `test_cvereg.py` | CVE registry CRUD, deterministic validation pass/fail/skip, cve CLI |
-| `test_workspace_containment.py` | path-containment guard, id validation, symlink escape rejection |
-| `test_harness_isolation.py` | generated-harness candidates run in an isolated child process |
 
-*(The table above lists the original phase suites; the repo now carries 52
-test modules covering every command group and target family — run
-`pytest --collect-only -q | tail -1` for the live count.)*
+Later additions include suites for every mock target family (`test_<family>_module.py`),
+real-signal targets (`test_mac_target.py`, `test_device_target.py`), engine
+features (`test_directed.py`, `test_stateful*.py`, `test_fuzz_*.py`),
+platform tooling (`test_staticscan.py`, `test_xcode*.py`, `test_nday.py`,
+`test_srd.py`, `test_supply.py`, `test_races.py`), and documentation
+contract tests (`test_cli_reference.py`, schema-sync in `test_agent.py`).
 
 ## Test types
 
@@ -47,11 +54,9 @@ test modules covering every command group and target family — run
 - **End-to-end** — full artifact chain `experiment → crash → minimized →
   analysis → report`, and a complete `research run`.
 - **Regression** — regression-corpus replay guarding known crash behavior.
-- **Mutation-tested** — critical logic is verified by targeted mutation testing;
-  five real test gaps found and closed (config deep-merge, config-hash width,
-  differential regression direction, differential `differs` flag, report
-  empty-section validation). Safety-critical exploitability/validation logic has
-  no surviving mutants.
+- **Mutation-tested** — critical logic was verified by targeted mutation
+  testing during optimization rounds; eight real test gaps found and closed.
+  Safety-critical exploitability/validation logic has no surviving mutants.
 
 ## Determinism & resumability (explicitly tested)
 
@@ -68,3 +73,12 @@ and the manual CLI sweep during the audit): `--help`, `doctor`, `init`,
 `experiment create`, `corpus create`, `fuzz start`, `crash list`,
 `crash minimize`, `analyze`, `diff`, `report create`, `research run`,
 `research summarize`, `agent status`.
+
+## Documentation contract
+
+Two tests pin generated docs to the live CLI so they cannot drift silently:
+
+- `tests/test_cli_reference.py` — [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)
+  matches `python tools/gen_cli_reference.py --check`
+- `tests/test_agent.py::test_committed_cli_schema_matches_generator` —
+  [docs/cli-schema.json](docs/cli-schema.json) matches `build_cli_schema()`
