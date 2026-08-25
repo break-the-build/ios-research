@@ -122,10 +122,19 @@ class TestPipelineLatencyEnv:
             assert metric in obs.metrics
             assert obs.metrics[metric].n == 3
 
-    def test_more_stages_cost_more_time(self):
+    def test_full_config_executes_extra_stages(self):
+        # #275: "more stages" is asserted structurally, not by ordering
+        # sub-second wall-clock means (the ~1 ms inter-config delta sits an
+        # order of magnitude below run-to-run noise). The env records
+        # analysis_stage_seconds = 0.0 exactly when do_analyze is off and
+        # > 0 when it runs; stages_completed can only grow as knobs enable.
         env = get_environment("ios_research_pipeline_latency")
         minimal = env.run({}, samples=3, seed=4)
         full = env.run({"do_analyze": True, "do_reproduce": True,
                         "do_minimize": True}, samples=3, seed=4)
-        assert full.metrics["pipeline_total_seconds"].mean >= \
-            minimal.metrics["pipeline_total_seconds"].mean
+        assert minimal.metrics["analysis_stage_seconds"].mean == 0.0
+        assert full.metrics["analysis_stage_seconds"].mean > 0.0
+        # reproduce + minimize actually ran in the full configuration.
+        assert full.metrics["triage_stage_seconds"].mean > 0.0
+        assert full.metrics["stages_completed"].mean >= \
+            minimal.metrics["stages_completed"].mean
