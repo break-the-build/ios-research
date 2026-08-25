@@ -31,6 +31,45 @@ def _fresh_workspace(tmp_path, name) -> Workspace:
     return ws
 
 
+class _ResearchBareStub(Target):
+    """Adapter-less deterministic target: worker-count-invariant streams.
+
+    #199 makes the research fuzz stage honor configured workers, and with a
+    coverage-guided target different worker counts legitimately explore in a
+    different order (coverage feedback lag). This stub has no coverage
+    adapter, so the exact-equality assertions in the equivalence test below
+    keep their meaning for any worker count.
+    """
+
+    target_id = "test:research-bare"
+    kind = "parser"
+    description = "deterministic two-signature crash rule, no coverage hook"
+    formats = ("bin",)
+
+    def seeds(self):
+        return [b"R\x00\x01"]
+
+    def _run(self, data):
+        ff = data.count(b"\xff")
+        if ff >= 2:
+            d = diagnostics.build(data, "NULL_DEREFERENCE", "TestMod",
+                                  ["sym_a"])
+            return ExecResult(outcome=Outcome.CRASH, detail="c1",
+                              diagnostics=d)
+        if ff == 1:
+            d = diagnostics.build(data, "OUT_OF_BOUNDS_READ", "TestMod",
+                                  ["sym_b"])
+            return ExecResult(outcome=Outcome.CRASH, detail="c2",
+                              diagnostics=d)
+        return ExecResult(outcome=Outcome.REJECTED, detail="rej")
+
+
+@pytest.fixture(autouse=True)
+def _unregister_research_bare_stub():
+    yield
+    tgt._REGISTRY.pop(_ResearchBareStub.target_id, None)
+
+
 # --- map_ordered unit behavior ----------------------------------------------
 def test_map_ordered_single_and_empty_and_serial_paths():
     calls: list[int] = []
@@ -154,12 +193,13 @@ def test_agent_run_serial_default_is_unchanged(tmp_path):
 
 # --- research stages equivalence ---------------------------------------------
 def test_research_stages_workers_equivalence(tmp_path):
+    tgt.register(_ResearchBareStub.target_id, lambda: _ResearchBareStub())
     runs = []
     for workers in (1, 4):
         ws = _fresh_workspace(tmp_path, f"research-w{workers}")
         orch = ResearchOrchestrator(ws)
-        run = orch.create(name="r", target="mock:parser", seed=1,
-                          max_cases=200,
+        run = orch.create(name="r", target=_ResearchBareStub.target_id,
+                          seed=1, max_cases=200,
                           limits={"max_workers": workers})
         run = orch.run(run)
         assert run.status == COMPLETED
