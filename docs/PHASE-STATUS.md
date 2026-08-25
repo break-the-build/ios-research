@@ -27,7 +27,7 @@ generation, persistence, surveillance, or sandbox/TCC bypass is implemented.
 ## Experiment-Loop Optimization (2026-08-13)
 
 Autonomous optimization via the `experiment-loop` engine (see
-[EXPERIMENT-LOOP-RESULTS.md](EXPERIMENT-LOOP-RESULTS.md)).
+[EXPERIMENT-LOOP-RESULTS.md](archive/EXPERIMENT-LOOP-RESULTS.md)).
 
 Promotions (all merged):
 
@@ -51,4 +51,4 @@ efficiency & agent (cost↔thoroughness trade-offs).
 
 Environments: 9 `run(config, samples, seed)` bindings under
 `tools/experiment_loop/ios_env/` (loaded via `ios_research_env.py`). See
-[EXPERIMENT-LOOP-RESULTS.md](EXPERIMENT-LOOP-RESULTS.md) for full evidence.
+[EXPERIMENT-LOOP-RESULTS.md](archive/EXPERIMENT-LOOP-RESULTS.md) for full evidence.
