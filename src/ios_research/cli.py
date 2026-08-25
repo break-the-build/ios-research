@@ -35,6 +35,7 @@ from .commands import (
     sequence_cmd,
     xcode_cmd,
     campaign_cmd,
+    staticscan_cmd,
     suite_cmd,
     srd_cmd,
 )
@@ -96,6 +97,7 @@ _REGISTRARS: list[Callable] = [
     xcode_cmd.register,
     srd_cmd.register,
     campaign_cmd.register,
+    staticscan_cmd.register,
 ]
 
 
