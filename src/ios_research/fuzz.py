@@ -55,6 +55,22 @@ DEFAULT_BASE = b"MOCK" + bytes([1, 1]) + (2).to_bytes(2, "big") + b"ok"
 # real harness. Sessions persist the value, so resume behavior is identical.
 DEFAULT_MAX_INPUT_BYTES = 1_048_576
 
+
+def checkpoint_due(*, pending: bool, cases_since_flush: int, elapsed_s: float,
+                   checkpoint_cases: int, checkpoint_seconds: float) -> bool:
+    """Whether a periodic checkpoint should flush right now (#208).
+
+    A checkpoint only fires when there IS unflushed state. Either threshold
+    triggers it; a value of ``0`` disables that mechanism entirely.
+    """
+    if not pending:
+        return False
+    if checkpoint_cases and cases_since_flush >= checkpoint_cases:
+        return True
+    if checkpoint_seconds and elapsed_s >= checkpoint_seconds:
+        return True
+    return False
+
 RUNNING = "running"
 PAUSED = "paused"
 STOPPED = "stopped"
@@ -88,6 +104,8 @@ class FuzzSession:
     duration_s: float | None
     status: str = RUNNING
     window: int = 1
+    checkpoint_cases: int = 256
+    checkpoint_seconds: float = 30.0
     base_shas: list[str] = field(default_factory=list)
     strategy_weights: dict[str, int] = field(default_factory=dict)
     cursor: int = 0
@@ -222,6 +240,8 @@ class FuzzEngine:
     def create(self, *, experiment_id: str, target: str, corpus_id: str,
                seed: int, workers: int, max_cases: int,
                duration_s: float | None, window: int | None = None,
+               checkpoint_cases: int | None = None,
+               checkpoint_seconds: float | None = None,
                strategy_weights: dict[str, int] | None = None,
                dictionary_path: str | None = None,
                dictionary_tokens: list[DictionaryToken] | None = None,
@@ -289,6 +309,10 @@ class FuzzEngine:
             corpus_id=corpus_id, seed=seed, workers=workers,
             max_cases=max_cases, duration_s=duration_s,
             window=(max(1, int(window)) if window is not None else 1),
+            checkpoint_cases=(256 if checkpoint_cases is None
+                              else max(0, int(checkpoint_cases))),
+            checkpoint_seconds=(30.0 if checkpoint_seconds is None
+                                else max(0.0, float(checkpoint_seconds))),
             base_shas=base_shas,
             strategy_weights=dict(strategy_weights or {}),
             status=RUNNING, started_at=now, updated_at=now,
@@ -527,6 +551,24 @@ class FuzzEngine:
         crash_first: dict[str, tuple] = {}   # crash_id -> (data, result, lineage)
         corpus_dirty = False
 
+        # Periodic checkpoints (#208): flush the batched accumulators mid-run
+        # so a killed long run keeps its crash discoveries. Thresholds come
+        # from the session; 0 disables a mechanism. Early flushes reuse the
+        # exact end-of-call path and reset the accumulators, so records are
+        # identical and nothing double-counts.
+        ckpt_cases = int(session.checkpoint_cases)
+        ckpt_seconds = float(session.checkpoint_seconds)
+        cases_since_flush = 0
+        last_flush_at = time.monotonic()
+
+        def _checkpoint_due() -> bool:
+            return checkpoint_due(
+                pending=bool(crash_counts) or corpus_dirty,
+                cases_since_flush=cases_since_flush,
+                elapsed_s=time.monotonic() - last_flush_at,
+                checkpoint_cases=ckpt_cases,
+                checkpoint_seconds=ckpt_seconds)
+
         # Windowed generate -> execute -> reduce (#207/#199). A session with
         # workers=1 and window=1 keeps the serial executor and single-case
         # windows: byte-identical to the original strictly serial loop.
@@ -709,6 +751,20 @@ class FuzzEngine:
             consumed = len(pending) + skipped
             session.cursor += consumed
             executed_this += consumed
+            cases_since_flush += consumed
+
+            # Periodic checkpoint (#208): identical writes to the end-of-call
+            # flush, then reset accumulators so the final flush cannot
+            # double-count.
+            if _checkpoint_due():
+                if corpus_dirty:
+                    self.corpus_store.save(corpus)
+                    corpus_dirty = False
+                self._flush_crashes(session, fmt, crash_counts, crash_first)
+                crash_counts.clear()
+                crash_first.clear()
+                cases_since_flush = 0
+                last_flush_at = time.monotonic()
 
         # Flush batched corpus + crash state.
         if corpus_dirty:
