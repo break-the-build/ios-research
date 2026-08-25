@@ -15,9 +15,10 @@ suite grew).
   `native` marker and require a real macOS toolchain
 - **Command:** `pytest --cov=ios_research --cov-report=term-missing`
 
-Known flake: `test_goals_bounty_coverage.py::TestPipelineLatencyEnv::test_more_stages_cost_more_time`
-compares wall-clock means of sub-second pipeline runs and can invert under
-heavy machine load.
+Timing-sensitive behaviors are asserted structurally, not by wall-clock
+comparison: fan-out via observed peak concurrency
+(`test_parallel.py`, `test_crash_triage.py`; #274) and pipeline stage
+coverage via per-stage metrics (`test_goals_bounty_coverage.py`; #275).
 
 ## Test suites
 
