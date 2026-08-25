@@ -161,6 +161,14 @@
                 "required": false
               },
               {
+                "dest": "distill_corpus",
+                "flags": [
+                  "--distill-corpus"
+                ],
+                "help": "after triage completes, distill the pipeline corpus to one representative per distinct behavior; runs between sessions, never mid-advance (deterministic)",
+                "required": false
+              },
+              {
                 "dest": "workers",
                 "flags": [
                   "--workers"

@@ -33,6 +33,11 @@ def register(subparsers, parent) -> None:
     p_run.add_argument("--seed", type=int, default=0)
     p_run.add_argument("--max-cases", type=int, default=200)
     p_run.add_argument("--no-minimize", action="store_true")
+    p_run.add_argument("--distill-corpus", action="store_true",
+                       help="after triage completes, distill the pipeline "
+                            "corpus to one representative per distinct "
+                            "behavior; runs between sessions, never "
+                            "mid-advance (deterministic)")
     p_run.add_argument("--workers", type=int, default=1,
                        help="thread pool width for post-fuzz crash triage "
                             "(default 1 = serial)")
@@ -86,7 +91,8 @@ def cmd_run(ctx, args) -> Result:
     target = _resolve_target(ctx, args.target)
     data = Agent(ctx).run(target=target, seed=args.seed,
                           max_cases=args.max_cases,
-                          minimize=not args.no_minimize, workers=args.workers)
+                          minimize=not args.no_minimize, workers=args.workers,
+                          distill_corpus=args.distill_corpus)
     return Result(command="agent run", data=data,
                   messages=[f"experiment {data['experiment_id']}: "
                             f"{data['unique_crashes']} unique crashes"])

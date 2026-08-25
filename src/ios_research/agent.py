@@ -49,12 +49,18 @@ class Agent:
         return build_cli_schema()
 
     def run(self, *, target: str, seed: int, max_cases: int,
-            minimize: bool = True, workers: int = 1) -> dict[str, Any]:
+            minimize: bool = True, workers: int = 1,
+            distill_corpus: bool = False) -> dict[str, Any]:
         """Bounded end-to-end pipeline: fuzz -> triage -> analyze -> summarize.
 
         ``workers`` fans the per-crash triage out over a thread pool (#200);
         crash summaries are returned in ``session.crash_ids`` order for any
         worker count, and ``workers <= 1`` runs the original serial loop.
+
+        With ``distill_corpus=True`` (opt-in, #206) the pipeline corpus is
+        distilled *after* triage completes — never mid-advance — so session
+        selection stays deterministic; the result gains a
+        ``corpus_distillation`` summary.
         """
         cfg = self.ctx.config()
         device = get_device(cfg.get("default_device"))
@@ -91,12 +97,47 @@ class Agent:
 
         crash_summaries = map_ordered(triage_crash, session.crash_ids, workers)
 
-        return {
+        result: dict[str, Any] = {
             "experiment_id": exp.id,
             "fuzz": session.stats(),
             "unique_crashes": session.unique_crashes,
             "crashes": crash_summaries,
         }
+        if distill_corpus:
+            result["corpus_distillation"] = self._distill_pipeline_corpus(
+                target)
+        return result
+
+    def _distill_pipeline_corpus(self, target: str) -> dict[str, Any]:
+        """Distill the ``agent-{target}`` pipeline corpus (issue #206).
+
+        Runs strictly after fuzz/triage so it never perturbs a running
+        session. Regression-origin entries are captured before minimization
+        and re-added verbatim (same bytes, ``origin="regression"``, original
+        parent sha) if minimization would drop them, preserving crash
+        regression history.
+        """
+        store = CorpusStore(self.ws)
+        # The engine loads its own Corpus instance during advance(); fetch a
+        # fresh copy so ``before`` reflects everything this run just added.
+        corpus = store.get(self._pipeline_corpus(target).id)
+        before = len(corpus.testcases)
+        regressions = [
+            (tc["sha256"], store.read_bytes(corpus, tc["sha256"]),
+             tc.get("parent"))
+            for tc in list(corpus.testcases)
+            if tc.get("origin") == "regression"]
+        stats = store.minimize(corpus, targets.create(target))
+        present = corpus.shas
+        for sha, data, parent in regressions:
+            if sha in present:
+                continue
+            store.add_bytes(corpus, data, origin="regression", parent=parent)
+            present.add(sha)
+        return {"ran": True, "before": before,
+                "after": len(corpus.testcases),
+                "kept_features": stats["coverage_features"],
+                "behaviors": stats["behaviors"]}
 
     def analyze(self) -> dict[str, Any]:
         analyses = Analyzer(self.ws).analyze_batch()
