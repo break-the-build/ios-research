@@ -66,7 +66,7 @@ search — test-suite coverage (01/02), CLI reliability/performance (03/04),
 reproduction rate (10), reporting (17), security (19), documentation (20), and
 the framework reliability / experiment reproducibility variants (16/18) — are
 intentionally omitted; there is no honest knob→metric gradient to optimize. See
-`docs/EXPERIMENT-LOOP-RESULTS.md` for the rationale.
+`docs/archive/EXPERIMENT-LOOP-RESULTS.md` for the rationale.
 
 ## Goal-file note
 
