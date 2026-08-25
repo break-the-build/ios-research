@@ -87,6 +87,17 @@ def adapted_weights(current: dict[str, int], stats: dict[str, dict],
     return out
 
 
+def focus_phase_index(cursor: int, phase_len: int, count: int) -> int:
+    """Deterministic focus-symbol rotation for multi-focus sessions (#205).
+
+    The active symbol advances every ``phase_len`` executed cases; with a
+    single symbol (or ``phase_len`` <= 0) the index is always 0.
+    """
+    if count <= 1 or phase_len <= 0:
+        return 0
+    return (max(0, cursor) // phase_len) % count
+
+
 def checkpoint_due(*, pending: bool, cases_since_flush: int, elapsed_s: float,
                    checkpoint_cases: int, checkpoint_seconds: float) -> bool:
     """Whether a periodic checkpoint should flush right now (#208).
@@ -144,6 +155,8 @@ class FuzzSession:
     strategy_adapt_every: int = 512
     cases_since_adapt: int = 0
     strategy_yield: dict = field(default_factory=dict)
+    focus_symbols: list[str] = field(default_factory=list)
+    focus_phase_len: int = 512
     base_shas: list[str] = field(default_factory=list)
     strategy_weights: dict[str, int] = field(default_factory=dict)
     cursor: int = 0
@@ -284,6 +297,8 @@ class FuzzEngine:
                skip_duplicates: bool = False,
                adapt_strategies: bool = False,
                strategy_adapt_every: int | None = None,
+               focus_symbols: list[str] | None = None,
+               focus_phase_len: int | None = None,
                strategy_weights: dict[str, int] | None = None,
                dictionary_path: str | None = None,
                dictionary_tokens: list[DictionaryToken] | None = None,
@@ -359,6 +374,9 @@ class FuzzEngine:
             adapt_strategies=bool(adapt_strategies),
             strategy_adapt_every=(512 if strategy_adapt_every is None
                                   else max(1, int(strategy_adapt_every))),
+            focus_symbols=[str(x) for x in (focus_symbols or []) if str(x)],
+            focus_phase_len=(512 if focus_phase_len is None
+                             else max(1, int(focus_phase_len))),
             base_shas=base_shas,
             strategy_weights=dict(strategy_weights or {}),
             status=RUNNING, started_at=now, updated_at=now,
@@ -412,6 +430,27 @@ class FuzzEngine:
         except Exception:  # optional guidance must never break a campaign
             session.focus_distances = {}
 
+    def _focus_tables(self, session: FuzzSession, target) -> dict:
+        """Per-symbol distance tables for multi-focus rotation (#205).
+
+        Computed fresh at advance() start — pure function of the target's
+        callgraph, so resume determinism never depends on persisting them.
+        Empty when the target lacks a usable callgraph hook.
+        """
+        graph_doc = getattr(target, "callgraph", None)
+        if not callable(graph_doc):
+            return {}
+        try:
+            doc = graph_doc()
+            if not doc:
+                return {}
+            from .directed import load_callgraph, target_distances
+            graph = load_callgraph(doc)
+            return {symbol: target_distances(graph, {symbol})
+                    for symbol in session.focus_symbols}
+        except Exception:  # optional guidance must never break a campaign
+            return {}
+
     def _focus_entry_distances(self, session: FuzzSession,
                                pairs: list[tuple[str, bytes]], target) -> dict:
         """Map corpus entries to call-graph distances via the target hook.
@@ -458,7 +497,8 @@ class FuzzEngine:
                      target=None, *,
                      bytes_by_sha: dict[str, bytes] | None = None,
                      entries_index: dict[str, dict] | None = None,
-                     fallback_shas: list[str] | None = None) -> bytes:
+                     fallback_shas: list[str] | None = None,
+                     focus_distances_override: dict | None = None) -> bytes:
         """Select a coverage corpus entry deterministically when available.
 
         ``bytes_by_sha``, ``entries_index``, and ``fallback_shas`` are optional
@@ -466,7 +506,10 @@ class FuzzEngine:
         (direct callers, tests) each is computed locally with identical
         results.
         """
-        if session.focus_distances and fallback_bases:
+        distances = (focus_distances_override
+                     if focus_distances_override is not None
+                     else session.focus_distances)
+        if distances and fallback_bases:
             # Directed scheduling applies on both the coverage and fallback
             # paths (#73): weight each candidate by the distance of the
             # symbol its input exercises (via the target hook).
@@ -487,8 +530,24 @@ class FuzzEngine:
                         seen.add(sha)
                         pairs.append((sha, self._cached_input_bytes(
                             corpus, sha, bytes_by_sha)))
-            entry_distances = self._focus_entry_distances(session, pairs,
-                                                          target)
+            if focus_distances_override is not None:
+                # Multi-focus (#205): per-symbol tables make the persisted
+                # sha->distance cache ambiguous, so map fresh per window.
+                symbol_for = getattr(target, "focus_symbol_for", None)
+                entry_distances = {}
+                for sha, data in pairs:
+                    distance = None
+                    if callable(symbol_for):
+                        try:
+                            symbol = symbol_for(data)
+                        except Exception:
+                            symbol = None
+                        if symbol is not None:
+                            distance = distances.get(symbol)
+                    entry_distances[sha] = distance
+            else:
+                entry_distances = self._focus_entry_distances(session, pairs,
+                                                              target)
             candidates = [(sha, entry_distances.get(sha)) for sha, _ in pairs]
             sha = weighted_selection(candidates, session.focus_counts)
             session.focus_counts[sha] = \
@@ -559,6 +618,9 @@ class FuzzEngine:
         fmt = target.formats[0] if target.formats else target.kind
         struct_fn = target.structure_mutate
         self._ensure_focus_distances(session, target)
+        focus_tables: dict = {}
+        if session.focus_symbols:
+            focus_tables = self._focus_tables(session, target)
         tokens = self.tokens_for(session)
         strategies: tuple[str, ...] = mutation.STRATEGIES
         if tokens:
@@ -667,6 +729,16 @@ class FuzzEngine:
             if max_new is not None:
                 budget = min(budget, max_new - executed_this)
 
+            # Multi-focus rotation (#205): the active symbol advances every
+            # focus_phase_len executed cases; selection within this window
+            # uses that symbol's distance table.
+            active_focus = None
+            if focus_tables:
+                symbol = session.focus_symbols[focus_phase_index(
+                    session.cursor, session.focus_phase_len,
+                    len(session.focus_symbols))]
+                active_focus = focus_tables.get(symbol)
+
             # --- generation (serial, index order) --------------------------
             # Each entry carries its generation context so reduction can apply
             # the existing bookkeeping verbatim: (index, base, input, strategy,
@@ -679,7 +751,8 @@ class FuzzEngine:
                 base = self._select_base(session, corpus, bases, i, target,
                                          bytes_by_sha=bytes_by_sha,
                                          entries_index=entries_index,
-                                         fallback_shas=fallback_shas)
+                                         fallback_shas=fallback_shas,
+                                         focus_distances_override=active_focus)
                 mutated = None
                 strategy = ""
                 llm_note = ""
