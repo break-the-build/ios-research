@@ -127,6 +127,8 @@ See [AGENTS.md](AGENTS.md) for the operating contract and recommended workflow.
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · [GOVERNANCE.md](GOVERNANCE.md)
 - [ROADMAP.md](ROADMAP.md) · [CHANGELOG.md](CHANGELOG.md) · [docs/RELEASES.md](docs/RELEASES.md)
 - [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) · [docs/RESPONSIBLE-RESEARCH-STARTER.md](docs/RESPONSIBLE-RESEARCH-STARTER.md)
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — profiling and Rust acceleration criteria
+- [docs/PERFORMANCE-BASELINE.md](docs/PERFORMANCE-BASELINE.md) — current measured mock baseline
 - [Community Discussions](https://github.com/break-the-build/ios-research/discussions) · [docs/COMMUNITY-HEALTH.md](docs/COMMUNITY-HEALTH.md)
 - [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) — full command reference
 - [SECURITY.md](SECURITY.md) / [SECURITY_AUDIT.md](SECURITY_AUDIT.md)

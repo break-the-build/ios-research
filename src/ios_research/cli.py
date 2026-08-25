@@ -38,6 +38,7 @@ from .commands import (
     staticscan_cmd,
     suite_cmd,
     srd_cmd,
+    benchmark_cmd,
 )
 
 _REGISTRARS: list[Callable] = [
@@ -98,6 +99,7 @@ _REGISTRARS: list[Callable] = [
     srd_cmd.register,
     campaign_cmd.register,
     staticscan_cmd.register,
+    benchmark_cmd.register,
 ]
 
 
