@@ -849,7 +849,14 @@ typedef CFTypeRef CTFontDescriptorRef;
 typedef CFTypeRef CTFontRef;
 typedef CFTypeRef CFArrayRef;
 typedef CFTypeRef CGPathRef;
-typedef struct { float a, b, c, d, tx, ty; } IOSR_CGAffineTransform;
+typedef CFTypeRef CGMutablePathRef;
+typedef CFTypeRef CTFramesetterRef;
+typedef CFTypeRef CTFrameRef;
+/* CGAffineTransform fields are CGFloat (double on arm64) — a float struct
+ * would be read past by the framework (48-byte ABI, 24-byte object). */
+typedef struct { double a, b, c, d, tx, ty; } IOSR_CGAffineTransform;
+typedef struct { double x, y, w, h; } IOSR_CGRect;
+typedef struct { long loc, len; } IOSR_CFRange;
 
 static CFArrayRef (*p_CTFontManagerCreateFontDescriptorsFromData)(CFDataRef) = NULL;
 static CTFontRef (*p_CTFontCreateWithFontDescriptor)(CTFontDescriptorRef,
@@ -867,9 +874,26 @@ typedef CFTypeRef CTLineRef;
 typedef const struct __CFString *CFStringRef;
 static CFAttributedStringRef (*p_CFAttributedStringCreate)(void *, CFStringRef, CFDictionaryRef) = NULL;
 static CTLineRef (*p_CTLineCreateWithAttributedString)(CFTypeRef) = NULL;
-static CFMutableDictionaryRef (*p_CFDictionaryCreateMutable)(void *, long) = NULL;
+static CTFramesetterRef (*p_CTFramesetterCreateWithAttributedString)(
+    CFAttributedStringRef) = NULL;
+/* CTFramesetterCreateFrame takes FOUR args (framesetter, stringRange, path,
+ * frameAttributes) — omitting the last reads it from garbage. */
+static CTFrameRef (*p_CTFramesetterCreateFrame)(CTFramesetterRef,
+                                                const IOSR_CFRange *,
+                                                CGPathRef, void *) = NULL;
+static CGMutablePathRef (*p_CGPathCreateMutable)(void) = NULL;
+static void (*p_CGPathAddRect)(CGMutablePathRef, const IOSR_CGAffineTransform *,
+                               IOSR_CGRect) = NULL;
+/* CFDictionaryCreateMutable takes FOUR args (allocator, capacity,
+ * keyCallbacks, valueCallbacks); use the real kCFType callback structs
+ * resolved by dlsym instead of letting the framework read them from garbage
+ * (observed as an objc BUS inside TAttributes::ApplyFont during shaping). */
+static CFMutableDictionaryRef (*p_CFDictionaryCreateMutable)(
+    void *, long, const void *, const void *) = NULL;
 static void (*p_CFDictionarySetValue)(CFMutableDictionaryRef, const void *, const void *) = NULL;static CFStringRef (*p_CFStringCreateWithCString)(void *, const char *, unsigned int) = NULL;
 static CFStringRef p_kCTFontAttributeName = NULL;
+static const void *p_kCFTypeDictionaryKeyCallBacks = NULL;
+static const void *p_kCFTypeDictionaryValueCallBacks = NULL;
 
 /* Shape an attributed line through the layout engine - drives feature-driven
  * glyph substitution (morx/GSUB) and cluster mapping, not merely outline
@@ -879,13 +903,17 @@ static CFStringRef p_kCTFontAttributeName = NULL;
 static int shape_line(CTFontRef font) {
     if (!p_CFAttributedStringCreate || !p_CTLineCreateWithAttributedString
         || !p_CFDictionaryCreateMutable || !p_CFDictionarySetValue
-        || !p_CFStringCreateWithCString || !p_kCTFontAttributeName)
+        || !p_CFStringCreateWithCString || !p_kCTFontAttributeName
+        || !p_kCFTypeDictionaryKeyCallBacks
+        || !p_kCFTypeDictionaryValueCallBacks)
         return 0;
     CFStringRef text = p_CFStringCreateWithCString(
         NULL, "AgQyffiW10", 0x00000600 /* kCFStringEncodingUTF8 */);
     if (!text) return 0;
     int shaped = 0;
-    CFMutableDictionaryRef dict = p_CFDictionaryCreateMutable(NULL, 1);
+    CFMutableDictionaryRef dict = p_CFDictionaryCreateMutable(
+        NULL, 1, p_kCFTypeDictionaryKeyCallBacks,
+        p_kCFTypeDictionaryValueCallBacks);
     if (dict) {
         p_CFDictionarySetValue(dict, p_kCTFontAttributeName,
                                (const void *)font);
@@ -893,6 +921,28 @@ static int shape_line(CTFontRef font) {
         if (as) {
             CTLineRef line = p_CTLineCreateWithAttributedString(as);
             if (line) { p_CFRelease(line); shaped = 1; }
+            /* Full typesetting (#228 §2): framesetter lays the string into a
+             * frame path — line-breaking, alignment, per-line glyph runs over
+             * the parsed font, not merely descriptor parse. */
+            if (p_CTFramesetterCreateWithAttributedString
+                && p_CTFramesetterCreateFrame && p_CGPathCreateMutable
+                && p_CGPathAddRect && p_CGPathRelease) {
+                CTFramesetterRef fs =
+                    p_CTFramesetterCreateWithAttributedString(as);
+                if (fs) {
+                    CGMutablePathRef path = p_CGPathCreateMutable();
+                    if (path) {
+                        IOSR_CGRect bounds = {0, 0, 200, 200};
+                        p_CGPathAddRect(path, NULL, bounds);
+                        IOSR_CFRange all = {0, 0};   /* whole string */
+                        CTFrameRef frame =
+                            p_CTFramesetterCreateFrame(fs, &all, path, NULL);
+                        if (frame) { p_CFRelease(frame); shaped = 1; }
+                        p_CGPathRelease(path);
+                    }
+                    p_CFRelease(fs);
+                }
+            }
             p_CFRelease(as);
         }
         p_CFRelease(dict);
@@ -921,12 +971,27 @@ static int resolve_target(void) {
     p_CFArrayGetCount = dlsym(cf_handle, "CFArrayGetCount");
     p_CFArrayGetValueAtIndex = dlsym(cf_handle, "CFArrayGetValueAtIndex");
     p_CGPathRelease = dlsym(cg, "CGPathRelease");
+    p_CGPathCreateMutable = dlsym(cg, "CGPathCreateMutable");
+    p_CGPathAddRect = dlsym(cg, "CGPathAddRect");
     p_CFAttributedStringCreate = dlsym(cf_handle, "CFAttributedStringCreate");
     p_CTLineCreateWithAttributedString = dlsym(fw_handle, "CTLineCreateWithAttributedString");
+    p_CTFramesetterCreateWithAttributedString = dlsym(
+        fw_handle, "CTFramesetterCreateWithAttributedString");
+    p_CTFramesetterCreateFrame = dlsym(fw_handle, "CTFramesetterCreateFrame");
     p_CFDictionaryCreateMutable = dlsym(cf_handle, "CFDictionaryCreateMutable");
     p_CFDictionarySetValue = dlsym(cf_handle, "CFDictionarySetValue");
     p_CFStringCreateWithCString = dlsym(cf_handle, "CFStringCreateWithCString");
+    p_kCFTypeDictionaryKeyCallBacks =
+        dlsym(cf_handle, "kCFTypeDictionaryKeyCallBacks");
+    p_kCFTypeDictionaryValueCallBacks =
+        dlsym(cf_handle, "kCFTypeDictionaryValueCallBacks");
     p_kCTFontAttributeName = (CFStringRef)dlsym(fw_handle, "kCTFontAttributeName");
+    /* kCTFontAttributeName is an exported GLOBAL holding a CFStringRef;
+     * dlsym yields its address, so deref to get the actual string. Passing
+     * the address itself as the dictionary key hands CoreText a non-object
+     * (objc BUS inside __setObject:forKey: class realization). */
+    if (p_kCTFontAttributeName)
+        p_kCTFontAttributeName = *(CFStringRef *)p_kCTFontAttributeName;
     return p_CTFontManagerCreateFontDescriptorsFromData
         && p_CTFontCreateWithFontDescriptor && p_CTFontGetGlyphsForCharacters
         && p_CTFontCreatePathForGlyph && p_CFArrayGetCount

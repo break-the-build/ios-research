@@ -126,7 +126,39 @@ _SEEDS = {
 
 
 def seeds(key: str) -> list[bytes]:
+    if key == "coretext":
+        # The static sfnt stubs are rejected by CoreText's descriptor parser,
+        # so campaigns would never reach the shaping engine. Augment with one
+        # real system font when available (host-side corpus prep only; CI and
+        # non-mac hosts deterministically fall back to the stubs).
+        font = _system_font_seed()
+        if font is not None:
+            return list(_SEEDS["coretext"]) + [font]
     return list(_SEEDS.get(key, []))
+
+
+def _system_font_seed() -> bytes | None:
+    """Smallest bundled system font, as raw bytes. Deterministic pick
+    (size-then-path sorted), capped at 512 KB; None when unavailable."""
+    import glob
+    import os
+
+    cands: list[str] = []
+    for pat in ("/System/Library/Fonts/*.ttf",
+                "/System/Library/Fonts/*/*.ttf",
+                "/System/Library/Fonts/*.ttc"):
+        cands.extend(glob.glob(pat))
+    for path in sorted(cands, key=lambda p: (os.path.getsize(p), p)):
+        try:
+            if os.path.getsize(path) > 512 * 1024:
+                continue
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            continue
+        if data[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf"):
+            return data
+    return None
 
 
 # --- structure-aware mutation ----------------------------------------------
