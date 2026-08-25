@@ -256,6 +256,51 @@
         ]
       }
     },
+    "benchmark": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "profile": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "mock target to profile (default: mock:parser)",
+                "required": false
+              },
+              {
+                "dest": "max_cases",
+                "flags": [
+                  "--max-cases"
+                ],
+                "help": "bounded fuzz cases (default: 1000)",
+                "required": false
+              },
+              {
+                "dest": "seed",
+                "flags": [
+                  "--seed"
+                ],
+                "help": "deterministic mutation seed (default: 0)",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        }
+      }
+    },
     "beta": {
       "arguments": {
         "options": [],
