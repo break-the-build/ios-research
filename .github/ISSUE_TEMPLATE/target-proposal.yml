@@ -1,0 +1,26 @@
+name: Authorized target proposal
+description: Propose a safe, authorized research target or target improvement.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "Never post private target data, exploit details, or instructions for unauthorized testing."
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Target and research value
+    validations:
+      required: true
+  - type: textarea
+    id: authorization
+    attributes:
+      label: Authorization and safety model
+      description: State why the target is mock, local, or explicitly authorized.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Test and documentation plan
+    validations:
+      required: true

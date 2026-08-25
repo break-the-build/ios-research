@@ -19,6 +19,7 @@ ios-research --help
 ```bash
 pytest                 # full suite
 pytest --cov=ios_research --cov-report=term-missing
+pytest tests/test_agent.py          # focused development loop
 ```
 
 Tests run against a temporary workspace with a frozen clock
@@ -39,3 +40,15 @@ Tests run against a temporary workspace with a frozen clock
 ## Commit style
 
 Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.
+
+## First contribution
+
+Start with an issue labelled `good first issue` or `help wanted`, leave a
+comment describing the intended approach, then make a focused pull request.
+For a safe local walkthrough, run the mock-target flow in
+[docs/RESPONSIBLE-RESEARCH-STARTER.md](docs/RESPONSIBLE-RESEARCH-STARTER.md).
+The project architecture is organized around `commands/` (CLI groups),
+`targets/` (target adapters), and persistent campaign/workspace modules.
+
+See [GOVERNANCE.md](GOVERNANCE.md) for review expectations, the safety-boundary
+approval rules, and how substantial proposals are prioritized.

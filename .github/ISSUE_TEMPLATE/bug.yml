@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible framework defect.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include credentials, private target data, or unpublished vulnerability details. Use private vulnerability reporting for sensitive framework security reports."
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include a mock or authorized target, exact command, and expected versus actual result.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Framework version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, and relevant toolchain version.
