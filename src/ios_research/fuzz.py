@@ -25,6 +25,7 @@ from .crashes import CrashStore
 from .dictionary import (DictionaryToken, load_dictionary, tokens_from_records,
                          tokens_to_records)
 from .errors import NotFoundError, StateError
+from .executors import SerialExecutor
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
@@ -505,6 +506,15 @@ class FuzzEngine:
         crash_first: dict[str, tuple] = {}   # crash_id -> (data, result, lineage)
         corpus_dirty = False
 
+        # Windowed generate -> execute -> reduce (#207). The default single-case
+        # window with the serial executor reproduces the original strictly
+        # serial loop exactly: case i is generated, executed, and fully reduced
+        # before case i+1 is generated. Wider windows and the threaded batch
+        # executor are wired up by #199; generation and reduction always stay
+        # on this thread in index order, so session state evolves identically.
+        window_size = 1
+        executor = SerialExecutor(target)
+
         while session.cursor < session.max_cases:
             if max_new is not None and executed_this >= max_new:
                 session.status = PAUSED
@@ -512,132 +522,163 @@ class FuzzEngine:
             if deadline is not None and time.monotonic() >= deadline:
                 session.status = PAUSED
                 break
+            # Never dispatch a window past the remaining case budget (#199):
+            # the final window may be partial, but never oversized, so pause/
+            # resume stays exact at the boundaries.
+            budget = session.max_cases - session.cursor
+            if max_new is not None:
+                budget = min(budget, max_new - executed_this)
 
+            # --- generation (serial, index order) --------------------------
+            # Each entry carries its generation context so reduction can apply
+            # the existing bookkeeping verbatim: (index, base, input, strategy,
+            # llm_note). Oversize skips are resolved HERE — counted and charged
+            # to the budget, they never occupy an executor slot (#199).
+            pending: list[tuple[int, bytes, bytes, str, str]] = []
+            skipped = 0
             i = session.cursor
-            base = self._select_base(session, corpus, bases, i, target,
-                                     bytes_by_sha=bytes_by_sha,
-                                     entries_index=entries_index,
-                                     fallback_shas=fallback_shas)
-            mutated = None
-            strategy = ""
-            llm_note = ""
-            if llm_active and not llm_exhausted and \
-                    session.llm_stats["proposals_used"] < session.llm_budget:
-                from .llmmutate import (validate_proposal_bytes,
-                                        repair_with_target)
-                try:
-                    next_line, proposal = next(llm_iter)  # type: ignore[union-attr]
-                except StopIteration:
-                    llm_exhausted = True
-                else:
-                    session.llm_cursor = next_line
-                    if proposal is None:
-                        session.llm_stats["proposals_invalid"] += 1
+            for _ in range(max(0, min(window_size, budget))):
+                base = self._select_base(session, corpus, bases, i, target,
+                                         bytes_by_sha=bytes_by_sha,
+                                         entries_index=entries_index,
+                                         fallback_shas=fallback_shas)
+                mutated = None
+                strategy = ""
+                llm_note = ""
+                if llm_active and not llm_exhausted and \
+                        session.llm_stats["proposals_used"] < session.llm_budget:
+                    from .llmmutate import (validate_proposal_bytes,
+                                            repair_with_target)
+                    try:
+                        next_line, proposal = next(llm_iter)  # type: ignore[union-attr]
+                    except StopIteration:
+                        llm_exhausted = True
                     else:
-                        decoded = validate_proposal_bytes(proposal.data)
-                        if decoded is None:
+                        session.llm_cursor = next_line
+                        if proposal is None:
                             session.llm_stats["proposals_invalid"] += 1
                         else:
-                            mutated = repair_with_target(decoded, target)
-                            strategy = "llm-proposal"
-                            llm_note = proposal.note
-                            session.llm_stats["proposals_used"] += 1
-            if mutated is None and llm_active:
-                session.llm_stats["fallback_iterations"] += 1
-            if plugin_host is not None and plugin_host.plugins:
-                rng = mutation.rng_for(session.seed, i)
-                if len(bases) > 1 and i % 4 == 3:
-                    outcome = plugin_host.crossover_bytes(
-                        base, bases[(i + 1) % len(bases)], rng)
-                else:
-                    outcome = plugin_host.mutate_bytes(base, rng)
-                if outcome is not None:
-                    mutated, strategy = outcome
-                    session.grammar_uses += 1
-            if mutated is None:
-                mutated, strategy = mutation.mutate(
-                    base, session.seed, i, struct_fn=struct_fn,
-                    strategies=pool, tokens=tokens)
-            if strategy.startswith("dict_"):
-                session.token_uses += 1
-            if session.max_input_bytes and \
-                    len(mutated) > session.max_input_bytes:
-                # Hardening bound: never hand an oversized input to a target.
-                # Skipping (rather than truncating) keeps executed inputs
-                # byte-identical to an uncapped run's same-index executions.
-                session.skipped_oversize += 1
-                session.cursor += 1
-                executed_this += 1
-                continue
-            self._perturb_target(target, session, i)
-            result = target.execute(mutated)
-            session.outcomes[result.outcome] = \
-                session.outcomes.get(result.outcome, 0) + 1
+                            decoded = validate_proposal_bytes(proposal.data)
+                            if decoded is None:
+                                session.llm_stats["proposals_invalid"] += 1
+                            else:
+                                mutated = repair_with_target(decoded, target)
+                                strategy = "llm-proposal"
+                                llm_note = proposal.note
+                                session.llm_stats["proposals_used"] += 1
+                if mutated is None and llm_active:
+                    session.llm_stats["fallback_iterations"] += 1
+                if plugin_host is not None and plugin_host.plugins:
+                    rng = mutation.rng_for(session.seed, i)
+                    if len(bases) > 1 and i % 4 == 3:
+                        plugin_outcome = plugin_host.crossover_bytes(
+                            base, bases[(i + 1) % len(bases)], rng)
+                    else:
+                        plugin_outcome = plugin_host.mutate_bytes(base, rng)
+                    if plugin_outcome is not None:
+                        mutated, strategy = plugin_outcome
+                        session.grammar_uses += 1
+                if mutated is None:
+                    mutated, strategy = mutation.mutate(
+                        base, session.seed, i, struct_fn=struct_fn,
+                        strategies=pool, tokens=tokens)
+                if strategy.startswith("dict_"):
+                    session.token_uses += 1
+                if session.max_input_bytes and \
+                        len(mutated) > session.max_input_bytes:
+                    # Hardening bound: never hand an oversized input to a
+                    # target. Skipping (rather than truncating) keeps executed
+                    # inputs byte-identical to an uncapped run's same-index
+                    # executions.
+                    session.skipped_oversize += 1
+                    skipped += 1
+                    i += 1
+                    continue
+                self._perturb_target(target, session, i)
+                pending.append((i, base, mutated, strategy, llm_note))
+                i += 1
 
-            features = self._features(target, mutated, result, session)
-            new_features = tuple(feature for feature in (features or ())
-                                 if feature not in known_feature_set)
-            if new_features:
-                known_feature_set.update(new_features)
-                session.coverage_features = sorted(known_feature_set)
-                session.cases_since_new_feature = 0
-                sha = sha256_bytes(mutated)
-                if sha not in session.coverage_retained_shas:
-                    session.coverage_retained_shas.append(sha)
-                    bytes_by_sha.setdefault(sha, mutated)
-                added = self.corpus_store.add_bytes(
-                        corpus, mutated, origin="mutation",
-                        parent=sha256_bytes(base), mutation=strategy,
-                        seed=session.seed, iteration=i,
-                        coverage_features=features,
-                        coverage_new_features=new_features,
-                        persist=False)
-                if added is not None:
-                    corpus_dirty = True
-                    # Keep the selection index fresh so the new entry is
-                    # selectable on the very next case of this advance().
-                    entries_index[added.sha256] = added.to_dict()
+            # --- execution (index-keyed results, order preserved) ----------
+            results = executor.run(
+                [(index, data) for index, _, data, _, _ in pending])
+            if len(results) != len(pending):  # pragma: no cover - contract guard
+                raise StateError("executor returned the wrong number of results")
 
-            if result.outcome == Outcome.ABNORMAL:
-                # Harness/tooling failures are operational evidence, not a
-                # confirmed vulnerability. Keep a bounded session summary and
-                # never assign them a synthetic crash signature.
-                session.abnormal_events += 1
-                session.last_abnormal_detail = result.detail[:500]
+            # --- reduction (STRICTLY in index order) ------------------------
+            for (index, base, mutated, strategy, llm_note), \
+                    (result_index, result) in zip(pending, results):
+                if result_index != index:  # pragma: no cover - contract guard
+                    raise StateError(
+                        "executor returned out-of-order results",
+                        details={"expected": index, "got": result_index})
+                session.outcomes[result.outcome] = \
+                    session.outcomes.get(result.outcome, 0) + 1
 
-            if result.outcome == Outcome.CRASH:
-                parent_sha = sha256_bytes(base)
-                signature = result.diagnostics.signature \
-                    if result.diagnostics else "sig_none"
-                crash_id = make_id("crash", session.experiment_id, signature)
-                session.crashes += 1
-                crash_counts[crash_id] = crash_counts.get(crash_id, 0) + 1
-                if crash_id not in crash_first:
-                    crash_first[crash_id] = (mutated, result, {
-                        "parent_sha256": parent_sha,
-                        "mutation": strategy, "seed": session.seed,
-                        "iteration": i,
-                        **({"origin": "llm-proposal",
-                            "round": session.llm_round, "note": llm_note}
-                           if strategy == "llm-proposal" else {})})
-                if crash_id not in unique:
-                    unique.add(crash_id)
-                    session.crash_ids.append(crash_id)
-                # Preserve the crashing input in the corpus with lineage; defer
-                # the manifest write until the end of the batch.
-                added = self.corpus_store.add_bytes(
-                        corpus, mutated, origin="mutation",
-                        parent=parent_sha, mutation=strategy,
-                        seed=session.seed, iteration=i, persist=False)
-                if added is not None:
-                    corpus_dirty = True
-                    bytes_by_sha.setdefault(sha256_bytes(mutated), mutated)
-                    entries_index[added.sha256] = added.to_dict()
+                features = self._features(target, mutated, result, session)
+                new_features = tuple(feature for feature in (features or ())
+                                     if feature not in known_feature_set)
+                if new_features:
+                    known_feature_set.update(new_features)
+                    session.coverage_features = sorted(known_feature_set)
+                    session.cases_since_new_feature = 0
+                    sha = sha256_bytes(mutated)
+                    if sha not in session.coverage_retained_shas:
+                        session.coverage_retained_shas.append(sha)
+                        bytes_by_sha.setdefault(sha, mutated)
+                    added = self.corpus_store.add_bytes(
+                            corpus, mutated, origin="mutation",
+                            parent=sha256_bytes(base), mutation=strategy,
+                            seed=session.seed, iteration=index,
+                            coverage_features=features,
+                            coverage_new_features=new_features,
+                            persist=False)
+                    if added is not None:
+                        corpus_dirty = True
+                        # Keep the selection index fresh so the new entry is
+                        # selectable on the very next case of this advance().
+                        entries_index[added.sha256] = added.to_dict()
 
-            session.cursor += 1
-            if features is not None:
-                session.cases_since_new_feature += 1
-            executed_this += 1
+                if result.outcome == Outcome.ABNORMAL:
+                    # Harness/tooling failures are operational evidence, not a
+                    # confirmed vulnerability. Keep a bounded session summary and
+                    # never assign them a synthetic crash signature.
+                    session.abnormal_events += 1
+                    session.last_abnormal_detail = result.detail[:500]
+
+                if result.outcome == Outcome.CRASH:
+                    parent_sha = sha256_bytes(base)
+                    signature = result.diagnostics.signature \
+                        if result.diagnostics else "sig_none"
+                    crash_id = make_id("crash", session.experiment_id, signature)
+                    session.crashes += 1
+                    crash_counts[crash_id] = crash_counts.get(crash_id, 0) + 1
+                    if crash_id not in crash_first:
+                        crash_first[crash_id] = (mutated, result, {
+                            "parent_sha256": parent_sha,
+                            "mutation": strategy, "seed": session.seed,
+                            "iteration": index,
+                            **({"origin": "llm-proposal",
+                                "round": session.llm_round, "note": llm_note}
+                               if strategy == "llm-proposal" else {})})
+                    if crash_id not in unique:
+                        unique.add(crash_id)
+                        session.crash_ids.append(crash_id)
+                    # Preserve the crashing input in the corpus with lineage; defer
+                    # the manifest write until the end of the batch.
+                    added = self.corpus_store.add_bytes(
+                            corpus, mutated, origin="mutation",
+                            parent=parent_sha, mutation=strategy,
+                            seed=session.seed, iteration=index, persist=False)
+                    if added is not None:
+                        corpus_dirty = True
+                        bytes_by_sha.setdefault(sha256_bytes(mutated), mutated)
+                        entries_index[added.sha256] = added.to_dict()
+                if features is not None:
+                    session.cases_since_new_feature += 1
+
+            consumed = len(pending) + skipped
+            session.cursor += consumed
+            executed_this += consumed
 
         # Flush batched corpus + crash state.
         if corpus_dirty:
