@@ -91,6 +91,16 @@ def _run(cmd: list[str], timeout: float = 120.0) -> str:
     return (proc.stdout + proc.stderr).decode("utf-8", "replace")
 
 
+def _run_status(cmd: list[str], timeout: float = 120.0) -> tuple[int, str]:
+    """Like ``_run`` but also returns the exit code (for optional tools)."""
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValidationError(f"tool failed: {cmd[0]}: {exc}") from exc
+    return proc.returncode, (proc.stdout + proc.stderr).decode(
+        "utf-8", "replace")
+
+
 def parse_nm_symbols(text: str) -> dict[str, dict]:
     """Parse ``nm`` output into ``{name: {address, type}}`` (tolerant)."""
     symbols: dict[str, dict] = {}
@@ -404,3 +414,49 @@ def make_scan_record(binary: dict, matches: dict,
         focus_functions=focus or [],
         dictionary=dictionary,
     )
+
+
+# --- dyld shared cache extraction ------------------------------------------------
+
+def extract_framework(name: str, out_dir: str,
+                      ipsw_bin: str = "ipsw") -> dict:
+    """Extract a framework's dylib from the dyld shared cache via ipsw.
+
+    Call-graph analysis needs the real Mach-O; strings-based
+    fingerprinting does not. Returns the extracted dylib path ready for
+    Ghidra headless import.
+    """
+    if not name or "/" in name or name.startswith("."):
+        raise ValidationError("framework name must be a bare name, e.g. "
+                              "'CoreText'")
+    loc = locate_framework(name)
+    if not loc["in_dyld_shared_cache"]:
+        return {"framework": name, "path": loc["path"],
+                "extracted": False, "note": "loose binary; no extraction "
+                "needed"}
+    cache = loc["cache_path"]
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    install_names = [
+        f"/System/Library/Frameworks/{name}.framework/{name}",
+        f"/System/Library/PrivateFrameworks/{name}.framework/{name}",
+    ]
+    last_err = ""
+    for install_name in install_names:
+        code, blob = _run_status([ipsw_bin, "dyld", "extract", cache,
+                           install_name, "-o", str(out), "--slide"],
+                          timeout=1800.0)
+        if code == 0:
+            produced = sorted(out.glob(f"*{name}*"))
+            produced = [p for p in produced if p.is_file()]
+            if produced:
+                return {"framework": name,
+                        "path": str(produced[-1].resolve()),
+                        "extracted": True,
+                        "install_name": install_name,
+                        "cache_path": cache}
+            last_err = f"ipsw reported success but no file matched *{name}*"
+        else:
+            last_err = blob.strip().splitlines()[-1] if blob.strip() \
+                else f"exit {code}"
+    raise NotFoundError(f"extraction failed for '{name}': {last_err}")

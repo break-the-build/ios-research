@@ -46,6 +46,16 @@ def register(subparsers, parent) -> None:
                         help="write dictionary to a file instead of stdout")
     p_dict.set_defaults(func=cmd_dict)
 
+    p_ex = sub.add_parser("extract", parents=[parent],
+                          help="extract a framework dylib from the dyld "
+                               "shared cache (via ipsw) for Ghidra analysis")
+    p_ex.add_argument("framework",
+                      help="bare framework name, e.g. CoreText")
+    p_ex.add_argument("--out", default=None,
+                      help="output directory (default: <workspace>/artifacts"
+                           "/dsc)")
+    p_ex.set_defaults(func=cmd_extract)
+
     p_cg = sub.add_parser("callgraph", parents=[parent],
                           help="normalize a Ghidra export into the "
                                "directed-fuzzing call-graph document")
@@ -147,6 +157,22 @@ def cmd_dict(ctx, args) -> Result:
                       data={"out": args.out, "tokens": tokens})
     return Result(command="staticscan dict",
                   data={"dictionary": dictionary, "tokens": tokens})
+
+
+def cmd_extract(ctx, args) -> Result:
+    from .. import staticscan
+    out_dir = args.out
+    if out_dir is None:
+        from pathlib import Path
+        base = ctx.workspace_path or ".ios-research"
+        out_dir = str(Path(base) / "artifacts" / "dsc")
+    try:
+        data = staticscan.extract_framework(args.framework, out_dir)
+    except Exception as exc:
+        return Result(command="staticscan extract", ok=False,
+                      exit_code=ExitCode.NOT_FOUND, error=str(exc),
+                      data={"framework": args.framework})
+    return Result(command="staticscan extract", data=data)
 
 
 def cmd_callgraph(ctx, args) -> Result:
