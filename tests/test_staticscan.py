@@ -231,3 +231,20 @@ def test_scan_binary_end_to_end(tmp_path):
     assert "coretext" in matches and "audiotoolbox" in matches
     dictionary = ss.build_dictionary(matches)
     assert '"OTTO"' in dictionary and '"glyf"' in dictionary
+
+
+def test_scan_binary_expands_subcaches(tmp_path, monkeypatch):
+    """A dyld cache's main file is a stub header; content lives in .NN
+    siblings — the scout must scan all of them (#223 follow-up)."""
+    import subprocess as sp
+    stub = tmp_path / "dyld_shared_cache_arm64e"
+    stub.write_bytes(b"dyld_v1  arm64e\n")
+    (tmp_path / "dyld_shared_cache_arm64e.01").write_bytes(b"glyf\x00loca\x00")
+    (tmp_path / "dyld_shared_cache_arm64e.02.dyldlinkedit").write_bytes(
+        b"OTTO\x00ttcf\x00")
+    (tmp_path / "dyld_shared_cache_arm64e.map").write_bytes(b"glyf should be excluded\n")
+    binary = ss.scan_binary(str(stub), min_len=3)
+    assert binary["is_dyld_shared_cache"] is True
+    assert len(binary["subcaches"]) == 2          # .map excluded
+    blob = "\n".join(binary["strings"])
+    assert "glyf" in blob and "OTTO" in blob

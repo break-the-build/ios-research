@@ -130,6 +130,10 @@ def main() -> int:
                          "--duration governs")
     ap.add_argument("--rounds", type=int, default=1)
     ap.add_argument("--value-profile", action="store_true")
+    ap.add_argument("--extra-dict", default=None,
+                    help="path to an additional dictionary (e.g. a "
+                         "staticscan evidence dictionary); merged with "
+                         "the built-in per-target dictionary")
     ap.add_argument("--summary", default=None)
     args = ap.parse_args()
 
@@ -148,7 +152,18 @@ def main() -> int:
     art_dir.mkdir(parents=True, exist_ok=True)
 
     dict_path = BASE / f"dict-{args.target}.dict"
-    dict_path.write_text(DICTIONARIES[args.target])
+    lines = list(DICTIONARIES[args.target].splitlines())
+    if args.extra_dict:
+        extra = Path(args.extra_dict).read_text(encoding="utf-8")
+        for ln in extra.splitlines():
+            if ln.strip() and ln.strip() not in lines:
+                lines.append(ln.strip())
+    dict_path.write_text("\n".join(lines) + "\n")
+    print(f"[{tgt.target_id}] dictionary: {len(lines)} tokens "
+          f"({'+' + str(len(lines) - len(DICTIONARIES[args.target].splitlines()))}"
+          f" from {args.extra_dict})" if args.extra_dict else
+          f"[{tgt.target_id}] dictionary: {len(lines)} tokens",
+          file=sys.stderr)
 
     seeds = harvest_seeds(args.target)
     print(f"[{tgt.target_id}] harvested {len(seeds)} real-format seeds "
