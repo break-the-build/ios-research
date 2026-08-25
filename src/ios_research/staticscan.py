@@ -69,7 +69,7 @@ FORMAT_SIGNATURES: dict[str, tuple[str, ...]] = {
         "Type3", "AcroForm", "OpenAction",
     ),
     "audiotoolbox": (
-        "ID3", "RIFF", "WAVE", "fmt ", "data", "FORM", "AIFF", "AIFC",
+        "ID3", "RIFF", "WAVE", "fmt ", "FORM", "AIFF", "AIFC",
         "COMM", "SSND", "caff", "mp4a", "moov", "stbl", ".mp3", "LAME",
         "esds",
     ),
@@ -296,6 +296,53 @@ def parser_focus_functions(normalized: dict,
              "families": sorted(s["families"]),
              "tokens": sorted(s["tokens"])}
             for s in sorted(focus.values(), key=lambda s: s["function"])]
+
+
+# --- fingerprint diffing (#228 beta-window hunting) ----------------------------
+
+def diff_fingerprints(old_matches: dict[str, list[dict]],
+                      new_matches: dict[str, list[dict]]) -> dict:
+    """Diff two fingerprint results (``{family: [{token, hits}]}``).
+
+    New format tokens in a shipped binary are evidence of newly added or
+    newly reachable parsers — the highest-EV directed-campaign targets during
+    an OS beta window (+50% bounty bonus). Returns deterministic per-family
+    ``added``/``removed`` token sets plus a flat ``directed_targets`` list
+    (families with additions, sorted).
+    """
+    def token_sets(matches: dict[str, list[dict]]
+                   ) -> dict[str, set[str]]:
+        return {family: {m["token"] for m in entries}
+                for family, entries in matches.items()}
+
+    old_tokens = token_sets(old_matches)
+    new_tokens = token_sets(new_matches)
+    families = sorted(set(old_tokens) | set(new_tokens))
+    per_family: dict[str, dict] = {}
+    directed_targets: list[dict] = []
+    for family in families:
+        added = sorted(new_tokens.get(family, set())
+                       - old_tokens.get(family, set()))
+        removed = sorted(old_tokens.get(family, set())
+                         - new_tokens.get(family, set()))
+        if added or removed:
+            per_family[family] = {"added": added, "removed": removed}
+        if added:
+            directed_targets.append({"family": family,
+                                     "new_tokens": added})
+    unchanged = sum(len(new_tokens.get(f, set()) & old_tokens.get(f, set()))
+                    for f in families)
+    return {
+        "families_compared": len(families),
+        "changed_families": len(per_family),
+        "per_family": per_family,
+        "added_token_count": sum(len(v["added"])
+                                 for v in per_family.values()),
+        "removed_token_count": sum(len(v["removed"])
+                                   for v in per_family.values()),
+        "unchanged_token_count": unchanged,
+        "directed_targets": directed_targets,
+    }
 
 
 # --- framework location --------------------------------------------------------

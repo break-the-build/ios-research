@@ -492,8 +492,10 @@ vuln-finding drowns in false positives — the hybrid is the proven pattern:
   constants rendered as a libFuzzer dictionary: the *exact bytes the binary
   compares*, not guessed magics. Feed straight into the campaign runner.
 - **Directed-fuzzing targets** (`staticscan callgraph --focus`) — normalize
-  a Ghidra headless export (`tools/staticscan/ghidra_export.py`) into the
-  call-graph document `directed.load_callgraph()` consumes, and identify
+  a Ghidra headless export (`tools/staticscan/ghidra_export.java` — Ghidra
+  12 dropped Jython, so the Java script is the default; setup guide in
+  `tools/staticscan/README.md`) into the call-graph document
+  `directed.load_callgraph()` consumes, and identify
   *parser focus functions*: functions that reference format constants.
   Walking the call graph toward those functions reaches deep parser states
   in hours instead of weeks.
