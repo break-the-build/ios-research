@@ -49,6 +49,11 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--duration", type=float, default=None,
                          help="wall-clock budget in seconds")
     p_start.add_argument("--workers", type=int, default=None)
+    p_start.add_argument("--adapt-strategies", action="store_true",
+                         default=False,
+                         help="online strategy reweighting from per-strategy "
+                              "novel-feature yield every "
+                              "fuzz.strategy_adapt_every cases (#203)")
     p_start.add_argument("--skip-duplicates", action="store_true",
                          default=False,
                          help="never execute the same input twice in a "
@@ -193,6 +198,10 @@ def cmd_start(ctx, args) -> Result:
                             window=window,
                             skip_duplicates=bool(
                                 getattr(args, "skip_duplicates", False)),
+                            adapt_strategies=bool(
+                                getattr(args, "adapt_strategies", False)),
+                            strategy_adapt_every=int(
+                                cfg.get("fuzz.strategy_adapt_every", 512)),
                             strategy_weights=cfg.get("fuzz.strategy_weights"),
                             dictionary_path=dictionary,
                             value_profile=bool(getattr(args, "value_profile",

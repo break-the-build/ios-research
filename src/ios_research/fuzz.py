@@ -56,6 +56,37 @@ DEFAULT_BASE = b"MOCK" + bytes([1, 1]) + (2).to_bytes(2, "big") + b"ok"
 DEFAULT_MAX_INPUT_BYTES = 1_048_576
 
 
+def adapted_weights(current: dict[str, int], stats: dict[str, dict],
+                    *, floor: int = 1, cap: int = 64,
+                    max_factor: float = 2.0) -> dict[str, int]:
+    """Bounded multiplicative strategy reweighting from yield stats (#203).
+
+    ``stats`` maps strategy -> {"executions": int, "features": int} measured
+    over the just-finished window. Each weight moves toward strategies whose
+    novel-feature rate beats the overall rate, clamped to ``[floor, cap]`` and
+    to a per-checkpoint factor of ``[1/max_factor, max_factor]`` so no single
+    checkpoint can collapse exploration or explode a weight. Strategies with
+    no measurements keep their current weight.
+    """
+    total_exec = sum(v.get("executions", 0) for v in stats.values())
+    total_feat = sum(v.get("features", 0) for v in stats.values())
+    if total_exec <= 0:
+        return dict(current)
+    overall_rate = total_feat / total_exec
+    out: dict[str, int] = {}
+    for strat, weight in current.items():
+        w = max(0, int(weight))
+        entry = stats.get(strat)
+        if not entry or not entry.get("executions"):
+            out[strat] = w or floor
+            continue
+        rate = entry.get("features", 0) / entry["executions"]
+        scaled = (rate / overall_rate) if overall_rate > 0 else 1.0
+        scaled = min(max_factor, max(1.0 / max_factor, scaled))
+        out[strat] = max(floor, min(cap, int(round(w * scaled))))
+    return out
+
+
 def checkpoint_due(*, pending: bool, cases_since_flush: int, elapsed_s: float,
                    checkpoint_cases: int, checkpoint_seconds: float) -> bool:
     """Whether a periodic checkpoint should flush right now (#208).
@@ -109,6 +140,10 @@ class FuzzSession:
     skip_duplicates: bool = False
     skipped_duplicate: int = 0
     seen_input_shas: list[str] = field(default_factory=list)
+    adapt_strategies: bool = False
+    strategy_adapt_every: int = 512
+    cases_since_adapt: int = 0
+    strategy_yield: dict = field(default_factory=dict)
     base_shas: list[str] = field(default_factory=list)
     strategy_weights: dict[str, int] = field(default_factory=dict)
     cursor: int = 0
@@ -247,6 +282,8 @@ class FuzzEngine:
                checkpoint_cases: int | None = None,
                checkpoint_seconds: float | None = None,
                skip_duplicates: bool = False,
+               adapt_strategies: bool = False,
+               strategy_adapt_every: int | None = None,
                strategy_weights: dict[str, int] | None = None,
                dictionary_path: str | None = None,
                dictionary_tokens: list[DictionaryToken] | None = None,
@@ -319,6 +356,9 @@ class FuzzEngine:
             checkpoint_seconds=(30.0 if checkpoint_seconds is None
                                 else max(0.0, float(checkpoint_seconds))),
             skip_duplicates=bool(skip_duplicates),
+            adapt_strategies=bool(adapt_strategies),
+            strategy_adapt_every=(512 if strategy_adapt_every is None
+                                  else max(1, int(strategy_adapt_every))),
             base_shas=base_shas,
             strategy_weights=dict(strategy_weights or {}),
             status=RUNNING, started_at=now, updated_at=now,
@@ -523,9 +563,19 @@ class FuzzEngine:
         strategies: tuple[str, ...] = mutation.STRATEGIES
         if tokens:
             strategies = mutation.STRATEGIES + mutation.DICT_STRATEGIES
-        # Precompute the weighted strategy pool once (invariant for the run).
+        # Weighted strategy pool (#203): recomputed when online adaptation
+        # reweights session.strategy_weights at checkpoints; otherwise
+        # computed once (invariant for the run).
+        strategies_key = tuple(strategies)
         pool = mutation.weighted_strategies(session.strategy_weights or None,
                                             strategies)
+        pool_set = set(pool)
+
+        def _recount_pool() -> None:
+            nonlocal pool, pool_set
+            pool = mutation.weighted_strategies(
+                session.strategy_weights or None, strategies_key)
+            pool_set = set(pool)
         # Grammar-aware mutator plugin (#41): loaded from a user-declared
         # path; every call is isolated and falls back to generic mutation.
         plugin_host = None
@@ -597,6 +647,11 @@ class FuzzEngine:
         # set seeds from persisted shas so resume reproduces identical skip
         # decisions; appends happen at generation time in case order.
         seen_inputs: set[str] = set(session.seen_input_shas)
+
+        # Online strategy adaptation state (#203): windowed per-strategy yield
+        # measured only while enabled; deterministic given the same settings.
+        if session.adapt_strategies and not session.strategy_yield:
+            session.strategy_yield = {}
 
         while session.cursor < session.max_cases:
             if max_new is not None and executed_this >= max_new:
@@ -689,6 +744,10 @@ class FuzzEngine:
                         continue
                     seen_inputs.add(input_sha)
                     session.seen_input_shas.append(input_sha)
+                if session.adapt_strategies and strategy in pool_set:
+                    entry = session.strategy_yield.setdefault(
+                        strategy, {"executions": 0, "features": 0})
+                    entry["executions"] += 1
                 self._perturb_target(target, session, i)
                 pending.append((i, base, mutated, strategy, llm_note))
                 i += 1
@@ -714,6 +773,10 @@ class FuzzEngine:
                                      if feature not in known_feature_set)
                 if new_features:
                     known_feature_set.update(new_features)
+                    if session.adapt_strategies and strategy in pool_set:
+                        entry = session.strategy_yield.setdefault(
+                            strategy, {"executions": 0, "features": 0})
+                        entry["features"] += 1
                     session.coverage_features = sorted(known_feature_set)
                     session.cases_since_new_feature = 0
                     sha = sha256_bytes(mutated)
@@ -775,6 +838,19 @@ class FuzzEngine:
             session.cursor += consumed
             executed_this += consumed
             cases_since_flush += consumed
+
+            # Strategy adaptation checkpoint (#203): bounded multiplicative
+            # reweighting from this window's measured yield; floors keep every
+            # strategy alive. Disabled sessions never enter this branch.
+            if session.adapt_strategies:
+                session.cases_since_adapt += consumed
+                if session.cases_since_adapt >= session.strategy_adapt_every                         and any(v.get("executions") for v in
+                                session.strategy_yield.values()):
+                    session.strategy_weights = adapted_weights(
+                        session.strategy_weights, session.strategy_yield)
+                    _recount_pool()
+                    session.strategy_yield = {}
+                    session.cases_since_adapt = 0
 
             # Periodic checkpoint (#208): identical writes to the end-of-call
             # flush, then reset accumulators so the final flush cannot
