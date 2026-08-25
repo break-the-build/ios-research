@@ -106,6 +106,9 @@ class FuzzSession:
     window: int = 1
     checkpoint_cases: int = 256
     checkpoint_seconds: float = 30.0
+    skip_duplicates: bool = False
+    skipped_duplicate: int = 0
+    seen_input_shas: list[str] = field(default_factory=list)
     base_shas: list[str] = field(default_factory=list)
     strategy_weights: dict[str, int] = field(default_factory=dict)
     cursor: int = 0
@@ -192,6 +195,7 @@ class FuzzSession:
             },
             "max_input_bytes": self.max_input_bytes,
             "skipped_oversize": self.skipped_oversize,
+            "skipped_duplicate": self.skipped_duplicate,
         }
 
 
@@ -242,6 +246,7 @@ class FuzzEngine:
                duration_s: float | None, window: int | None = None,
                checkpoint_cases: int | None = None,
                checkpoint_seconds: float | None = None,
+               skip_duplicates: bool = False,
                strategy_weights: dict[str, int] | None = None,
                dictionary_path: str | None = None,
                dictionary_tokens: list[DictionaryToken] | None = None,
@@ -313,6 +318,7 @@ class FuzzEngine:
                               else max(0, int(checkpoint_cases))),
             checkpoint_seconds=(30.0 if checkpoint_seconds is None
                                 else max(0.0, float(checkpoint_seconds))),
+            skip_duplicates=bool(skip_duplicates),
             base_shas=base_shas,
             strategy_weights=dict(strategy_weights or {}),
             status=RUNNING, started_at=now, updated_at=now,
@@ -587,6 +593,11 @@ class FuzzEngine:
         window_size = max(1, min(
             (window_setting if window_setting > 1 else workers_count), 64))
 
+        # Duplicate-input skip (#204): opt-in via the session flag. The seen
+        # set seeds from persisted shas so resume reproduces identical skip
+        # decisions; appends happen at generation time in case order.
+        seen_inputs: set[str] = set(session.seen_input_shas)
+
         while session.cursor < session.max_cases:
             if max_new is not None and executed_this >= max_new:
                 session.status = PAUSED
@@ -666,6 +677,18 @@ class FuzzEngine:
                     skipped += 1
                     i += 1
                     continue
+                if session.skip_duplicates:
+                    # Never execute the same input twice within a session
+                    # (#204). Checked after the oversize bound so an oversized
+                    # candidate is accounted as oversize, not as a duplicate.
+                    input_sha = sha256_bytes(mutated)
+                    if input_sha in seen_inputs:
+                        session.skipped_duplicate += 1
+                        skipped += 1
+                        i += 1
+                        continue
+                    seen_inputs.add(input_sha)
+                    session.seen_input_shas.append(input_sha)
                 self._perturb_target(target, session, i)
                 pending.append((i, base, mutated, strategy, llm_note))
                 i += 1
