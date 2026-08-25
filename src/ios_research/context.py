@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -32,14 +33,23 @@ class Context:
 
     # workspace -----------------------------------------------------------
     def workspace(self, *, required: bool = True) -> Workspace | None:
+        """Resolve the workspace for this invocation.
+
+        Pinning precedence (#268): an explicit ``--workspace`` flag wins, then
+        the ``IOS_RESEARCH_WORKSPACE`` environment variable, then the
+        cwd-relative fallback (``Workspace.require()/locate()``). The env var
+        lets agents pin a workspace once per session instead of repeating
+        ``--workspace`` on every command — a single forgotten flag otherwise
+        silently operates on whatever workspace is nearest the cwd.
+        """
         if self._workspace is not None:
             return self._workspace
-        if self.workspace_path:
-            ws = Workspace(Path(self.workspace_path))
+        pinned = self.workspace_path or os.environ.get("IOS_RESEARCH_WORKSPACE")
+        if pinned:
+            ws = Workspace(Path(pinned))
             if required and not ws.initialized:
                 from .errors import NotFoundError
-                raise NotFoundError(
-                    f"no initialized workspace at {self.workspace_path}")
+                raise NotFoundError(f"no initialized workspace at {pinned}")
         elif required:
             ws = Workspace.require()
         else:
