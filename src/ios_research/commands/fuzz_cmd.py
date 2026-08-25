@@ -49,6 +49,11 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--duration", type=float, default=None,
                          help="wall-clock budget in seconds")
     p_start.add_argument("--workers", type=int, default=None)
+    p_start.add_argument("--skip-duplicates", action="store_true",
+                         default=False,
+                         help="never execute the same input twice in a "
+                              "session (#204); duplicates are counted as "
+                              "skipped_duplicate")
     p_start.add_argument("--window", type=int, default=None,
                          help="generation window: cases produced before "
                               "execution fans out (>=1; default fuzz.window)")
@@ -186,6 +191,8 @@ def cmd_start(ctx, args) -> Result:
                             corpus_id=corpus.id, seed=seed, workers=workers,
                             max_cases=max_cases, duration_s=args.duration,
                             window=window,
+                            skip_duplicates=bool(
+                                getattr(args, "skip_duplicates", False)),
                             strategy_weights=cfg.get("fuzz.strategy_weights"),
                             dictionary_path=dictionary,
                             value_profile=bool(getattr(args, "value_profile",
