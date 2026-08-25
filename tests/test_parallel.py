@@ -3,11 +3,13 @@
 Covers the ``map_ordered`` primitive, ordered-output equivalence of every
 fanned-out pipeline site between ``workers=1`` and ``workers=N``, exception
 propagation parity, CLI/schema exposure of ``agent run --workers``, and a
-generous wall-clock speedup smoke test against a sleeping stub target.
+deterministic concurrency-overlap probe against a sleeping stub target
+(#274: peak-parallelism instrumentation instead of wall-clock ratios).
 """
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -145,6 +147,41 @@ class ExplodingStub(SlowCrashStub):
         raise RuntimeError("stub target exploded")
 
 
+PROBE_ID = "stub:overlap-probe"
+
+
+class OverlapProbeStub(SlowCrashStub):
+    """Sleeping crash stub that records peak concurrent ``_run`` entries.
+
+    #274: fan-out is verified by observing actual overlap (class-level peak
+    concurrency while every worker sits inside a CPU-free sleep), not by
+    comparing wall-clock durations, which inverted under runner load.
+    Instances are created per reproduce call, hence the class-level counter.
+    """
+
+    target_id = PROBE_ID
+
+    _lock = threading.Lock()
+    _active = 0
+    peak = 0
+
+    def _run(self, data: bytes) -> ExecResult:
+        with type(self)._lock:
+            type(self)._active += 1
+            type(self).peak = max(type(self).peak, type(self)._active)
+        try:
+            return super()._run(data)
+        finally:
+            with type(self)._lock:
+                type(self)._active -= 1
+
+
+@pytest.fixture(autouse=True)
+def _unregister_probe_target():
+    yield
+    tgt._REGISTRY.pop(PROBE_ID, None)
+
+
 @pytest.fixture(autouse=True)
 def _unregister_stub_target():
     """Keep the stub out of the global registry (suite pollution guard,
@@ -255,19 +292,26 @@ def test_analyze_batch_exception_parity_between_modes(tmp_path):
 
 
 # --- speedup smoke -------------------------------------------------------------
-def test_analyze_batch_fanout_is_faster_than_serial(tmp_path):
-    timings = {}
-    for workers in (1, 4):
-        ws = _fresh_workspace(tmp_path, f"speed-w{workers}")
-        _record_slow_crashes(ws, 6)
-        analyzer = Analyzer(ws)
-        start = time.perf_counter()
-        out = analyzer.analyze_batch(workers=workers)
-        timings[workers] = time.perf_counter() - start
+def test_analyze_batch_fanout_actually_overlaps_executions(tmp_path):
+    # #274: assert fan-out via observed peak concurrency, not wall-clock
+    # ratios. Each item spends ~25ms inside a CPU-free sleep, so with 4
+    # workers the pool is guaranteed to hold >1 in-flight _run at once,
+    # regardless of machine load.
+    tgt.register(PROBE_ID, lambda: OverlapProbeStub())
+    for workers, expected_min_peak in ((4, 2), (1, 1)):
+        ws = _fresh_workspace(tmp_path, f"overlap-w{workers}")
+        store = CrashStore(ws)
+        for i in range(6):
+            data = b"MOCK" + bytes([i]) * 12
+            res = tgt.create(PROBE_ID).execute(data)
+            assert res.outcome == Outcome.CRASH
+            store.record(experiment_id=f"exp-{i}", target=PROBE_ID,
+                         fmt="stub-record", data=data, exec_result=res)
+        OverlapProbeStub.peak = 0
+        out = Analyzer(ws).analyze_batch(workers=workers)
         assert len(out) == 6
-    # Each item sleeps ~25ms inside execute (GIL released); 6 items with 4
-    # workers overlap heavily. Generous margin to stay flake-free.
-    assert timings[4] < timings[1] * 0.75, timings
+        assert OverlapProbeStub.peak >= expected_min_peak, (
+            workers, OverlapProbeStub.peak)
 
 
 # --- CLI / schema exposure -----------------------------------------------------

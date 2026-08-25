@@ -92,24 +92,34 @@ def test_ddmin_parallel_output_identical_on_mid_buffer_region():
     assert serial == parallel == b"BUG"
 
 
-def test_ddmin_parallel_faster_than_serial():
-    def slow_has_bug(d):
-        time.sleep(0.01)
-        return b"BUG" in d
+def test_ddmin_parallel_actually_overlaps_oracle_calls():
+    # #274: verify fan-out via observed peak concurrency inside the oracle,
+    # not by comparing wall-clock durations (which inverted under runner
+    # load). Every oracle call spends its life in a CPU-free sleep, so a
+    # workers=4 round evaluating >=2 complements must show peak > 1.
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0}
+
+    def probe_has_bug(d):
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            time.sleep(0.01)
+            return b"BUG" in d
+        finally:
+            with lock:
+                state["active"] -= 1
 
     data = b"BUG" + b"A" * 1500
-    start = time.perf_counter()
-    ddmin(data, slow_has_bug, workers=1)
-    t_serial = time.perf_counter() - start
 
-    start = time.perf_counter()
-    out = ddmin(data, slow_has_bug, workers=4)
-    t_parallel = time.perf_counter() - start
+    state["peak"] = 0
+    assert ddmin(data, probe_has_bug, workers=1) == b"BUG"
+    assert state["peak"] == 1          # serial path: strictly sequential
 
-    assert out == b"BUG"
-    # Generous margin to stay flake-free; subprocess-style waits (sleep here)
-    # release the GIL so 4 workers overlap nearly perfectly.
-    assert t_parallel < t_serial * 0.8
+    state["peak"] = 0
+    assert ddmin(data, probe_has_bug, workers=4) == b"BUG"
+    assert state["peak"] > 1           # parallel path: real overlap
 
 
 def test_ddmin_respects_budget_with_parallel_workers():
