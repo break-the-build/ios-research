@@ -869,6 +869,73 @@ Positional arguments:
 - `report_id` (required)
 
 
+### `ios-research staticscan`
+
+Static-analysis scout: surface census, parser fingerprinting, call-graph
+export (#223).
+
+Positional arguments:
+
+- `subcommand` (required)
+
+### `ios-research staticscan locate`
+
+Locate a framework binary (loose path or dyld shared cache).
+
+Positional arguments:
+
+- `framework` (required) — bare framework name, e.g. `AudioToolbox`
+
+### `ios-research staticscan scan`
+
+Census a Mach-O or dyld shared cache: symbols, linked libraries, constant
+strings.
+
+Positional arguments:
+
+- `path` (required)
+
+Options:
+
+- `--min-len` — minimum string length (default 4)
+
+### `ios-research staticscan fingerprint`
+
+Identify parser families by format constants (magic bytes, chunk names,
+section tags) with per-token hit evidence.
+
+Positional arguments:
+
+- `path` (required)
+
+### `ios-research staticscan dict`
+
+Emit an evidence-backed libFuzzer dictionary from the matched constants.
+
+Positional arguments:
+
+- `path` (required)
+
+Options:
+
+- `--families` — comma-separated family filter (default: all matched)
+- `--out` — write dictionary to a file instead of stdout
+
+### `ios-research staticscan callgraph`
+
+Normalize a Ghidra headless export (`tools/staticscan/ghidra_export.py`)
+into the directed-fuzzing call-graph document.
+
+Positional arguments:
+
+- `export_json` (required)
+
+Options:
+
+- `--out` — write the call-graph document to a file
+- `--focus` — list parser focus functions (functions referencing format
+  constants)
+
 ### `ios-research surface`
 
 Positional arguments:

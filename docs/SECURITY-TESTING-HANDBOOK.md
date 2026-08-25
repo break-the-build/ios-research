@@ -475,7 +475,41 @@ format you seriously hunt; register it in `_mac_seeds.structure_mutate`;
 unit-test it for determinism and for the "corrupted input must not crash
 the mutator itself" case (we shipped an overflow fix for exactly this).
 
-#### 11.3 Directed fuzzing
+#### 11.3 Static-analysis scouting
+
+The scout answers *where to aim*; fuzzers confirm *what's real*. Pure static
+vuln-finding drowns in false positives — the hybrid is the proven pattern:
+
+- **Surface census** (`staticscan scan`) — symbols, linked libraries, and
+  constant strings from any Mach-O, or directly from the dyld shared cache
+  (constant strings are stored contiguously, so fingerprinting needs no
+  extraction).
+- **Parser fingerprinting** (`staticscan fingerprint`) — match format
+  constants (`"ID3"`, `"ftyp"`, sfnt tags, PNG chunk names) against the
+  binary's strings to prove which parser families it contains, with
+  per-token hit counts as evidence.
+- **Evidence-backed dictionaries** (`staticscan dict`) — the matched
+  constants rendered as a libFuzzer dictionary: the *exact bytes the binary
+  compares*, not guessed magics. Feed straight into the campaign runner.
+- **Directed-fuzzing targets** (`staticscan callgraph --focus`) — normalize
+  a Ghidra headless export (`tools/staticscan/ghidra_export.py`) into the
+  call-graph document `directed.load_callgraph()` consumes, and identify
+  *parser focus functions*: functions that reference format constants.
+  Walking the call graph toward those functions reaches deep parser states
+  in hours instead of weeks.
+
+Platform note: system framework paths are broken symlinks on cryptex-era
+OSes; the code lives in the dyld shared cache
+(`/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/`). `staticscan
+locate <framework>` reports which case you're in. Ghidra analysis requires
+extracting the dylib of interest from the cache first (dyld_shared_cache_util
+or the `ipsw` tool); strings-based fingerprinting works on the cache as-is.
+
+RE of Apple binaries for vulnerability research on your own devices is the
+activity the Apple Security Bounty program contemplates — this module stays
+inside that line: it produces targets and maps, never exploit material.
+
+#### 11.4 Directed fuzzing
 
 When you know *where* the bug should be (a function identified by patch
 diffing, a newly added parser), directed greybox fuzzing scores inputs by
@@ -483,7 +517,7 @@ call-graph distance to the target and prefers low-distance seeds — reaching
 deep code in hours instead of weeks. Use after `nday` patch-diffing points
 you at a changed function.
 
-#### 11.4 Grammar & stateful (protocol) testing
+#### 11.5 Grammar & stateful (protocol) testing
 
 Parsers of *sequences* (messaging protocols, pairing handoffs, sync
 engines) don't crash on single inputs; they crash on *state transitions*.
@@ -493,7 +527,7 @@ a state machine, fuzz the transitions). The module targets (`pq3:`,
 `wifiaware:`, `messaging:`) exist to develop and validate these workflows
 against realistic models before aiming them at real transports.
 
-#### 11.5 LLM-in-the-loop mutation
+#### 11.6 LLM-in-the-loop mutation
 
 An LLM reads the format spec (or the crash history) and proposes inputs;
 proposals are ingested as *candidates* into the normal coverage-guided loop
@@ -502,7 +536,7 @@ dictionary covers ("make this length field *just barely* inconsistent with
 the chunk size"). The `llmmutate` module tracks proposal provenance and
 whether each proposal actually contributed coverage or crashes.
 
-#### 11.6 Differential & regression testing
+#### 11.7 Differential & regression testing
 
 Run identical inputs against two builds (or two configurations) and compare
 outcomes. Outcome *transitions* (crash→clean = fixed; clean→crash =
@@ -511,7 +545,7 @@ the honest way to test *mitigations*: `beta diff` for release pairs,
 `lockdown` for Lockdown-Mode pairs (the +100% bonus tier). Determinism
 makes the comparisons exact rather than statistical.
 
-#### 11.7 N-day reproduction and patch-diffing
+#### 11.8 N-day reproduction and patch-diffing
 
 `nday` diffs two IPSW builds' symbols: functions changed between builds are
 the patch's fingerprint. Prioritized by reachability, that list is a
@@ -520,7 +554,7 @@ reproduce the patched bug (validates the fix, feeds `cve validate`) — or
 find that the patch was incomplete, which is a legitimate, often
 under-reported finding class.
 
-#### 11.8 Concurrency (races)
+#### 11.9 Concurrency (races)
 
 TSan on the harness builds + scheduling perturbation hooks (`races`):
 fuzz with randomized scheduling to shake out TOCTOU and double-visit bugs
@@ -528,7 +562,7 @@ that deterministic single-threaded runs never see. Race findings need
 special care in reports (reproducibility is statistical; document the
 perturbation schedule).
 
-#### 11.9 Oracles for non-crash bugs
+#### 11.10 Oracles for non-crash bugs
 
 Not all bugs crash: wrong parsing results, silent data corruption,
 authorization bypasses. Metamorphic oracles (`oracles`, `macoracles`)
@@ -537,7 +571,7 @@ assert *properties* ("parsing then re-serializing is identity",
 connection order") and flag violations — the only practical way to hunt
 logic bugs at scale.
 
-#### 11.10 Supply-chain vetting
+#### 11.11 Supply-chain vetting
 
 Your research box is itself a target: `supply audit/scan/verify` checks
 declared vs installed dependencies, scans for behavior drift, and verifies
