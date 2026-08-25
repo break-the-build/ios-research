@@ -16,6 +16,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "fuzz": {
         "workers": 1,
         "window": 1,
+        "strategy_adapt_every": 512,
         "max_cases": 1000,
         "timeout_ms": 1000,
         "seed": 0,
