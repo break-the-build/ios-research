@@ -380,6 +380,12 @@ def test_mac_seeds_present(key):
     assert seeds and all(isinstance(s, bytes) and s for s in seeds)
 
 
+def test_videotoolbox_seeds_use_annex_b_framing():
+    seeds = _mac_seeds.seeds("videotoolbox")
+    assert len(seeds) >= 2
+    assert all(seed.startswith(b"\x00\x00\x00\x01") for seed in seeds)
+
+
 def test_png_structure_mutation_changes_png():
     import random
     png = _mac_seeds.seeds("imageio")[0]
