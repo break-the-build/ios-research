@@ -117,6 +117,8 @@ See [docs/CVE-REGRESSION.md](docs/CVE-REGRESSION.md).
 
 The full CLI is described in a machine-readable schema
 ([docs/cli-schema.json](docs/cli-schema.json), or `ios-research agent inspect`).
+After changing CLI registration, regenerate the committed schema with
+`ios-research agent schema`; the test suite verifies it remains current.
 See [AGENTS.md](AGENTS.md) for the operating contract and recommended workflow.
 
 ## Documentation

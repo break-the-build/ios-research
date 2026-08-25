@@ -3150,6 +3150,27 @@
             ]
           }
         },
+        "extract": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "output directory (default: <workspace>/artifacts/dsc)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "bare framework name, e.g. CoreText",
+                "name": "framework",
+                "required": true
+              }
+            ]
+          }
+        },
         "fingerprint": {
           "arguments": {
             "options": [],
