@@ -268,6 +268,37 @@
         ]
       },
       "subcommands": {
+        "native-profile": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "target",
+                "flags": [
+                  "--target"
+                ],
+                "help": "built mac:<framework> target to profile",
+                "required": true
+              },
+              {
+                "dest": "max_cases",
+                "flags": [
+                  "--max-cases"
+                ],
+                "help": "bounded seed executions (default: 10)",
+                "required": false
+              },
+              {
+                "dest": "acknowledge_authorized_use",
+                "flags": [
+                  "--acknowledge-authorized-use"
+                ],
+                "help": "confirm authorization to execute the local native harness",
+                "required": false
+              }
+            ],
+            "positionals": []
+          }
+        },
         "profile": {
           "arguments": {
             "options": [
