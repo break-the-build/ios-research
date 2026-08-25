@@ -53,8 +53,14 @@ class Target:
    version, and configuration hash:
 
    ```bash
-   ios-research fuzz start --target audio-device:wav --device <device-id>
+   ios-research experiment create --device <device-id> --target audio-device:wav
+   ios-research fuzz start --target audio-device:wav
    ```
+
+   For the shipped on-device flow, the target id is one of the
+   `ios-device:<surface>` targets and the device is resolved per
+   [ON-DEVICE-TARGET.md](ON-DEVICE-TARGET.md) (USB attachment +
+   `libimobiledevice`); no separate `--device` flag exists on `fuzz start`.
 
 ## Determinism note
 

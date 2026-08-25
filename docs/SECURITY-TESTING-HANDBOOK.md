@@ -795,7 +795,7 @@ ios-research detect scan FILE --json      # detection signature check
 
 # reporting
 ios-research report create crash_XYZ --json
-ios-research bounty readiness --json      # submission-readiness check
+ios-research report bounty-validate report_XYZ --json  # submission-readiness check
 ```
 
 ## Appendix B — Reading the signs (campaign health)
