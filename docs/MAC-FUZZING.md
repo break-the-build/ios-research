@@ -66,12 +66,14 @@ export IOS_RESEARCH_MAC_HARNESS=/path/to/imageio_fuzzer
 
 Available framework keys and their entry points:
 
-| target id           | framework      | entry point                        |
-|---------------------|----------------|------------------------------------|
-| `mac:imageio`       | ImageIO        | `CGImageSourceCreateWithData`      |
-| `mac:audiotoolbox`  | AudioToolbox   | `AudioFileOpenWithCallbacks`       |
-| `mac:coregraphics`  | CoreGraphics   | `CGPDFDocumentCreateWithProvider` + page render |
-| `mac:selftest`      | (none)         | controlled buggy parser — see below |
+| target id             | framework      | entry point                        |
+|-----------------------|----------------|------------------------------------|
+| `mac:imageio`         | ImageIO        | `CGImageSourceCreateWithData` + full-frame bitmap render |
+| `mac:audiotoolbox`    | AudioToolbox   | `AudioFileOpenWithCallbacks` + packet read + AudioConverter |
+| `mac:coregraphics`    | CoreGraphics   | `CGPDFDocumentCreateWithProvider` + every-page render + content-stream operator sweep |
+| `mac:coretext`        | CoreText       | font descriptors from data + glyph outlines + attributed-line shaping |
+| `mac:videotoolbox`    | VideoToolbox   | parameter-set format descriptions + `VTDecompressionSessionDecodeFrame` |
+| `mac:selftest`        | (none)         | controlled buggy parser — see below |
 
 ### Self-test target (real-crash pipeline validation)
 
@@ -90,6 +92,43 @@ IOS_RESEARCH_MAC_HARNESS=$PWD/tools/harness/build/selftest_fuzzer \
 # -> 3 unique real crashes; crash reproduce re-triggers; crash minimize (ddmin)
 #    shrinks a 200-byte input to the 3-byte marker with the signature preserved.
 ```
+
+### VideoToolbox target (decompression-session fuzzing, #234)
+
+`mac:videotoolbox` drives the real video-decode pipeline — not a container
+parse: parameter-set format descriptions (`CMVideoFormatDescription…From
+{H264,HEVC}ParameterSets`, exercising the SPS/PPS/VPS parsers on every input)
+→ `VTDecompressionSessionCreate` → `VTDecompressionSessionDecodeFrame`
+(decoder selection + NAL repacketization) → async drain → full teardown.
+Codec-frame-first by design; MP4/ByteParser container logic is a separate
+follow-up target.
+
+Input container (all integers big-endian):
+
+```
+byte 0        flags; bit0 selects codec (0 = H.264, 1 = HEVC)
+records...    u32 length L + min(L, remaining) payload bytes
+              H.264: [SPS, PPS, frame]   HEVC: [VPS, SPS, PPS, frame]
+frame record  repeated u32-length-prefixed sub-NALs, re-emitted as one
+              AVCC/HVCC-style buffer with canonical 4-byte prefixes
+```
+
+Malformed lengths are clamped to the bytes actually present, keeping boundary
+math in fuzz space instead of rejecting early. Every iteration fully tears the
+session down (drain → invalidate → release), so libFuzzer runs cannot leak
+decoder sessions or wedge the media daemon.
+
+Seeds are generated locally with Apple's own encoders — no third-party deps:
+
+```bash
+xcrun clang tools/harness/gen_videoseeds.c -o /tmp/gen_videoseeds \
+  -framework CoreFoundation -framework CoreMedia -framework CoreVideo \
+  -framework VideoToolbox
+/tmp/gen_videoseeds /tmp/vt_h264.bin /tmp/vt_hevc.bin   # valid keyframe AUs
+```
+
+The checked-in seeds in `targets/_mac_seeds.py` were generated this way and
+embedded as hex, alongside malformed parameter-set variants.
 
 ### Build modes
 

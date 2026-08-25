@@ -64,6 +64,14 @@ _FRAMEWORKS = {
         "description": ("CoreText font-parsing fuzzing "
                         "(font descriptors from data + glyph outline decode)"),
     },
+    "videotoolbox": {
+        "framework": "VideoToolbox",
+        "entry": "VTDecompressionSessionCreate",
+        "formats": ("h264", "hevc", "raw"),
+        "description": ("VideoToolbox video-decode fuzzing "
+                        "(parameter-set format descriptions + "
+                        "decompression-session frame decode)"),
+    },
     "selftest": {
         "framework": "SelfTest",
         "entry": "selftest_parser",

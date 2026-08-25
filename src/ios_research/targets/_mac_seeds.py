@@ -35,6 +35,30 @@ _TIFF = b"II*\x00\x08\x00\x00\x00" + b"\x00" * 24
 # 16x16 1-bpp ICO with a BMP DIB payload header.
 _ICO = b"\x00\x00\x01\x00\x01\x00\x10\x10\x00\x00\x01\x00\x20\x00" + b"\x00" * 40
 
+# VideoToolbox harness containers (#234), generated on this host by
+# tools/harness/gen_videoseeds.c (Apple's own VTCompressionSession encodes a
+# 96x96 gradient; parameter sets are pulled from the avcC/hvcC sample-
+# description atoms). Layout: byte0 flags (bit0 codec) then u32-BE-length
+# records — H.264 [SPS, PPS, frame], HEVC [VPS, SPS, PPS, frame]; the frame
+# record is u32-BE-length-prefixed sub-NALs.
+_VT_H264 = bytes.fromhex(
+    "000000000b2764000bac562c30de0c740000000428ee3cb0000000c30000003b0605"
+    "3247564adc5c4c433f94efc5113cd143a8010000030001030000030001020001e600"
+    "0b000003000003000003001e0c038924010dffffffff800000008025b8201fde1d94"
+    "333fe0b4dc7d56cad6f8e96c3e0caadbf681b1ee198aa151fd9300002a3fd521d57e"
+    "3d5303fe39873b9f2dd0eed1c10832f8d8c8762d490d5cae06f87cee57c856582cea"
+    "7ac2996040e5e099f1443caa1bcb061c943d740972322e88c9bc3fdf82a6352613464"
+    "0cd4ea05f9de9b860ed40e9fb446303508180")
+_VT_HEVC = bytes.fromhex(
+    "010000001840010c01ffff016000000300b0000003000003001e15c0900000001e42"
+    "0101016000000300b0000003000003001ea0142061c10f8815ee4595100000000744"
+    "01c02cbc14c9000000aa0000003c4e01053247564adc5c4c433f94efc5113cd143a8"
+    "010000030001030000030001020000ca800b00000300000300000300280c038924010"
+    "dffffffff80000000662801af33354d40ea6ae949ba790a54bfc677909be7edf35ee"
+    "3f89cfd7237468dd8f5970d143c84d51cb54ac0d86a37e51a8092c13f34ccd9c0b3c"
+    "d080135e251ffee063a48b1798af7c84e90a90579fc2d982f421dd63b33737f08f84"
+    "b97716172f6e8c36594")
+
 
 def _wav(pcm: bytes = b"\x00\x00\x00\x00") -> bytes:
     """Minimal 8kHz mono 16-bit PCM WAV."""
@@ -83,6 +107,16 @@ _SEEDS = {
                (b"loca", b"\x00\x00\x00\x00\x00\x00")]),
         b"OTTO" + b"\x00" * 60,                           # CFF-flavoured stub
         b"ttcf" + struct.pack(">II", 0x00010000, 1) + b"\x00" * 52,
+    ],
+    # Valid keyframe access units for both codecs plus malformed parameter-set
+    # variants (truncated SPS, bogus record length) — the harness clamps
+    # lengths, so truncation stays inside the parse.
+    "videotoolbox": [
+        _VT_H264,
+        _VT_HEVC,
+        _VT_H264[:16],                       # truncated SPS record payload
+        _VT_H264[:1] + struct.pack(">I", 0xFFFFF000) + _VT_H264[5:20],
+        _VT_HEVC[:24],
     ],
     # Self-test markers trigger the harness's deliberate ASan bugs; the trailing
     # padding gives ddmin something to shrink while preserving the signature.
@@ -179,8 +213,63 @@ def _mutate_sfnt(data: bytes, rng) -> bytes | None:
     return bytes(out)
 
 
+def _iter_vt_records(data: bytes):
+    """Yield ``(offset, length)`` of each u32-BE-length record (post flags)."""
+    pos = 1
+    n = len(data)
+    while pos + 4 <= n:
+        length = int.from_bytes(data[pos:pos + 4], "big")
+        yield pos, length
+        end = pos + 4 + min(length, n - pos - 4)
+        if end <= pos:
+            break
+        pos = end
+
+
+def _mutate_vt_container(data: bytes, rng) -> bytes | None:
+    """Perturb the videotoolbox record container (#234).
+
+    Steers toward the boundary math the harness and the parameter-set parsers
+    do: record lengths, NAL sub-lengths inside the frame record, codec bit,
+    and parameter-set payload bytes.
+    """
+    if len(data) < 5:
+        return None
+    out = bytearray(data)
+    records = list(_iter_vt_records(data))
+    choice = rng.randrange(5)
+    if choice == 0 and records:
+        # Corrupt a record's declared length -> clamped by the harness.
+        pos, length = rng.choice(records)
+        new_len = rng.choice([0, length + 1, 0x7FFFFFFF, 0xFFFFF000])
+        out[pos:pos + 4] = int(new_len & 0xFFFFFFFF).to_bytes(4, "big")
+    elif choice == 1:
+        # Toggle the codec flag (H.264 <-> HEVC record-count expectations).
+        out[0] ^= 0x01
+    elif choice == 2 and len(out) > 24:
+        # Flip a byte in a parameter-set payload (SPS/PPS/VPS header fields).
+        i = 5 + rng.randrange(min(48, len(out) - 5))
+        out[i] ^= 1 << rng.randrange(8)
+    elif choice == 3 and len(out) > 32:
+        # Mangle a u32 sub-NAL length inside the frame record (last record).
+        pos = records[-1][0] if records else 1
+        frame_start = pos + 4
+        if frame_start + 8 <= len(out):
+            off = frame_start + rng.randrange(max(1, (len(out) - frame_start - 4) // 2))
+            out[off:off + 4] = rng.choice(
+                [b"\x00\x00\x00\x00", b"\xff\xff\xff\xff",
+                 b"\x7f\xff\xff\xff", b"\x00\x00\x00\x01"])
+    else:
+        # Truncate somewhere past the first record.
+        cut = rng.randrange(12, max(13, len(out)))
+        del out[cut:]
+    return bytes(out)
+
+
 def structure_mutate(key: str, data: bytes, rng) -> bytes | None:
     """Format-aware mutation; returns None to fall back to generic mutation."""
+    if key == "videotoolbox":
+        return _mutate_vt_container(data, rng)
     if data[:len(_PNG_MAGIC)] == _PNG_MAGIC:
         return _mutate_png(data, rng)
     magic4 = data[:4]
