@@ -118,10 +118,23 @@ static int resolve_common(void) {
 
 #if defined(HARNESS_TARGET_IMAGEIO)
 
+/* Deep decode (#228): create EVERY frame of the source, then render each
+ * into an offscreen bitmap — forcing full pixel decode (color management,
+ * codec tile paths) rather than header-only opens. */
 typedef CFTypeRef CGImageSourceRef;
 typedef CFTypeRef CGImageRef;
+typedef CFTypeRef CGContextRef;
+typedef CFTypeRef CGColorSpaceRef;
 static CGImageSourceRef (*p_CGImageSourceCreateWithData)(CFDataRef, CFDictionaryRef) = NULL;
 static CGImageRef (*p_CGImageSourceCreateImageAtIndex)(CGImageSourceRef, size_t, CFDictionaryRef) = NULL;
+static size_t (*p_CGImageSourceGetCount)(CGImageSourceRef) = NULL;
+static size_t (*p_CGImageGetWidth)(CGImageRef) = NULL;
+static size_t (*p_CGImageGetHeight)(CGImageRef) = NULL;
+static CGContextRef (*p_CGBitmapContextCreate)(void *, size_t, size_t, size_t, size_t, CGColorSpaceRef, uint32_t) = NULL;
+static CGColorSpaceRef (*p_CGColorSpaceCreateDeviceRGB)(void) = NULL;
+static void (*p_CGColorSpaceRelease)(CGColorSpaceRef) = NULL;
+static void (*p_CGContextDrawImage)(CGContextRef, void *, CGImageRef) = NULL;
+static void (*p_CGContextRelease)(CGContextRef) = NULL;
 
 static int resolve_target(void) {
     if (!resolve_common()) return 0;
@@ -129,18 +142,58 @@ static int resolve_target(void) {
         "/System/Library/Frameworks/ImageIO.framework/ImageIO",
         RTLD_LAZY | RTLD_GLOBAL);
     if (!fw_handle) { fprintf(stderr, "harness: dlopen ImageIO: %s\n", dlerror()); return 0; }
+    void *cg = dlopen(
+        "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
+        RTLD_LAZY | RTLD_GLOBAL);
+    if (!cg) { fprintf(stderr, "harness: dlopen CoreGraphics: %s\n", dlerror()); return 0; }
     p_CGImageSourceCreateWithData = dlsym(fw_handle, "CGImageSourceCreateWithData");
     p_CGImageSourceCreateImageAtIndex = dlsym(fw_handle, "CGImageSourceCreateImageAtIndex");
-    return p_CGImageSourceCreateWithData && p_CGImageSourceCreateImageAtIndex;
+    p_CGImageSourceGetCount = dlsym(fw_handle, "CGImageSourceGetCount");
+    p_CGImageGetWidth = dlsym(cg, "CGImageGetWidth");
+    p_CGImageGetHeight = dlsym(cg, "CGImageGetHeight");
+    p_CGBitmapContextCreate = dlsym(cg, "CGBitmapContextCreate");
+    p_CGColorSpaceCreateDeviceRGB = dlsym(cg, "CGColorSpaceCreateDeviceRGB");
+    p_CGColorSpaceRelease = dlsym(cg, "CGColorSpaceRelease");
+    p_CGContextDrawImage = dlsym(cg, "CGContextDrawImage");
+    p_CGContextRelease = dlsym(cg, "CGContextRelease");
+    return p_CGImageSourceCreateWithData && p_CGImageSourceCreateImageAtIndex
+        && p_CGImageSourceGetCount && p_CGImageGetWidth && p_CGImageGetHeight
+        && p_CGBitmapContextCreate && p_CGColorSpaceCreateDeviceRGB
+        && p_CGColorSpaceRelease && p_CGContextDrawImage && p_CGContextRelease;
 }
 
-/* Returns 1 if the input decoded to an image, 0 if the framework rejected it. */
+#define IOSR_IMGIO_MAX_DIM 512u  /* bound decode memory */
+
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     CGImageSourceRef src = p_CGImageSourceCreateWithData(cfdata, NULL);
     if (!src) return 0;
-    CGImageRef img = p_CGImageSourceCreateImageAtIndex(src, 0, NULL);
-    int decoded = img != NULL;
-    if (img) p_CFRelease(img);
+    int decoded = 0;
+    size_t frames = p_CGImageSourceGetCount(src);
+    if (frames > 16) frames = 16;   /* bound multi-frame work */
+    for (size_t i = 0; i < frames; i++) {
+        CGImageRef img = p_CGImageSourceCreateImageAtIndex(src, i, NULL);
+        if (!img) continue;
+        size_t w = p_CGImageGetWidth(img), h = p_CGImageGetHeight(img);
+        if (w > IOSR_IMGIO_MAX_DIM) w = IOSR_IMGIO_MAX_DIM;
+        if (h > IOSR_IMGIO_MAX_DIM) h = IOSR_IMGIO_MAX_DIM;
+        if (w && h) {
+            CGColorSpaceRef cs = p_CGColorSpaceCreateDeviceRGB();
+            if (cs) {
+                CGContextRef ctx = p_CGBitmapContextCreate(
+                    NULL, w, h, 8, w * 4, cs, 2 /* premul first */);
+                if (ctx) {
+                    double rect[4] = {0};   /* CGRect: origin + size as doubles */
+                    double *r = (double *)rect;
+                    r[2] = (double)w; r[3] = (double)h;
+                    p_CGContextDrawImage(ctx, rect, img);
+                    p_CGContextRelease(ctx);
+                    decoded = 1;
+                }
+                p_CGColorSpaceRelease(cs);
+            }
+        }
+        p_CFRelease(img);
+    }
     p_CFRelease(src);
     return decoded;
 }
@@ -229,12 +282,13 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
 
 #elif defined(HARNESS_TARGET_AUDIOTOOLBOX)
 
-/* AudioToolbox path: use AudioFileOpenWithCallbacks over an in-memory buffer.
- * Callback typedefs kept minimal; signatures match the public AudioToolbox API.
- */
+/* Deep decode (#228): open -> query format -> read packets (drives the
+ * demuxer AND codec packetization) -> AudioConverter to PCM16 (drives the
+ * decoder pipeline), not merely open+close. */
 typedef int32_t OSStatus;
 typedef uint32_t UInt32;
 typedef int64_t SInt64;
+typedef uint32_t FourCharCode;
 typedef CFTypeRef AudioFileID;
 
 typedef OSStatus (*AudioFile_ReadProc)(void *, SInt64, UInt32, void *, UInt32 *);
@@ -242,10 +296,38 @@ typedef OSStatus (*AudioFile_WriteProc)(void *, SInt64, UInt32, const void *, UI
 typedef SInt64 (*AudioFile_GetSizeProc)(void *);
 typedef OSStatus (*AudioFile_SetSizeProc)(void *, SInt64);
 
+#pragma pack(push, 4)
+typedef struct {
+    double mSampleRate;
+    FourCharCode mFormatID;
+    UInt32 mFormatFlags;
+    UInt32 mBytesPerPacket;
+    UInt32 mFramesPerPacket;
+    UInt32 mBytesPerFrame;
+    UInt32 mChannelsPerFrame;
+    UInt32 mBitsPerChannel;
+    UInt32 mReserved;
+} IOSR_ASBD;
+#pragma pack(pop)
+
 static OSStatus (*p_AudioFileOpenWithCallbacks)(
     void *, AudioFile_ReadProc, AudioFile_WriteProc,
     AudioFile_GetSizeProc, AudioFile_SetSizeProc, UInt32, AudioFileID *) = NULL;
 static OSStatus (*p_AudioFileClose)(AudioFileID) = NULL;
+static OSStatus (*p_AudioFileGetProperty)(AudioFileID, FourCharCode,
+                                          UInt32 *, void *) = NULL;
+static OSStatus (*p_AudioFileReadPacketData)(AudioFileID, int,
+                                             UInt32 *, void *, SInt64, UInt32, void *) = NULL;
+static OSStatus (*p_AudioConverterNew)(const IOSR_ASBD *, const IOSR_ASBD *, void **) = NULL;
+static void (*p_AudioConverterDispose)(void *) = NULL;
+static OSStatus (*p_AudioConverterConvertComplexBuffer)(void *, UInt32,
+                                                        void *, void *) = NULL;
+
+/* AudioConverterConvertComplexBuffer parameter structs (packed layouts). */
+#pragma pack(push, 4)
+typedef struct { UInt32 mNumberBuffers; struct { UInt32 mNumberChannels; UInt32 mDataByteSize; void *mData; } mBuffers[1]; } IOSR_ACB1;
+typedef struct { UInt32 mNumberBuffers; struct { UInt32 mNumberChannels; UInt32 mDataByteSize; void *mData; } mBuffers[1]; } IOSR_ACB2;
+#pragma pack(pop)
 
 typedef struct { const uint8_t *data; size_t size; } MemFile;
 
@@ -271,8 +353,20 @@ static int resolve_target(void) {
     if (!fw_handle) { fprintf(stderr, "harness: dlopen AudioToolbox: %s\n", dlerror()); return 0; }
     p_AudioFileOpenWithCallbacks = dlsym(fw_handle, "AudioFileOpenWithCallbacks");
     p_AudioFileClose = dlsym(fw_handle, "AudioFileClose");
-    return p_AudioFileOpenWithCallbacks && p_AudioFileClose;
+    p_AudioFileGetProperty = dlsym(fw_handle, "AudioFileGetProperty");
+    p_AudioFileReadPacketData = dlsym(fw_handle, "AudioFileReadPacketData");
+    p_AudioConverterNew = dlsym(fw_handle, "AudioConverterNew");
+    p_AudioConverterDispose = dlsym(fw_handle, "AudioConverterDispose");
+    p_AudioConverterConvertComplexBuffer = dlsym(fw_handle, "AudioConverterConvertComplexBuffer");
+    return p_AudioFileOpenWithCallbacks && p_AudioFileClose
+        && p_AudioFileGetProperty && p_AudioFileReadPacketData
+        && p_AudioConverterNew && p_AudioConverterDispose
+        && p_AudioConverterConvertComplexBuffer;
 }
+
+#define IOSR_AT_PROP_FORMAT 0x61736264UL  /* 'asbd' kAudioFilePropertyDataFormat */
+#define IOSR_AT_MAX_PACKETS 64u
+#define IOSR_AT_BUF_BYTES (64u * 1024u)
 
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     (void)cfdata;
@@ -280,8 +374,51 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     AudioFileID af = NULL;
     OSStatus st = p_AudioFileOpenWithCallbacks(&mf, mem_read, NULL,
                                                mem_size, NULL, 0, &af);
-    if (st == 0 && af) { p_AudioFileClose(af); return 1; }
-    return 0;
+    if (st != 0 || !af) return 0;
+
+    int exercised = 0;
+    IOSR_ASBD src_fmt;
+    UInt32 sz = sizeof(src_fmt);
+    if (p_AudioFileGetProperty(af, IOSR_AT_PROP_FORMAT, &sz, &src_fmt) == 0) {
+        /* Read packets through the demuxer. */
+        static UInt8 pktbuf[IOSR_AT_BUF_BYTES];
+        static IOSR_ASBD dst_fmt;
+        static UInt8 convbuf[IOSR_AT_BUF_BYTES];
+        UInt32 npackets = IOSR_AT_MAX_PACKETS;
+        void *pktdescs = NULL;
+        if (p_AudioFileReadPacketData(af, 0 /* !cache */, &npackets,
+                                      pktdescs, 0, IOSR_AT_BUF_BYTES,
+                                      pktbuf) == 0 && npackets > 0) {
+            exercised = 1;
+            /* Convert to 16-bit stereo PCM through the codec pipeline. */
+            dst_fmt = src_fmt;
+            dst_fmt.mSampleRate = 44100.0;
+            dst_fmt.mFormatID = 0x6c70636dUL;      /* 'lpcm' */
+            dst_fmt.mFormatFlags = 0x0000000cUL;   /* signed | packed */
+            dst_fmt.mBytesPerPacket = 4;
+            dst_fmt.mFramesPerPacket = 1;
+            dst_fmt.mBytesPerFrame = 4;
+            dst_fmt.mChannelsPerFrame = 2;
+            dst_fmt.mBitsPerChannel = 16;
+            dst_fmt.mReserved = 0;
+            void *conv = NULL;
+            if (p_AudioConverterNew(&src_fmt, &dst_fmt, &conv) == 0 && conv) {
+                IOSR_ACB1 in; in.mNumberBuffers = 1;
+                in.mBuffers[0].mNumberChannels = src_fmt.mChannelsPerFrame;
+                in.mBuffers[0].mDataByteSize = IOSR_AT_BUF_BYTES;
+                in.mBuffers[0].mData = pktbuf;
+                IOSR_ACB2 out; out.mNumberBuffers = 1;
+                out.mBuffers[0].mNumberChannels = 2;
+                out.mBuffers[0].mDataByteSize = IOSR_AT_BUF_BYTES;
+                out.mBuffers[0].mData = convbuf;
+                /* Best effort: conversion may legitimately fail on garbage. */
+                p_AudioConverterConvertComplexBuffer(conv, npackets, &in, &out);
+                p_AudioConverterDispose(conv);
+            }
+        }
+    }
+    p_AudioFileClose(af);
+    return exercised;
 }
 
 #elif defined(HARNESS_TARGET_SELFTEST)
@@ -354,6 +491,14 @@ static CGPathRef (*p_CTFontCreatePathForGlyph)(CTFontRef, uint16_t,
 static CFIndex (*p_CFArrayGetCount)(CFArrayRef) = NULL;
 static CFTypeRef (*p_CFArrayGetValueAtIndex)(CFArrayRef, CFIndex) = NULL;
 static void (*p_CGPathRelease)(CGPathRef) = NULL;
+typedef CFTypeRef CFMutableDictionaryRef;
+typedef CFTypeRef CFAttributedStringRef;
+typedef CFTypeRef CTLineRef;
+static CFAttributedStringRef (*p_CFAttributedStringCreate)(void *, CFStringRef, CFDictionaryRef) = NULL;
+static CTLineRef (*p_CTLineCreateWithAttributedString)(CFTypeRef) = NULL;
+static CFMutableDictionaryRef (*p_CFDictionaryCreateMutable)(void *, long) = NULL;
+static void (*p_CFDictionarySetValue)(CFMutableDictionaryRef, const void *, const void *) = NULL;
+static CFStringRef (*p_CFStringCreateWithCString)(void *, const char *, unsigned int) = NULL;
 
 static int resolve_target(void) {
     if (!resolve_common()) return 0;
@@ -375,6 +520,11 @@ static int resolve_target(void) {
     p_CFArrayGetCount = dlsym(cf_handle, "CFArrayGetCount");
     p_CFArrayGetValueAtIndex = dlsym(cf_handle, "CFArrayGetValueAtIndex");
     p_CGPathRelease = dlsym(cg, "CGPathRelease");
+    p_CFAttributedStringCreate = dlsym(cf_handle, "CFAttributedStringCreate");
+    p_CTLineCreateWithAttributedString = dlsym(fw_handle, "CTLineCreateWithAttributedString");
+    p_CFDictionaryCreateMutable = dlsym(cf_handle, "CFDictionaryCreateMutable");
+    p_CFDictionarySetValue = dlsym(cf_handle, "CFDictionarySetValue");
+    p_CFStringCreateWithCString = dlsym(cf_handle, "CFStringCreateWithCString");
     return p_CTFontManagerCreateFontDescriptorsFromData
         && p_CTFontCreateWithFontDescriptor && p_CTFontGetGlyphsForCharacters
         && p_CTFontCreatePathForGlyph && p_CFArrayGetCount
@@ -405,6 +555,33 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
                 }
                 p_CFRelease(font);
             }
+        }
+    }
+    /* Deep decode (#228): shape an attributed line through the layout
+     * engine - drives feature-driven glyph substitution (morx/GSUB) and
+     * cluster mapping, not merely outline extraction. */
+    if (p_CFAttributedStringCreate && p_CTLineCreateWithAttributedString
+        && p_CFDictionaryCreateMutable && p_CFDictionarySetValue
+        && p_CFStringCreateWithCString) {
+        CFStringRef text = p_CFStringCreateWithCString(
+            NULL, "AgQyffiW10", 0x00000600 /* kCFStringEncodingUTF8 */);
+        if (text) {
+            CFMutableDictionaryRef dict =
+                p_CFDictionaryCreateMutable(NULL, 1);
+            if (dict) {
+                /* kCTFontAttributeName carries the CTFont as the value. */
+                p_CFDictionarySetValue(dict, (const void *)1,
+                                       (const void *)font);
+                CFAttributedStringRef as = p_CFAttributedStringCreate(
+                    NULL, text, dict);
+                if (as) {
+                    CTLineRef line = p_CTLineCreateWithAttributedString(as);
+                    if (line) { p_CFRelease(line); decoded = 1; }
+                    p_CFRelease(as);
+                }
+                p_CFRelease(dict);
+            }
+            p_CFRelease(text);
         }
     }
     p_CFRelease(descs);

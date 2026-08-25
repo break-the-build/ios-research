@@ -56,6 +56,14 @@ def register(subparsers, parent) -> None:
                            "reference format constants)")
     p_cg.set_defaults(func=cmd_callgraph)
 
+    p_diff = sub.add_parser("diff", parents=[parent],
+                            help="diff two binaries'/records' format-token "
+                                 "fingerprints: new/removed tokens mark "
+                                 "newly shipped parsers (#228 beta hunting)")
+    p_diff.add_argument("old_path")
+    p_diff.add_argument("new_path")
+    p_diff.set_defaults(func=cmd_diff)
+
     p.set_defaults(func=cmd_default)
 
 
@@ -63,9 +71,9 @@ def cmd_default(ctx, args) -> Result:
     return Result(command="staticscan", ok=False,
                   exit_code=ExitCode.USAGE,
                   error="choose an action: locate | scan | fingerprint | "
-                        "dict | callgraph",
+                        "dict | callgraph | diff",
                   data={"actions": ["locate", "scan", "fingerprint", "dict",
-                                    "callgraph"]})
+                                    "callgraph", "diff"]})
 
 
 def _scan(path: str, min_len: int = 4) -> dict:
@@ -169,3 +177,44 @@ def cmd_callgraph(ctx, args) -> Result:
         data["out"] = args.out
         del data["document"]
     return Result(command="staticscan callgraph", data=data)
+
+
+def _fingerprint_doc(path: str) -> tuple[str, dict]:
+    """Fingerprint a binary path, or load a saved fingerprint document.
+
+    A ``.json`` path is treated as a previously saved document with a
+    ``matches`` mapping ({family: [{token, hits}]}) so repeated diffs of a
+    huge dyld shared cache don't re-pay the strings pass.
+    """
+    if path.endswith(".json"):
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        matches = raw.get("matches")
+        if not isinstance(matches, dict):
+            raise ValueError("saved fingerprint document needs a 'matches' "
+                             "object: {family: [{token, hits}]}")
+        return raw.get("path", path), matches
+    from .. import staticscan
+    binary = _scan(path)
+    return binary["path"], staticscan.fingerprint(binary["strings"])
+
+
+def cmd_diff(ctx, args) -> Result:
+    from .. import staticscan
+    try:
+        old_path, old_matches = _fingerprint_doc(args.old_path)
+        new_path, new_matches = _fingerprint_doc(args.new_path)
+    except Exception as exc:
+        return Result(command="staticscan diff", ok=False,
+                      exit_code=ExitCode.VALIDATION,
+                      error=f"cannot fingerprint inputs: {exc}",
+                      data={"old": args.old_path, "new": args.new_path})
+    diff = staticscan.diff_fingerprints(old_matches, new_matches)
+    data = {"old_path": old_path, "new_path": new_path, **diff}
+    if not diff["added_token_count"]:
+        # No new parsers to aim at; still a valid (negative) result.
+        return Result(command="staticscan diff",
+                      error=None,
+                      data={**data,
+                            "note": "no new format tokens; no directed "
+                                    "targets this window"})
+    return Result(command="staticscan diff", data=data)
