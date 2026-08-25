@@ -65,9 +65,8 @@ def profile_campaign(*, target_id: str = "mock:parser", max_cases: int = 1000,
 
         original_mutate = mutation.mutate
         original_create = targets.create
-        original_add = engine.corpus_store.add_bytes
-        original_save_corpus = engine.corpus_store.save
-        original_save_session = engine.save
+        original_write_bytes = workspace.write_bytes
+        original_write_json = workspace.write_json
 
         def timed_mutate(*args, **kwargs):
             return stages.measure("mutation", original_mutate, *args, **kwargs)
@@ -83,37 +82,49 @@ def profile_campaign(*, target_id: str = "mock:parser", max_cases: int = 1000,
             created.execute = timed_execute
             return created
 
-        def timed_add(*args, **kwargs):
-            return stages.measure("persistence", original_add, *args, **kwargs)
+        def timed_write_bytes(rel, *args, **kwargs):
+            name = "input_writes" if "/inputs/" in rel else "other_writes"
+            return stages.measure(name, original_write_bytes, rel, *args,
+                                  **kwargs)
 
-        def timed_save_corpus(*args, **kwargs):
-            return stages.measure("persistence", original_save_corpus,
-                                  *args, **kwargs)
-
-        def timed_save_session(*args, **kwargs):
-            return stages.measure("persistence", original_save_session,
-                                  *args, **kwargs)
+        def timed_write_json(rel, *args, **kwargs):
+            if rel.startswith("corpus/"):
+                name = "corpus_manifests"
+            elif rel.startswith("crashes/"):
+                name = "crash_records"
+            elif rel.startswith("fuzz/"):
+                name = "session_checkpoints"
+            else:
+                name = "other_metadata"
+            return stages.measure(name, original_write_json, rel, *args,
+                                  **kwargs)
 
         mutation.mutate = timed_mutate
         targets.create = timed_create
-        engine.corpus_store.add_bytes = timed_add
-        engine.corpus_store.save = timed_save_corpus
-        engine.save = timed_save_session
+        workspace.write_bytes = timed_write_bytes
+        workspace.write_json = timed_write_json
         started = time.perf_counter()
         try:
             completed = engine.advance(session)
         finally:
             mutation.mutate = original_mutate
             targets.create = original_create
-            engine.corpus_store.add_bytes = original_add
-            engine.corpus_store.save = original_save_corpus
-            engine.save = original_save_session
+            workspace.write_bytes = original_write_bytes
+            workspace.write_json = original_write_json
         wall_seconds = time.perf_counter() - started
 
     # Mock targets do not produce sanitizer reports. Keep this explicit in the
     # stable result shape rather than misattributing target execution time.
     stages.seconds.setdefault("sanitizer_report_parsing", 0.0)
     stages.calls.setdefault("sanitizer_report_parsing", 0)
+    persistence_names = ("input_writes", "corpus_manifests", "crash_records",
+                         "session_checkpoints", "other_writes",
+                         "other_metadata")
+    persistence_seconds = sum(stages.seconds.get(name, 0.0)
+                              for name in persistence_names)
+    persistence_calls = sum(stages.calls.get(name, 0) for name in persistence_names)
+    stages.seconds["persistence"] = persistence_seconds
+    stages.calls["persistence"] = persistence_calls
     stage_rows = {
         name: {
             "seconds": round(stages.seconds.get(name, 0.0), 6),
@@ -136,6 +147,13 @@ def profile_campaign(*, target_id: str = "mock:parser", max_cases: int = 1000,
         "executed_cases": completed.cursor,
         "wall_seconds": round(wall_seconds, 6),
         "stages": stage_rows,
+        "persistence_breakdown": {
+            name: {
+                "seconds": round(stages.seconds.get(name, 0.0), 6),
+                "calls": stages.calls.get(name, 0),
+            }
+            for name in persistence_names
+        },
         "notes": [
             "Mock-target baseline; native harness/sanitizer startup is excluded.",
             "Temporary workspace is removed after profiling.",

@@ -75,7 +75,11 @@ class CorpusStore:
         return corpus
 
     def save(self, corpus: Corpus) -> None:
-        self.ws.write_json(self._manifest_rel(corpus.id), corpus.to_dict())
+        # Corpus manifests are engine-owned and grow with every retained
+        # input. Compact, deterministic JSON reduces serialization and I/O
+        # without changing the persisted data model or resume semantics.
+        self.ws.write_json(self._manifest_rel(corpus.id), corpus.to_dict(),
+                           compact=True)
 
     def get(self, corpus_id: str) -> Corpus:
         rel = self._manifest_rel(corpus_id)
