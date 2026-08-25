@@ -94,6 +94,11 @@
           "arguments": {
             "options": [],
             "positionals": []
+          },
+          "time_bounds": {
+            "blocking": true,
+            "bounds": [],
+            "note": "analyzes all recorded crashes; bounded by crash count, no slicing flag exists yet"
           }
         },
         "experiment": {
@@ -117,12 +122,23 @@
               }
             ],
             "positionals": []
+          },
+          "next": [
+            "ios-research fuzz start --experiment <id> --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "creates a stamped experiment record only; returns immediately"
           }
         },
         "inspect": {
           "arguments": {
             "options": [],
             "positionals": []
+          },
+          "time_bounds": {
+            "blocking": false,
+            "note": "prints this schema; returns immediately"
           }
         },
         "run": {
@@ -178,6 +194,46 @@
               }
             ],
             "positionals": []
+          },
+          "examples": [
+            {
+              "argv": [
+                "ios-research",
+                "agent",
+                "run",
+                "--target",
+                "mock:parser",
+                "--max-cases",
+                "200",
+                "--seed",
+                "0",
+                "--json"
+              ],
+              "envelope": {
+                "command": "agent run",
+                "data": {
+                  "<other-pipeline-fields>": "...",
+                  "experiment_id": "<experiment-id>",
+                  "unique_crashes": 0
+                },
+                "error": null,
+                "exit_code": 0,
+                "messages": [],
+                "ok": true
+              }
+            }
+          ],
+          "next": [
+            "ios-research crash list --json",
+            "ios-research report create <crash_id> --json",
+            "ios-research agent analyze --json"
+          ],
+          "time_bounds": {
+            "blocking": true,
+            "bounds": [
+              "--max-cases"
+            ],
+            "note": "bounded end-to-end pipeline (fuzz -> reproduce -> minimize -> analyze) in one call; blocks until done but is capped by --max-cases (default 200)"
           }
         },
         "schema": {
@@ -193,12 +249,23 @@
               }
             ],
             "positionals": []
+          },
+          "time_bounds": {
+            "blocking": false,
+            "note": "writes docs/cli-schema.json (or --out P); fast, but re-run after any CLI change so the committed schema stays current"
           }
         },
         "status": {
           "arguments": {
             "options": [],
             "positionals": []
+          },
+          "next": [
+            "ios-research target list --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "environment + workspace counts; returns immediately"
           }
         }
       }
@@ -457,6 +524,43 @@
               }
             ],
             "positionals": []
+          },
+          "examples": [
+            {
+              "argv": [
+                "ios-research",
+                "campaign",
+                "export",
+                "--corpus",
+                "<corpus-id>",
+                "--out",
+                "/tmp/bundle.tar.zst",
+                "--worker",
+                "w1",
+                "--json"
+              ],
+              "envelope": {
+                "command": "campaign export",
+                "data": {
+                  "manifest": {
+                    "<manifest-fields>": "..."
+                  },
+                  "out": "<bundle-path>"
+                },
+                "error": null,
+                "exit_code": 0,
+                "messages": [],
+                "ok": true
+              }
+            }
+          ],
+          "next": [
+            "ios-research campaign import --from <bundle> --corpus <id> --json",
+            "ios-research campaign status --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "writes one exchange bundle; bounded by corpus size but no scheduling flags apply"
           }
         },
         "import": {
@@ -496,6 +600,14 @@
               }
             ],
             "positionals": []
+          },
+          "next": [
+            "ios-research campaign status --json",
+            "ios-research fuzz start --corpus <corpus-id> --max-cases N --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "imports one bundle; use --dry-run to preview accept/reject decisions without writing"
           }
         },
         "status": {
@@ -511,6 +623,10 @@
               }
             ],
             "positionals": []
+          },
+          "time_bounds": {
+            "blocking": false,
+            "note": "aggregates sync records from disk; returns immediately"
           }
         }
       }
@@ -1484,6 +1600,13 @@
                 "required": false
               }
             ]
+          },
+          "next": [
+            "ios-research fuzz resume [session_id] --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "marks a session paused; returns immediately"
           }
         },
         "resume": {
@@ -1513,6 +1636,45 @@
                 "required": false
               }
             ]
+          },
+          "examples": [
+            {
+              "argv": [
+                "ios-research",
+                "fuzz",
+                "resume",
+                "--chunk",
+                "50",
+                "--json"
+              ],
+              "envelope": {
+                "command": "fuzz resume",
+                "data": {
+                  "session": {
+                    "<session-fields>": "..."
+                  },
+                  "stats": {
+                    "<stats-fields>": "..."
+                  }
+                },
+                "error": null,
+                "exit_code": 0,
+                "messages": [],
+                "ok": true
+              }
+            }
+          ],
+          "next": [
+            "ios-research fuzz status [session_id] --json",
+            "ios-research crash list --json"
+          ],
+          "time_bounds": {
+            "blocking": true,
+            "bounds": [
+              "--chunk",
+              "--duration"
+            ],
+            "note": "resumes execution for at most --chunk cases or --duration seconds; without bounds it runs to the session's remaining budget"
           }
         },
         "start": {
@@ -1696,6 +1858,70 @@
               }
             ],
             "positionals": []
+          },
+          "examples": [
+            {
+              "argv": [
+                "ios-research",
+                "fuzz",
+                "start",
+                "--target",
+                "mock:parser",
+                "--max-cases",
+                "200",
+                "--json"
+              ],
+              "envelope": {
+                "command": "fuzz start",
+                "data": {
+                  "experiment_id": "<experiment-id>",
+                  "session": {
+                    "<session-fields>": "..."
+                  },
+                  "stats": {
+                    "<stats-fields>": "..."
+                  }
+                },
+                "error": null,
+                "exit_code": 0,
+                "messages": [],
+                "ok": true
+              }
+            },
+            {
+              "argv": [
+                "ios-research",
+                "fuzz",
+                "start",
+                "--duration",
+                "30",
+                "--chunk",
+                "50",
+                "--json"
+              ],
+              "envelope": {
+                "command": "fuzz start",
+                "data": {},
+                "error": null,
+                "exit_code": 0,
+                "messages": [],
+                "ok": true
+              }
+            }
+          ],
+          "next": [
+            "ios-research fuzz status [session_id] --json",
+            "ios-research fuzz stats [session_id] --json",
+            "ios-research crash list --json"
+          ],
+          "time_bounds": {
+            "blocking": true,
+            "bounds": [
+              "--max-cases",
+              "--duration",
+              "--chunk"
+            ],
+            "note": "executes cases synchronously up to the given budget; always pass an explicit --max-cases/--duration/--chunk (defaults can run long); sessions are resumable via 'fuzz resume'"
           }
         },
         "stats": {
@@ -1708,6 +1934,10 @@
                 "required": false
               }
             ]
+          },
+          "time_bounds": {
+            "blocking": false,
+            "note": "reads session state from disk and returns immediately"
           }
         },
         "status": {
@@ -1720,6 +1950,13 @@
                 "required": false
               }
             ]
+          },
+          "next": [
+            "ios-research fuzz stats [session_id] --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "reads session state from disk and returns immediately"
           }
         },
         "stop": {
@@ -1732,6 +1969,10 @@
                 "required": false
               }
             ]
+          },
+          "time_bounds": {
+            "blocking": false,
+            "note": "marks a session stopped; returns immediately"
           }
         }
       }
@@ -2877,6 +3118,42 @@
               }
             ],
             "positionals": []
+          },
+          "examples": [
+            {
+              "argv": [
+                "ios-research",
+                "research",
+                "create",
+                "--name",
+                "my-run",
+                "--target",
+                "mock:parser",
+                "--max-cases",
+                "300",
+                "--json"
+              ],
+              "envelope": {
+                "command": "research create",
+                "data": {
+                  "research": {
+                    "<research-run-fields>": "..."
+                  }
+                },
+                "error": null,
+                "exit_code": 0,
+                "messages": [],
+                "ok": true
+              }
+            }
+          ],
+          "next": [
+            "ios-research research run <research_id> --yes --json",
+            "ios-research research status --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "creates the run record only; no stages execute here"
           }
         },
         "pause": {
@@ -2889,6 +3166,13 @@
                 "required": false
               }
             ]
+          },
+          "next": [
+            "ios-research research resume <research_id> --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "marks a run paused; returns immediately"
           }
         },
         "resume": {
@@ -2910,6 +3194,17 @@
                 "required": false
               }
             ]
+          },
+          "next": [
+            "ios-research research status <research_id> --json",
+            "ios-research research summarize <research_id> --json"
+          ],
+          "time_bounds": {
+            "blocking": true,
+            "bounds": [
+              "--max-stages"
+            ],
+            "note": "continues a paused/partial run; slice with --max-stages to keep each invocation short"
           }
         },
         "run": {
@@ -2931,6 +3226,18 @@
                 "required": false
               }
             ]
+          },
+          "next": [
+            "ios-research research status <research_id> --json",
+            "ios-research research summarize <research_id> --json",
+            "ios-research research pause <research_id> --json"
+          ],
+          "time_bounds": {
+            "blocking": true,
+            "bounds": [
+              "--max-stages"
+            ],
+            "note": "destructive/resource-consuming: requires --yes; runs pipeline stages until complete unless sliced with --max-stages N (resumable); per-stage budgets come from the run's --max-cases/--max-runtime/--max-testcases set at 'research create'"
           }
         },
         "status": {
@@ -2943,6 +3250,13 @@
                 "required": false
               }
             ]
+          },
+          "next": [
+            "ios-research research summarize <research_id> --json"
+          ],
+          "time_bounds": {
+            "blocking": false,
+            "note": "reads run state from disk and returns immediately"
           }
         },
         "summarize": {
@@ -2955,6 +3269,10 @@
                 "required": false
               }
             ]
+          },
+          "time_bounds": {
+            "blocking": false,
+            "note": "aggregates recorded stage results; returns immediately"
           }
         }
       }

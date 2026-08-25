@@ -18,6 +18,16 @@ described in a machine-readable schema.
 - **Schema**: `ios-research agent inspect --json` returns the full schema, also
   committed at [`docs/cli-schema.json`](docs/cli-schema.json). Regenerate with
   `ios-research agent schema`.
+- **Workspace pinning**: commands resolve their workspace as explicit
+  `--workspace P` flag > `$IOS_RESEARCH_WORKSPACE` > nearest `.ios-research/`
+  above the cwd (#268). For multi-command sessions, export
+  `IOS_RESEARCH_WORKSPACE=/abs/path/.ios-research` once — a single forgotten
+  `--workspace` otherwise silently falls back to the cwd-relative workspace.
+- **Operational hints**: pipeline commands (`fuzz`, `campaign`, `research`,
+  `agent`) carry per-command `examples` (argv + expected envelope),
+  `time_bounds` (`blocking` + which flags cap runtime, e.g.
+  `--chunk`/`--duration`/`--max-cases`) and `next` (common follow-ups) in the
+  schema (#268). Bound every long-running invocation explicitly.
 
 ## Agent commands
 

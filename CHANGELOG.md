@@ -7,6 +7,13 @@ patch releases.
 
 ## Unreleased
 
+### Agent ergonomics
+
+- Workspace pinning via the `IOS_RESEARCH_WORKSPACE` environment variable
+  (precedence: `--workspace` > env var > cwd) and operational schema hints
+  (`examples`, `time_bounds`, `next`) for the `fuzz`, `campaign`, `research`,
+  and `agent` command groups (#268).
+
 ### Initial framework (phases 00–10)
 
 - Deterministic CLI runtime with a stable JSON envelope, exit-code contract,
