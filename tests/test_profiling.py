@@ -39,3 +39,10 @@ def test_benchmark_profile_cli_rejects_real_target(capsys):
     assert main(["benchmark", "profile", "--target", "mac:imageio", "--json"]) == 2
     result = json.loads(capsys.readouterr().out)
     assert result["exit_code"] == 2
+
+
+def test_native_profile_requires_explicit_authorization(capsys):
+    assert main(["benchmark", "native-profile", "--target", "mac:imageio",
+                 "--json"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert "acknowledge-authorized-use" in result["error"]

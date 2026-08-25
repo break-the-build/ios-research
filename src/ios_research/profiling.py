@@ -159,3 +159,73 @@ def profile_campaign(*, target_id: str = "mock:parser", max_cases: int = 1000,
             "Temporary workspace is removed after profiling.",
         ],
     }
+
+
+def profile_native_campaign(*, target_id: str, max_cases: int,
+                            acknowledged: bool) -> dict[str, Any]:
+    """Profile a bounded, explicitly authorized macOS harness locally.
+
+    No campaign workspace or inputs are retained. Startup is estimated from an
+    empty-input run; the remaining harness time is reported as target decode.
+    """
+    if not acknowledged:
+        raise ValueError("pass --acknowledge-authorized-use for native profiling")
+    if not target_id.startswith("mac:") or max_cases <= 0:
+        raise ValueError("native profiling requires mac:<target> and positive cases")
+    from .targets import mac
+
+    target = targets.create(target_id)
+    if not target.available():
+        raise ValueError(f"native harness for {target_id} is not available")
+    seeds = target.seeds()
+    if not seeds:
+        raise ValueError(f"native target {target_id} has no seed inputs")
+    stages = _Stages()
+    original_run = mac.subprocess.run
+    original_parse = mac.asan.parse
+
+    def timed_run(*args, **kwargs):
+        return stages.measure("harness_process", original_run, *args, **kwargs)
+
+    def timed_parse(*args, **kwargs):
+        return stages.measure("sanitizer_report_parsing", original_parse,
+                              *args, **kwargs)
+
+    mac.subprocess.run = timed_run
+    mac.asan.parse = timed_parse
+    started = time.perf_counter()
+    try:
+        # A single empty-input run estimates executable/process startup. It is
+        # deliberately reported separately and never treated as a decode.
+        target.execute(b"")
+        startup = stages.seconds.get("harness_process", 0.0)
+        before = stages.seconds.get("harness_process", 0.0)
+        for index in range(max_cases):
+            target.execute(seeds[index % len(seeds)])
+        process_seconds = stages.seconds.get("harness_process", 0.0) - before
+    finally:
+        mac.subprocess.run = original_run
+        mac.asan.parse = original_parse
+    wall_seconds = time.perf_counter() - started
+    startup_per_case = startup
+    decode_seconds = max(0.0, process_seconds - startup_per_case * max_cases)
+    return {
+        "target": target_id,
+        "max_cases": max_cases,
+        "executed_cases": max_cases,
+        "wall_seconds": round(wall_seconds, 6),
+        "stages": {
+            "mutation": {"seconds": 0.0, "calls": 0},
+            "process_startup": {"seconds": round(startup, 6), "calls": 1},
+            "target_execution": {"seconds": round(decode_seconds, 6),
+                                 "calls": max_cases},
+            "sanitizer_report_parsing": {
+                "seconds": round(stages.seconds.get("sanitizer_report_parsing", 0.0), 6),
+                "calls": stages.calls.get("sanitizer_report_parsing", 0)},
+            "persistence": {"seconds": 0.0, "calls": 0},
+        },
+        "notes": [
+            "No campaign workspace or input artifacts are retained.",
+            "Target execution is process time less one empty-input startup estimate per case.",
+        ],
+    }

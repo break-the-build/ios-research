@@ -32,3 +32,17 @@ I/O; this does not alter their data model or resume semantics.
 
 Any acceleration prototype must sit behind a stable interface and include
 parity, deterministic-output, and representative-workload comparison tests.
+
+## Authorized native-harness measurement
+
+After building a local `mac:*` harness and confirming authorization, run:
+
+```bash
+ios-research benchmark native-profile --target mac:imageio --max-cases 10 \
+  --acknowledge-authorized-use --json
+```
+
+This is opt-in and retains no campaign workspace or input artifacts. It reports
+an empty-input process-startup estimate, target execution after subtracting that
+estimate, and sanitizer-report parsing. Compare its stage shape with the mock
+baseline; do not combine their absolute throughput claims.
