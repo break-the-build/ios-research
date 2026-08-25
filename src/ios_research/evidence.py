@@ -89,8 +89,16 @@ class EvidenceStore:
         if captured_at:
             try:
                 from datetime import datetime
-                parsed_capture = datetime.fromisoformat(captured_at)
-                parsed_seen = datetime.fromisoformat(crash.last_seen)
+                # Python 3.10's fromisoformat does not accept the RFC 3339
+                # ``Z`` suffix that the framework clock emits. Normalize it
+                # so campaign evidence correlates consistently across all
+                # supported Python versions.
+                parsed_capture = datetime.fromisoformat(
+                    captured_at.removesuffix("Z") + "+00:00"
+                    if captured_at.endswith("Z") else captured_at)
+                parsed_seen = datetime.fromisoformat(
+                    crash.last_seen.removesuffix("Z") + "+00:00"
+                    if crash.last_seen.endswith("Z") else crash.last_seen)
                 if (parsed_capture.tzinfo is None) != \
                         (parsed_seen.tzinfo is None):
                     raise ValueError("mixed aware/naive timestamps")
