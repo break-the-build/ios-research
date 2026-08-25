@@ -49,6 +49,10 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--duration", type=float, default=None,
                          help="wall-clock budget in seconds")
     p_start.add_argument("--workers", type=int, default=None)
+    p_start.add_argument("--focus-symbols", default=None,
+                         help="comma-separated focus symbols rotated every "
+                              "fuzz.focus_phase_len cases (#205); overrides "
+                              "--focus-symbol when given")
     p_start.add_argument("--adapt-strategies", action="store_true",
                          default=False,
                          help="online strategy reweighting from per-strategy "
@@ -202,6 +206,12 @@ def cmd_start(ctx, args) -> Result:
                                 getattr(args, "adapt_strategies", False)),
                             strategy_adapt_every=int(
                                 cfg.get("fuzz.strategy_adapt_every", 512)),
+                            focus_symbols=(
+                                [x.strip() for x in
+                                 (getattr(args, "focus_symbols", None)
+                                  or "").split(",") if x.strip()] or None),
+                            focus_phase_len=int(
+                                cfg.get("fuzz.focus_phase_len", 512)),
                             strategy_weights=cfg.get("fuzz.strategy_weights"),
                             dictionary_path=dictionary,
                             value_profile=bool(getattr(args, "value_profile",
