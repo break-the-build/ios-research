@@ -121,11 +121,12 @@ def parse_strings(text: str, min_len: int = 4) -> list[str]:
 
 
 def scan_binary(path: str, *, min_len: int = 4) -> dict:
-    """Census a loose Mach-O: symbols, linked libraries, constant strings.
+    """Census a loose Mach-O or a dyld shared cache (with its subcaches).
 
-    Also accepts a dyld shared cache file: symbols/otool are skipped
-    (the cache is not a Mach-O image) and strings are extracted from the
-    whole cache, which is sufficient for fingerprinting.
+    A dyld shared cache's main file is a stub header; the content lives in
+    numbered sibling files (``.01``, ``.02``, ...). All siblings are
+    scanned for constant strings (they are stored contiguously), which is
+    sufficient for fingerprinting without extraction.
     """
     target = Path(path)
     if not target.is_file():
@@ -136,8 +137,21 @@ def scan_binary(path: str, *, min_len: int = 4) -> dict:
         "size_bytes": target.stat().st_size,
         "is_dyld_shared_cache": is_cache,
     }
-    strings_text = _run(["strings", "-n", str(min_len), str(target)])
-    record["strings"] = parse_strings(strings_text, min_len)
+    files = [target]
+    if is_cache:
+        parent = target.parent
+        subcaches = sorted(p for p in parent.glob(target.name + ".*")
+                           if p.is_file()
+                           and not p.name.endswith((".map", ".atlas")))
+        files.extend(subcaches)
+        record["subcaches"] = [str(p.name) for p in subcaches]
+        record["size_bytes"] = sum(f.stat().st_size for f in files)
+    strings: list[str] = []
+    for f in files:
+        strings_text = _run(["strings", "-n", str(min_len), str(f)],
+                            timeout=600.0)
+        strings.extend(parse_strings(strings_text, min_len))
+    record["strings"] = strings
     if is_cache:
         record["symbols"] = {}
         record["libraries"] = []
