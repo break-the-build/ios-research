@@ -224,7 +224,7 @@ downstream (fuzzer, triage, analysis) is target-agnostic.
 |---|---|---|
 | `mock:parser`, `mock:parser-v2` | In-process Python parsers with planted, *known* bug classes (OOB write, UAF, type confusion) | Pipeline validation, training, differential/regression demos — never evidence |
 | `audio:wav/mp3/aac/alac` | Pure-Python format parsers with realistic structure | Fast iteration on mutators/oracles without native builds |
-| `mac:imageio/coregraphics/audiotoolbox/coretext` | **Real Apple parsers** via a C harness (ASan+UBSan+libFuzzer) on macOS — ImageIO, CoreGraphics PDF, AudioToolbox, CoreText | Primary discovery engine; code is shared with iOS, so findings transfer (FINDING-04 proved it end-to-end) |
+| `mac:imageio/coregraphics/audiotoolbox/coretext/videotoolbox` | **Real Apple parsers** via a C harness (ASan+UBSan+libFuzzer) on macOS — ImageIO, CoreGraphics PDF, AudioToolbox, CoreText, VideoToolbox decode sessions | Primary discovery engine; code is shared with iOS, so findings transfer (FINDING-04 proved it end-to-end) |
 | `mac:selftest` | C harness with three deliberate ASan-detectable bugs (OOB read/write, UAF) keyed on input markers | Validates the entire crash pipeline (parse→dedup→minimize→reproduce) against real sanitizer output |
 | Module targets (`wifi:`, `bluetooth:`, `ipc:`, `kernel:`, `pq3:`, `wifiaware:`, `messaging:`, `lockeddevice:`, …) | Structured mock models of iOS subsystems (protocol state machines, IPC surfaces) | Exercising *workflow/orchestration* logic and generating realistic corpora for those domains |
 | `jsc:semantic`, `mach:sim` | Semantic JS-engine model; Mach message model (`mach_msg` subset) | Kernel-boundary and engine-logic research planning |

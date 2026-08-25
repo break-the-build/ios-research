@@ -16,7 +16,7 @@
 # Usage:
 #   tools/harness/build.sh [--driver|--libfuzzer] [--trace-cmp] <framework> [<framework> ...]
 #   tools/harness/build.sh all
-#   frameworks: imageio | audiotoolbox | coregraphics | all
+#   frameworks: imageio | audiotoolbox | coregraphics | coretext | videotoolbox | all
 #
 # --trace-cmp adds -fsanitize-coverage=trace-cmp (#30) so comparison
 # instrumentation is available to the standalone driver. libFuzzer builds
@@ -96,6 +96,7 @@ define_for() {
     audiotoolbox) echo "-DHARNESS_TARGET_AUDIOTOOLBOX" ;;
     coregraphics) echo "-DHARNESS_TARGET_COREGRAPHICS" ;;
     coretext)     echo "-DHARNESS_TARGET_CORETEXT" ;;
+    videotoolbox) echo "-DHARNESS_TARGET_VIDEOTOOLBOX" ;;
     selftest)     echo "-DHARNESS_TARGET_SELFTEST" ;;
     *) return 1 ;;
   esac
@@ -141,7 +142,7 @@ sdk_flags() {
 build_one() {
   local key="$1" def out
   if ! def="$(define_for "$key")"; then
-    echo "unknown framework key: $key (want: imageio audiotoolbox coregraphics)" >&2
+    echo "unknown framework key: $key (want: imageio audiotoolbox coregraphics coretext videotoolbox)" >&2
     return 2
   fi
   if ! profile_supported_on "$SANITIZER_PROFILE" "$(uname -s)"; then
@@ -184,11 +185,11 @@ main() {
   done
 
   if [ "${#args[@]}" -eq 0 ]; then
-    echo "usage: $0 [--driver|--libfuzzer] <imageio|audiotoolbox|coregraphics|all> ..." >&2
+    echo "usage: $0 [--driver|--libfuzzer] <imageio|audiotoolbox|coregraphics|coretext|videotoolbox|all> ..." >&2
     exit 2
   fi
   if [ "${args[0]}" = "all" ]; then
-    args=(imageio audiotoolbox coregraphics)
+    args=(imageio audiotoolbox coregraphics coretext videotoolbox)
   fi
   for a in "${args[@]}"; do
     build_one "$a"

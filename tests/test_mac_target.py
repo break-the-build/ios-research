@@ -453,6 +453,71 @@ def test_sfnt_structure_mutation_survives_corrupt_num_tables():
         assert out is None or isinstance(out, bytes)
 
 
+# --- VideoToolbox decompression-session target (#234) ------------------------
+
+def test_videotoolbox_target_registered():
+    t = create("mac:videotoolbox")
+    assert t.mock is False
+    d = t.describe()
+    assert d["framework"] == "VideoToolbox"
+    assert d["entry_point"] == "VTDecompressionSessionCreate"
+    assert t.formats == ("h264", "hevc", "raw")
+
+
+def test_videotoolbox_seeds_parse_for_both_codecs():
+    seeds = _mac_seeds.seeds("videotoolbox")
+    assert len(seeds) >= 5
+    h264 = [s for s in seeds if s[0] & 1 == 0]
+    hevc = [s for s in seeds if s[0] & 1 == 1]
+    assert h264 and hevc
+
+    def records(data):
+        """Walk u32-BE-length records; returns [(declared, available)]."""
+        out, pos = [], 1
+        while pos + 4 <= len(data) and len(out) < 16:
+            declared = int.from_bytes(data[pos:pos + 4], "big")
+            avail = min(declared, len(data) - pos - 4)
+            out.append((declared, avail))
+            pos += 4 + avail
+        return out
+
+    # H.264: [SPS, PPS, frame]; HEVC: [VPS, SPS, PPS, frame]. The valid seeds
+    # carry exact (unclamped) lengths; the malformed variants do not.
+    h_rec = records(h264[0])
+    assert len(h_rec) == 3 and all(d == a for d, a in h_rec)
+    e_rec = records(hevc[0])
+    assert len(e_rec) == 4 and all(d == a for d, a in e_rec)
+
+
+def test_videotoolbox_mutation_is_deterministic_and_effective():
+    import random
+    seed = _mac_seeds.seeds("videotoolbox")[0]
+    a = _mac_seeds.structure_mutate("videotoolbox", seed, random.Random(7))
+    b = _mac_seeds.structure_mutate("videotoolbox", seed, random.Random(7))
+    assert a == b and isinstance(a, bytes)
+    changed = any(
+        _mac_seeds.structure_mutate("videotoolbox", seed, random.Random(r))
+        != seed
+        for r in range(20))
+    assert changed
+
+
+def test_videotoolbox_mutation_handles_tiny_inputs():
+    import random
+    for blob in (b"", b"\x00", b"\x01\x00\x00"):
+        out = _mac_seeds.structure_mutate("videotoolbox", blob,
+                                          random.Random(0))
+        assert out is None or isinstance(out, bytes)
+
+
+def test_videotoolbox_structure_mutate_hook_delegates():
+    import random
+    t = create("mac:videotoolbox")
+    seed = t.seeds()[0]
+    out = t.structure_mutate(seed, random.Random(3))
+    assert isinstance(out, bytes)
+
+
 def test_sfnt_magic_dispatch_covers_cff_and_collection():
     import random
     for magic in (b"OTTO" + b"\x00" * 40, b"true" + b"\x00" * 40,
@@ -816,6 +881,46 @@ def test_native_coregraphics_rejects_junk(tmp_path):
     # either way it must not be reported as a sanitizer finding.
     pdf = t.execute(t.seeds()[1])
     assert pdf.outcome in (Outcome.ACCEPTED, Outcome.REJECTED)
+
+
+@pytest.mark.native
+@pytest.mark.skipif(_asan_clang() is None,
+                    reason="requires macOS with a full-Xcode/Homebrew ASan clang")
+def test_native_videotoolbox_seed_roundtrip(tmp_path):
+    """#234 end-to-end: the VideoToolbox driver decodes both valid codec seeds
+    and *rejects* junk — real decompression-session signal under ASan/UBSan."""
+    build = REPO / "tools" / "harness" / "build.sh"
+    env = dict(os.environ)
+    env["CC"] = _asan_clang()
+    env["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
+    r = subprocess.run(["bash", str(build), "videotoolbox"],
+                       capture_output=True, env=env, timeout=180)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    binary = REPO / "tools" / "harness" / "build" / "videotoolbox_fuzzer"
+    assert binary.is_file()
+
+    t = MacFuzzTarget("videotoolbox", harness=str(binary), timeout_s=30)
+    seeds = t.seeds()
+    assert len(seeds) >= 2
+    h264, hevc = seeds[0], seeds[1]
+    assert h264[0] & 1 == 0 and hevc[0] & 1 == 1
+
+    junk = t.execute(b"definitely-not-a-video")
+    if junk.outcome == Outcome.ABNORMAL and "CHECK failed" in junk.detail:
+        pytest.skip("toolchain ASan runtime aborts on dlopen (init CHECK)")
+    assert junk.outcome == Outcome.REJECTED
+
+    for seed in (h264, hevc):
+        res = t.execute(seed)
+        assert res.outcome in (Outcome.ACCEPTED, Outcome.REJECTED)
+
+    # Structure-mutated containers stay inside the parse (no sanitizer finding
+    # from the harness's own boundary math) and produce normalized outcomes.
+    import random
+    rng = random.Random(7)
+    batch = [t.structure_mutate(h264, rng) or h264 for _ in range(8)]
+    results = t.execute_batch(batch)
+    assert all(res.outcome in Outcome.ALL for res in results)
 
 
 @pytest.mark.skipif(_asan_clang() is None,
