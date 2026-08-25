@@ -501,11 +501,12 @@ vuln-finding drowns in false positives — the hybrid is the proven pattern:
   in hours instead of weeks.
 
 Platform note: system framework paths are broken symlinks on cryptex-era
-OSes; the code lives in the dyld shared cache
-(`/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/`). `staticscan
-locate <framework>` reports which case you're in. Ghidra analysis requires
-extracting the dylib of interest from the cache first (dyld_shared_cache_util
-or the `ipsw` tool); strings-based fingerprinting works on the cache as-is.
+OSes; the code lives in the dyld shared cache. `staticscan locate
+<framework>` reports which case you're in; `staticscan extract <framework>`
+pulls the real dylib out (via `ipsw`) for Ghidra analysis, while
+strings-based fingerprinting works on the cache as-is. Live-verified:
+CoreText extracts to a 3.4 MB dylib yielding 6,952 functions / 18,142
+edges, with focus functions in real internals.
 
 RE of Apple binaries for vulnerability research on your own devices is the
 activity the Apple Security Bounty program contemplates — this module stays

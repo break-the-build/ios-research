@@ -46,15 +46,29 @@ ios-research staticscan callgraph <binary>.ghidra_export.json \
 Then point a directed campaign at the focus functions (see
 `src/ios_research/directed.py`).
 
-## dyld shared cache caveat
+## dyld shared cache: extracting system frameworks
 
-System frameworks live inside the shared cache, not as loose files —
-`staticscan locate <framework>` reports this. Strings-based
-fingerprinting works on the cache directly, but **call-graph analysis
-requires extracting the dylib first** (e.g. with `dyld_shared_cache_util
--extract` from dyld sources, or the `ipsw` tool: `brew install ipsw`,
-then `ipsw dsc extract`). Loose Mach-Os (custom targets, third-party
-apps, our harness binaries) need no extraction.
+System frameworks live inside the shared cache, not as loose files.
+`staticscan extract <framework>` pulls the real dylib out via `ipsw`
+(`brew install ipsw`), ready for Ghidra:
+
+```bash
+brew install ipsw
+ios-research staticscan extract CoreText
+# -> .ios-research/artifacts/dsc/CoreText
+mkdir -p /tmp/ghidra-proj
+~/tools/ghidra/support/analyzeHeadless /tmp/ghidra-proj proj \
+    -import "$PWD/.ios-research/artifacts/dsc/CoreText" \
+    -postScript ghidra_export.java -scriptPath "$PWD/tools/staticscan"
+ios-research staticscan callgraph \
+    .ios-research/artifacts/dsc/CoreText.ghidra_export.json \
+    --focus --out coretext-callgraph.json
+```
+
+Live-verified on macOS 26.5: CoreText extracts to a 3.4 MB dylib; Ghidra
+yields 6,952 functions / 18,142 edges; focus functions include real
+internals (`_CTGlyphStorage_allocatedAdvances`). Loose Mach-Os (custom
+targets, third-party apps, our harness binaries) need no extraction.
 
 ## Focus-token quality
 

@@ -10,6 +10,7 @@ fixture binary and runs the real census end-to-end.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -291,3 +292,60 @@ def test_cmd_diff_accepts_saved_json_documents(tmp_path):
     res = staticscan_cmd.cmd_diff(ctx=None, args=a)
     assert res.ok and res.data["added_token_count"] == 1
     assert res.data["directed_targets"][0]["family"] == "pdf"
+
+
+# --- dyld shared cache extraction (#237) -----------------------------------------
+
+def test_extract_rejects_bad_names():
+    with pytest.raises(Exception):
+        ss.extract_framework("../evil", "/tmp/x")
+    with pytest.raises(Exception):
+        ss.extract_framework("", "/tmp/x")
+
+
+def test_extract_loose_binary_needs_no_extraction(tmp_path, monkeypatch):
+    fw = tmp_path / "Foo.framework" / "Versions" / "Current" / "Foo"
+    fw.parent.mkdir(parents=True)
+    fw.write_bytes(b"\xcf\xfa\xed\xfe")
+    monkeypatch.setattr(ss, "FRAMEWORK_BASES", (str(tmp_path),))
+    monkeypatch.setattr(ss, "DSC_PATHS", ())
+    out = ss.extract_framework("Foo", str(tmp_path / "out"))
+    assert out["extracted"] is False
+    assert out["path"] == str(fw)
+
+
+def test_extract_runs_ipsw_and_finds_output(tmp_path, monkeypatch):
+    fake_cache = tmp_path / "dyld_shared_cache_arm64e"
+    fake_cache.write_bytes(b"stub")
+    monkeypatch.setattr(ss, "DSC_PATHS", (str(fake_cache),))
+
+    captured = {}
+
+    def fake_run(cmd, timeout=120.0):
+        captured["cmd"] = cmd
+        outdir = cmd[cmd.index("-o") + 1]
+        (tmp_path / "out" if outdir == str(tmp_path / "out")
+         else pathlib.Path(outdir)).mkdir(parents=True, exist_ok=True)
+        produced = pathlib.Path(outdir) / "CoreText.dylib"
+        produced.write_bytes(b"\xcf\xfa\xed\xfe")
+        return 0, "extracted"
+
+    monkeypatch.setattr(ss, "_run_status", fake_run)
+    out = ss.extract_framework("CoreText", str(tmp_path / "out"))
+    assert out["extracted"] is True
+    assert out["path"].endswith("CoreText.dylib")
+    assert out["install_name"] == \
+        "/System/Library/Frameworks/CoreText.framework/CoreText"
+    cmd = captured["cmd"]
+    assert cmd[:3] == ["ipsw", "dyld", "extract"]
+    assert "--slide" in cmd and "-o" in cmd
+
+
+def test_extract_reports_ipsw_failure(tmp_path, monkeypatch):
+    fake_cache = tmp_path / "dyld_shared_cache_arm64e"
+    fake_cache.write_bytes(b"stub")
+    monkeypatch.setattr(ss, "DSC_PATHS", (str(fake_cache),))
+    monkeypatch.setattr(ss, "_run_status", lambda cmd, timeout=120.0:
+                        (1, "boom: dylib not found"))
+    with pytest.raises(Exception, match="dylib not found"):
+        ss.extract_framework("CoreText", str(tmp_path / "out"))
