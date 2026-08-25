@@ -248,3 +248,46 @@ def test_scan_binary_expands_subcaches(tmp_path, monkeypatch):
     assert len(binary["subcaches"]) == 2          # .map excluded
     blob = "\n".join(binary["strings"])
     assert "glyf" in blob and "OTTO" in blob
+
+
+# --- fingerprint diffing (#228) -------------------------------------------------
+
+def test_diff_fingerprints_added_removed_and_targets():
+    old = {"pdf": [{"token": "%PDF-", "hits": 3}],
+           "font": [{"token": "sfnt", "hits": 2}]}
+    new = {"pdf": [{"token": "%PDF-", "hits": 3},
+                   {"token": "/JBIG2Decode", "hits": 1}],
+           "jxl": [{"token": "JXL ", "hits": 4}]}
+    d = ss.diff_fingerprints(old, new)
+    assert d["per_family"]["pdf"]["added"] == ["/JBIG2Decode"]
+    assert d["per_family"]["font"]["removed"] == ["sfnt"]
+    assert {t["family"] for t in d["directed_targets"]} == {"pdf", "jxl"}
+    assert d["added_token_count"] == 2
+    assert d["removed_token_count"] == 1
+    assert d["unchanged_token_count"] == 1
+
+
+def test_diff_fingerprints_identical_is_negative():
+    m = {"audio": [{"token": "caff", "hits": 9}]}
+    d = ss.diff_fingerprints(m, m)
+    assert d["changed_families"] == 0
+    assert d["directed_targets"] == []
+    assert d["added_token_count"] == 0
+
+
+def test_cmd_diff_accepts_saved_json_documents(tmp_path):
+    from ios_research.commands import staticscan_cmd
+
+    old_doc = tmp_path / "old.json"
+    new_doc = tmp_path / "new.json"
+    old_doc.write_text(json.dumps({"path": "old", "matches":
+        {"pdf": [{"token": "%PDF-", "hits": 2}]}}))
+    new_doc.write_text(json.dumps({"path": "new", "matches":
+        {"pdf": [{"token": "%PDF-", "hits": 2},
+                 {"token": "/JBIG2Decode", "hits": 5}]}}))
+
+    class A: pass
+    a = A(); a.old_path = str(old_doc); a.new_path = str(new_doc)
+    res = staticscan_cmd.cmd_diff(ctx=None, args=a)
+    assert res.ok and res.data["added_token_count"] == 1
+    assert res.data["directed_targets"][0]["family"] == "pdf"

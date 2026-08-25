@@ -45,7 +45,54 @@ def register(subparsers, parent) -> None:
     p_show.add_argument("pair_id", nargs="?", default=None)
     p_show.set_defaults(func=cmd_show)
 
+    p_state = sub.add_parser("state", parents=[parent],
+                             help="verify host Lockdown Mode state and "
+                                  "paired-run tooling readiness (#228 §4)")
+    p_state.set_defaults(func=cmd_state)
+
     p.set_defaults(func=cmd_list)
+
+
+def _lm_state() -> dict:
+    """Read the host Lockdown Mode state (0 = off, 1/2 = enabled levels)."""
+    import subprocess
+    try:
+        out = subprocess.run(["sysctl", "-n",
+                              "security.mac.lockdown_mode_state"],
+                             capture_output=True, text=True, timeout=10)
+        raw = out.stdout.strip()
+        state = int(raw) if raw.isdigit() else -1
+        readable = out.returncode == 0 and state >= 0
+    except (OSError, ValueError):
+        readable, state = False, -1
+    return {"readable": readable, "raw": state,
+            "enabled": bool(state >= 1),
+            "source": "sysctl security.mac.lockdown_mode_state"}
+
+
+def cmd_state(ctx, args) -> Result:
+    from ..targets import _REGISTRY, create
+    lm = _lm_state()
+    # Prerequisite probe: at least one mock target must be constructible for
+    # the paired run's standard leg; the lockdown leg is the same binary
+    # under LM policy.
+    mock_targets = []
+    for tid in sorted(_REGISTRY):
+        try:
+            if getattr(create(tid), "mock", False):
+                mock_targets.append(tid)
+        except Exception:  # noqa: BLE001 - readiness probe only
+            continue
+    data = {"lockdown_mode": lm,
+            "paired_run_ready": lm["readable"] and bool(mock_targets),
+            "mock_target_count": len(mock_targets),
+            "notes": [
+                "enable Lockdown Mode in System Settings > Privacy & "
+                "Security (reversible; requires reboot) before the "
+                "lockdown leg",
+                f"currently: {'ENABLED' if lm['enabled'] else 'disabled'}",
+            ]}
+    return Result(command="lockdown state", data=data)
 
 
 def _resolve(engine, pair_id):

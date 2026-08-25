@@ -1507,6 +1507,38 @@
                 "required": false
               },
               {
+                "dest": "focus_symbols",
+                "flags": [
+                  "--focus-symbols"
+                ],
+                "help": "comma-separated focus symbols rotated every fuzz.focus_phase_len cases (#205); overrides --focus-symbol when given",
+                "required": false
+              },
+              {
+                "dest": "adapt_strategies",
+                "flags": [
+                  "--adapt-strategies"
+                ],
+                "help": "online strategy reweighting from per-strategy novel-feature yield every fuzz.strategy_adapt_every cases (#203)",
+                "required": false
+              },
+              {
+                "dest": "skip_duplicates",
+                "flags": [
+                  "--skip-duplicates"
+                ],
+                "help": "never execute the same input twice in a session (#204); duplicates are counted as skipped_duplicate",
+                "required": false
+              },
+              {
+                "dest": "window",
+                "flags": [
+                  "--window"
+                ],
+                "help": "generation window: cases produced before execution fans out (>=1; default fuzz.window)",
+                "required": false
+              },
+              {
                 "dest": "chunk",
                 "flags": [
                   "--chunk"
@@ -2001,6 +2033,12 @@
                 "required": false
               }
             ]
+          }
+        },
+        "state": {
+          "arguments": {
+            "options": [],
+            "positionals": []
           }
         }
       }
@@ -3021,6 +3059,140 @@
           "arguments": {
             "options": [],
             "positionals": []
+          }
+        }
+      }
+    },
+    "staticscan": {
+      "arguments": {
+        "options": [],
+        "positionals": [
+          {
+            "help": "",
+            "name": "subcommand",
+            "required": true
+          }
+        ]
+      },
+      "subcommands": {
+        "callgraph": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "focus",
+                "flags": [
+                  "--focus"
+                ],
+                "help": "list parser focus functions (functions that reference format constants)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "export_json",
+                "required": true
+              }
+            ]
+          }
+        },
+        "dict": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "families",
+                "flags": [
+                  "--families"
+                ],
+                "help": "comma-separated family filter (default: all matched)",
+                "required": false
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "write dictionary to a file instead of stdout",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "diff": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "old_path",
+                "required": true
+              },
+              {
+                "help": "",
+                "name": "new_path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "fingerprint": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "locate": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "bare framework name, e.g. AudioToolbox",
+                "name": "framework",
+                "required": true
+              }
+            ]
+          }
+        },
+        "scan": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "min_len",
+                "flags": [
+                  "--min-len"
+                ],
+                "help": "minimum string length (default 4)",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
           }
         }
       }
@@ -4099,6 +4271,30 @@
         ]
       },
       "subcommands": {
+        "import-plan": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
+        "parse-xcresult": {
+          "arguments": {
+            "options": [],
+            "positionals": [
+              {
+                "help": "",
+                "name": "path",
+                "required": true
+              }
+            ]
+          }
+        },
         "plan": {
           "arguments": {
             "options": [],
@@ -4188,6 +4384,168 @@
             ]
           }
         },
+        "repro-cmd": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "plan",
+                "flags": [
+                  "--plan"
+                ],
+                "help": "",
+                "required": true
+              },
+              {
+                "dest": "failure_index",
+                "flags": [
+                  "--failure-index"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "project",
+                "flags": [
+                  "--project"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "workspace_swift",
+                "flags": [
+                  "--xcode-workspace"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "input",
+                "flags": [
+                  "--input"
+                ],
+                "help": "minimized fuzz input path to map instead of a recorded failure",
+                "required": false
+              },
+              {
+                "dest": "action",
+                "flags": [
+                  "--action"
+                ],
+                "help": "action sequence step (repeatable, with --input)",
+                "required": false
+              },
+              {
+                "dest": "test",
+                "flags": [
+                  "--test"
+                ],
+                "help": "explicit -only-testing identifier override",
+                "required": false
+              },
+              {
+                "dest": "sanitizer",
+                "flags": [
+                  "--sanitizer"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "record_id",
+                "required": false
+              }
+            ]
+          }
+        },
+        "run-tests": {
+          "arguments": {
+            "options": [
+              {
+                "dest": "project",
+                "flags": [
+                  "--project"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "workspace_swift",
+                "flags": [
+                  "--xcode-workspace"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "destination",
+                "flags": [
+                  "--destination"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "only_testing",
+                "flags": [
+                  "--only-testing"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "sanitizer",
+                "flags": [
+                  "--sanitizer"
+                ],
+                "help": "address|thread|undefined-behavior|main-thread-checker|guard-malloc|zombies|code-coverage (repeatable)",
+                "required": false
+              },
+              {
+                "dest": "result_bundle_path",
+                "flags": [
+                  "--result-bundle-path"
+                ],
+                "help": "",
+                "required": false
+              },
+              {
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "print the command without executing (construction-only is the default)",
+                "required": false
+              },
+              {
+                "dest": "execute",
+                "flags": [
+                  "--execute"
+                ],
+                "help": "actually run xcodebuild (opt-in; requires --yes)",
+                "required": false
+              },
+              {
+                "dest": "timeout",
+                "flags": [
+                  "--timeout"
+                ],
+                "help": "",
+                "required": false
+              }
+            ],
+            "positionals": [
+              {
+                "help": "",
+                "name": "plan_id",
+                "required": true
+              }
+            ]
+          }
+        },
         "test": {
           "arguments": {
             "options": [
@@ -4228,7 +4586,7 @@
                 "flags": [
                   "--sanitizer"
                 ],
-                "help": "address|thread|undefined-behavior|main-thread-checker|zombies (repeatable)",
+                "help": "address|thread|undefined-behavior|main-thread-checker|guard-malloc|zombies|code-coverage (repeatable)",
                 "required": false
               },
               {
@@ -4244,7 +4602,15 @@
                 "flags": [
                   "--dry-run"
                 ],
-                "help": "print the command without executing (default when xcodebuild is unavailable)",
+                "help": "print the command without executing (construction-only is the default)",
+                "required": false
+              },
+              {
+                "dest": "execute",
+                "flags": [
+                  "--execute"
+                ],
+                "help": "actually run xcodebuild (opt-in; requires --yes)",
                 "required": false
               },
               {

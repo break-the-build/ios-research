@@ -135,6 +135,45 @@ def parse_verdict(console: str, timed_out: bool) -> str:
     return "HANG" if timed_out else "ERROR"
 
 
+#: devicectl can tear its console channel down before the app's final PROBE
+#: lines are relayed when the app exits within milliseconds of launch; the
+#: lines show up fine on a manual run but the captured stream is empty, which
+#: parse_verdict maps to a false ERROR. A probe-side PROBE ERROR line is
+#: definitive and must NOT be retried; an empty/marker-less capture is treated
+#: as a suspected capture race and retried with backoff (RESEARCH-LOG 2026-08-25).
+CONSOLE_RACE_ATTEMPTS = 3
+
+
+def launch_with_retry(launch_fn, timeout: float,
+                      attempts: int = CONSOLE_RACE_ATTEMPTS):
+    """Run the launch/capture step, retrying suspected console races.
+
+    ``launch_fn`` is called as ``launch_fn(timeout)`` and returns
+    ``(code, console)``. Returns ``(code, console, attempts_meta)`` where the
+    meta list records every attempt for the JSON envelope.
+    """
+    tried = []
+    code, console = 0, ""
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            time.sleep(1.5 * (attempt - 1))
+        code, console = launch_fn(timeout)
+        timed_out = code == 124
+        verdict = parse_verdict(console, timed_out)
+        has_markers = "PROBE" in console
+        tried.append({"attempt": attempt, "verdict": verdict,
+                      "probe_lines": sum(1 for ln in console.splitlines()
+                                         if "PROBE" in ln),
+                      "timed_out": timed_out})
+        if verdict != "ERROR":
+            return code, console, tried
+        if has_markers:
+            # The app itself reported PROBE ERROR: definitive, no retry.
+            return code, console, tried
+        # Marker-less ERROR: suspected console-capture race -> retry.
+    return code, console, tried
+
+
 def load_input(args) -> bytes:
     if args.input:
         return Path(args.input).read_bytes()
@@ -200,7 +239,11 @@ def main() -> int:
               "--device", dev_id, "--terminate-existing",
               "--console", args.app]
     started = time.monotonic()
-    code, console = run(launch, timeout=args.timeout)
+
+    def _launch(timeout: float) -> tuple[int, str]:
+        return run(launch, timeout=timeout)
+
+    code, console, attempts_meta = launch_with_retry(_launch, args.timeout)
     timed_out = code == 124
     verdict = parse_verdict(console, timed_out)
     probes = [ln.strip() for ln in console.splitlines()
@@ -220,6 +263,7 @@ def main() -> int:
             "family": classify_family(data),
             "elapsed_s": round(time.monotonic() - started, 1),
             "probe_lines": probes,
+            "launch_attempts": attempts_meta,
         },
         "messages": [],
         "error": None if ok else f"device verdict: {verdict}",
