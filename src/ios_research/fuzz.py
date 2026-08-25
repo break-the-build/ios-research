@@ -6,6 +6,23 @@ persisted so they can be paused and resumed. Execution is fully deterministic
 for a given ``(seed, corpus)`` — the reference engine runs sequentially and
 records ``workers`` as metadata.
 
+Parallel execution contract (#199)
+----------------------------------
+With ``--workers``/``--window`` greater than one the engine fans case
+executions out to a thread pool over generation windows. The run stays a pure
+function of ``(seed, window)``: mutation is derived per case index and
+reduction happens strictly in index order on the calling thread, so the same
+seed and window produce an identical case sequence and identical final state
+regardless of thread scheduling. Coverage feedback observes session state as
+of the start of the current generation window — feedback lag is at most
+``window - 1`` cases (zero at ``window == 1``), so non-coverage targets
+produce byte-identical sequences at every window width, while coverage-guided
+targets legitimately observe slightly staler state than the serial loop.
+Resume equivalence holds given identical settings: pausing between windows —
+including mid-window via ``max_new``, since windows are never dispatched past
+the remaining case budget — yields the same state and downstream sequence as
+an uninterrupted run.
+
 The engine persists confirmed crashes and reports abnormal harness behavior
 separately. It never generates exploit payloads.
 """
@@ -25,7 +42,7 @@ from .crashes import CrashStore
 from .dictionary import (DictionaryToken, load_dictionary, tokens_from_records,
                          tokens_to_records)
 from .errors import NotFoundError, StateError
-from .executors import SerialExecutor
+from .executors import SerialExecutor, ThreadedBatchExecutor, MAX_WORKERS
 from .hashing import sha256_bytes
 from .ids import make_id
 from .targets.base import Outcome
@@ -70,6 +87,7 @@ class FuzzSession:
     max_cases: int
     duration_s: float | None
     status: str = RUNNING
+    window: int = 1
     base_shas: list[str] = field(default_factory=list)
     strategy_weights: dict[str, int] = field(default_factory=dict)
     cursor: int = 0
@@ -118,6 +136,8 @@ class FuzzSession:
             "status": self.status,
             "executed": self.cursor,
             "max_cases": self.max_cases,
+            "workers": self.workers,
+            "window": self.window,
             "progress": round(self.cursor / self.max_cases, 4)
             if self.max_cases else 1.0,
             "outcomes": dict(self.outcomes),
@@ -201,7 +221,7 @@ class FuzzEngine:
     # lifecycle -----------------------------------------------------------
     def create(self, *, experiment_id: str, target: str, corpus_id: str,
                seed: int, workers: int, max_cases: int,
-               duration_s: float | None,
+               duration_s: float | None, window: int | None = None,
                strategy_weights: dict[str, int] | None = None,
                dictionary_path: str | None = None,
                dictionary_tokens: list[DictionaryToken] | None = None,
@@ -268,6 +288,7 @@ class FuzzEngine:
             id=session_id, experiment_id=experiment_id, target=target,
             corpus_id=corpus_id, seed=seed, workers=workers,
             max_cases=max_cases, duration_s=duration_s,
+            window=(max(1, int(window)) if window is not None else 1),
             base_shas=base_shas,
             strategy_weights=dict(strategy_weights or {}),
             status=RUNNING, started_at=now, updated_at=now,
@@ -506,14 +527,23 @@ class FuzzEngine:
         crash_first: dict[str, tuple] = {}   # crash_id -> (data, result, lineage)
         corpus_dirty = False
 
-        # Windowed generate -> execute -> reduce (#207). The default single-case
-        # window with the serial executor reproduces the original strictly
-        # serial loop exactly: case i is generated, executed, and fully reduced
-        # before case i+1 is generated. Wider windows and the threaded batch
-        # executor are wired up by #199; generation and reduction always stay
-        # on this thread in index order, so session state evolves identically.
-        window_size = 1
-        executor = SerialExecutor(target)
+        # Windowed generate -> execute -> reduce (#207/#199). A session with
+        # workers=1 and window=1 keeps the serial executor and single-case
+        # windows: byte-identical to the original strictly serial loop.
+        # Otherwise executions fan out to a thread pool and generation widens
+        # to a window of cases so the pool has work to overlap; an explicit
+        # window setting wins over the worker count, falling back to it
+        # (bounded at 64). Generation and reduction always stay on this
+        # thread in index order, so session state evolves identically.
+        workers_count = max(1, int(getattr(session, "workers", 1) or 1))
+        window_setting = max(1, int(getattr(session, "window", 1) or 1))
+        if workers_count > 1 or window_setting > 1:
+            executor = ThreadedBatchExecutor(
+                target, max(1, min(workers_count, MAX_WORKERS)))
+        else:
+            executor = SerialExecutor(target)
+        window_size = max(1, min(
+            (window_setting if window_setting > 1 else workers_count), 64))
 
         while session.cursor < session.max_cases:
             if max_new is not None and executed_this >= max_new:

@@ -49,6 +49,9 @@ def register(subparsers, parent) -> None:
     p_start.add_argument("--duration", type=float, default=None,
                          help="wall-clock budget in seconds")
     p_start.add_argument("--workers", type=int, default=None)
+    p_start.add_argument("--window", type=int, default=None,
+                         help="generation window: cases produced before "
+                              "execution fans out (>=1; default fuzz.window)")
     p_start.add_argument("--chunk", type=int, default=None,
                          help="cases to execute this invocation (for resumable runs)")
     p_start.add_argument("--dictionary", default=None,
@@ -130,6 +133,10 @@ def cmd_start(ctx, args) -> Result:
     max_workers = cfg.get("limits.max_workers", 8)
     if workers > max_workers:
         raise UsageError(f"workers={workers} exceeds limit {max_workers}")
+    window = args.window if args.window is not None \
+        else cfg.get("fuzz.window", 1)
+    if window < 1:
+        raise UsageError(f"window must be >= 1, got {window}")
 
     # Resolve or create corpus.
     corpus_store = CorpusStore(ws)
@@ -155,6 +162,7 @@ def cmd_start(ctx, args) -> Result:
             target=target_id, device=device.id, os_version=device.os_version,
             config_hash=cfg.hash, seed=seed,
             params={"corpus": corpus.id, "max_cases": max_cases,
+                    "workers": workers, "window": window,
                     **({"delivery": args.delivery}
                        if getattr(args, "delivery", None) else {})})
 
@@ -177,6 +185,7 @@ def cmd_start(ctx, args) -> Result:
     session = engine.create(experiment_id=experiment.id, target=target_id,
                             corpus_id=corpus.id, seed=seed, workers=workers,
                             max_cases=max_cases, duration_s=args.duration,
+                            window=window,
                             strategy_weights=cfg.get("fuzz.strategy_weights"),
                             dictionary_path=dictionary,
                             value_profile=bool(getattr(args, "value_profile",
