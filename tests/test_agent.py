@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from ios_research.agent import Agent
 from ios_research.context import Context
@@ -22,6 +23,11 @@ def test_schema_lists_all_commands_and_contract():
     assert schema["exit_codes"] == EXIT_CODES
     assert schema["safety_boundary"]["authorized_research_only"] is True
     assert "CODE_EXECUTION_INDICATOR" in schema["exploitability_indicators"]
+
+
+def test_committed_cli_schema_matches_generator():
+    schema_path = Path(__file__).resolve().parents[1] / "docs" / "cli-schema.json"
+    assert json.loads(schema_path.read_text(encoding="utf-8")) == build_cli_schema()
 
 
 def test_agent_status_reports_counts(workspace):
