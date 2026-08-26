@@ -280,7 +280,11 @@ class FuzzEngine:
         return tokens_from_records(records) or None
 
     def list(self) -> list[FuzzSession]:
-        return [_session_from_dict(d) for d in self.ws.list_json("fuzz")]
+        # exclude dictionary sidecars (<id>.dict.json); they share the fuzz/
+        # directory with session records and are not sessions themselves.
+        return [_session_from_dict(d)
+                for d in self.ws.list_json("fuzz",
+                                           exclude_suffixes=(".dict.json",))]
 
     def latest(self) -> FuzzSession | None:
         sessions = self.list()
