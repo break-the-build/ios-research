@@ -207,10 +207,95 @@ final class ScanTest: NSObject, CBCentralManagerDelegate {
     }
 }
 
+final class Churn: NSObject, CBPeripheralManagerDelegate {
+    var pm: CBPeripheralManager!
+    var cycles = 0
+    var churnMs: Int = 200
+    var gattRebuild = false
+    var service: CBMutableService? = nil
+    var rng = Rng(s: 0x9E3779B97F4A7C15)
+    var t0 = Date()
+    var fatalAt: Date? = nil
+    var recoveredAt: Date? = nil
+
+    func log(_ s: String) {
+        print("CHURN +\(Int(Date().timeIntervalSince(t0)))s cycles=\(cycles) \(s)")
+        fflush(stdout)
+    }
+
+    func start() {
+        let a = Array(CommandLine.arguments.dropFirst())
+        if let i = a.firstIndex(of: "--churn-ms"), i + 1 < a.count {
+            churnMs = Int(a[i + 1]) ?? 200
+        }
+        if a.contains("--gatt-rebuild") { gattRebuild = true }
+        pm = CBPeripheralManager(delegate: self, queue: nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(900))
+        log("end")
+        exit(0)
+    }
+
+    func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        log("state=\(peripheral.state.rawValue)")
+        switch peripheral.state {
+        case .poweredOn:
+            if fatalAt != nil && recoveredAt == nil {
+                recoveredAt = Date()
+                log("RECOVERED after \(Int(recoveredAt!.timeIntervalSince(fatalAt!)))s")
+            }
+            if fatalAt == nil {
+                Timer.scheduledTimer(withTimeInterval: Double(churnMs) / 1000.0,
+                                     repeats: true) { [weak self] _ in
+                    guard let self, self.fatalAt == nil else { return }
+                    self.cycles += 1
+                    self.pm.stopAdvertising()
+                    if self.gattRebuild {
+                        if let old = self.service { self.pm.remove(old) }
+                        let chrs: [CBMutableCharacteristic] = (0..<4).map { i in
+                            CBMutableCharacteristic(
+                                type: CBUUID(string: "\(CHAR_BASE)\(String(format: "%02X", i))"),
+                                properties: [.read],
+                                value: self.rng.data(16 + Int(self.rng.next() % 48)),
+                                permissions: [.readable])
+                        }
+                        let svc = CBMutableService(type: SERVICE_UUID, primary: true)
+                        svc.characteristics = chrs.map { c in
+                            let ch = CBMutableCharacteristic(
+                                type: c.uuid, properties: [.read],
+                                value: c.value, permissions: [.readable])
+                            ch.descriptors = [CBMutableDescriptor(
+                                type: DESC_UUID, value: self.rng.data(16))]
+                            return ch
+                        }
+                        self.pm.add(svc)
+                        self.service = svc
+                    }
+                    self.pm.startAdvertising([
+                        CBAdvertisementDataLocalNameKey: LOCAL_NAME,
+                        CBAdvertisementDataManufacturerDataKey:
+                            Data([0xFF, 0xFF, UInt8(self.cycles & 0xFF)])])
+                    if self.cycles % 50 == 0 { self.log("churning gatt=\(self.gattRebuild)") }
+                }
+            }
+        case .poweredOff:
+            // System sleep reports poweredOff to sessions (pmset-correlated);
+            // only fatal if it happens while a caffeinated run holds the
+            // machine awake — otherwise pause and resume on poweredOn.
+            log("poweredOff (system sleep?) — pausing churn")
+            if fatalAt == nil { fatalAt = Date() }
+        default:
+            log("state-change \(peripheral.state.rawValue)")
+        }
+    }
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 if args.contains("--scan-test") {
     let st = ScanTest()
     st.run()
+}
+if args.contains("--churn-test") {
+    Churn().start()
 }
 var cfg = Config()
 var i = 0

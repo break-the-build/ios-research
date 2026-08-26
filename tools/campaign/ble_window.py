@@ -152,6 +152,10 @@ def main() -> int:
     # Launch detached via `open`: TCC attributes Bluetooth access to the app
     # bundle itself (a child of this shell would inherit a non-Bluetooth host
     # and abort with __TCC_CRASHING_DUE_TO_PRIVACY_VIOLATION).
+    # Keep the Mac awake for the whole window — system sleep reports
+    # poweredOff to CoreBluetooth sessions and masquerades as a radio failure.
+    caffeinate = subprocess.Popen(
+        ["caffeinate", "-dims", "-w", str(os.getpid())])
     run(["open", "-a", str(PEER_APP), "--stdout", str(peer_log),
          "--stderr", str(out / "peer.err"), "--args",
          "--duration", str(args.duration + 15),
@@ -164,6 +168,7 @@ def main() -> int:
     def stop_peer():
         subprocess.run(["pkill", "-f", "BLEPeer.app/Contents/MacOS"],
                        capture_output=True)
+        caffeinate.terminate()
     deadline = time.time() + max(30, args.duration - 10)
     launches: list[dict] = []
     crashes: list[dict] = []
@@ -187,6 +192,9 @@ def main() -> int:
             for p in harvest_crashes(out):
                 crashes.append({"file": p.name})
             next_launch = time.time() + max(15, args.relaunch_every)
+            # stream per-launch progress so long windows are observable
+            with open(out / "progress.jsonl", "a") as pf:
+                pf.write(json.dumps(launches[-1]) + "\n")
         time.sleep(2)
 
     stop_peer()
