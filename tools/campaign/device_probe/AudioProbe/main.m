@@ -16,6 +16,9 @@
 #import <CoreText/CoreText.h>
 @import CoreBluetooth;
 
+#define PEER_SERVICE_UUID @"3A4E0001-11C3-4F2A-9E37-52B7C0DEF001"
+#define PEER_NAME_PREFIX @"IOSR-BT"
+
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 @property (strong, nonatomic) UIWindow *window;
 @end
@@ -146,9 +149,22 @@ static dispatch_semaphore_t g_bt_done;
         NSLog(@"PROBE OPEN_FAIL bluetooth state=%ld", (long)central.state);
         return;
     }
-    // Scan for everything; connection is name-filtered in didDiscover.
+    // Phase 1: unfiltered visibility sweep (who's out there at all).
     [central scanForPeripheralsWithServices:nil options:nil];
-    NSLog(@"PROBE bluetooth scan-started");
+    NSLog(@"PROBE bluetooth scan-started unfiltered");
+    // Phase 2: hardware service filter. The peer advertises SERVICE_UUID;
+    // controller-level matching sidesteps software scan throttling that
+    // otherwise drops the peer from unfiltered results (observed: app saw
+    // only <= -97 dBm devices while bluetoothd logged the peer at -57).
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                  (int64_t)(8 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (self.pending.count > 0) return;   // already found the peer
+        [central stopScan];
+        [central scanForPeripheralsWithServices:@[[CBUUID UUIDWithString:PEER_SERVICE_UUID]]
+                                        options:@{CBCentralManagerScanOptionAllowDuplicatesKey: @YES}];
+        NSLog(@"PROBE bluetooth scan-started service-filtered");
+    });
 }
 
 - (void)centralManager:(CBCentralManager *)central
@@ -161,9 +177,12 @@ static dispatch_semaphore_t g_bt_done;
     // the debugging battle.
     NSLog(@"PROBE adv-hit %@ rssi=%@ adv=%@", name, RSSI,
           advertisementData[CBAdvertisementDataManufacturerDataKey]);
-    if (![name hasPrefix:@"IOSR-BT"] || [self.pending containsObject:peripheral])
+    NSArray *svcs = advertisementData[CBAdvertisementDataServiceUUIDsKey];
+    BOOL svcMatch = [svcs containsObject:[CBUUID UUIDWithString:PEER_SERVICE_UUID]];
+    BOOL nameMatch = [name hasPrefix:PEER_NAME_PREFIX];
+    if ((!nameMatch && !svcMatch) || [self.pending containsObject:peripheral])
         return;
-    NSLog(@"PROBE peer-match %@", name);
+    NSLog(@"PROBE peer-match %@ svc=%d", name, svcMatch);
     [self.pending addObject:peripheral];
     peripheral.delegate = self;
     [central connectPeripheral:peripheral options:nil];
