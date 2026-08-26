@@ -4,6 +4,15 @@ The JSON files in this directory are executable search definitions.  They are
 not, by themselves, evidence that a change improves a real iOS research
 campaign.  This document defines how their results may be used.
 
+## Numbering convention
+
+Goal numbers organize the portfolio, but they are **not unique identifiers**:
+variants that implement one goal share its number (e.g.
+`05-fuzz-throughput.json` and `05-fuzz-throughput-engine.json`; `18-framework-reliability.json`
+and `18-on-device-matching.json`). The canonical machine identifier is the
+`name` field inside each file (`iosr-*-v1`), which is also what logs and
+experiment records reference — cite that, not the bare number.
+
 ## Evidence classes
 
 | Class | Goal environments | Permitted conclusion |
