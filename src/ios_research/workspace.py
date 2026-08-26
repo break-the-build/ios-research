@@ -166,12 +166,21 @@ class Workspace:
             raise NotFoundError(f"missing workspace file: {rel}")
         return dest.read_bytes()
 
-    def list_json(self, subdir: str) -> list[dict[str, Any]]:
-        """Load every ``*.json`` record directly under ``subdir`` (sorted)."""
+    def list_json(self, subdir: str,
+                  exclude_suffixes: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+        """Load every ``*.json`` record directly under ``subdir`` (sorted).
+
+        Filenames ending with any of ``exclude_suffixes`` are skipped, so
+        auxiliary sidecars that share a record directory (e.g. per-session
+        ``<id>.dict.json`` dictionaries next to ``<id>.json`` sessions) are
+        not mistaken for records by engines that glob the same directory.
+        """
         out: list[dict[str, Any]] = []
         base = self.dir(subdir)
         if not base.exists():
             return out
         for child in sorted(base.glob("*.json")):
+            if child.name.endswith(tuple(exclude_suffixes)):
+                continue
             out.append(json.loads(child.read_text(encoding="utf-8")))
         return out
