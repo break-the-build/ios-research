@@ -176,6 +176,7 @@
 				DEVELOPMENT_TEAM = APCDDQL9RC;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = AudioProbe;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Scans the research peer (IOSR-BT) to exercise on-device Bluetooth parsing.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = research.iosprobe.AudioProbe;
@@ -191,6 +192,7 @@
 				DEVELOPMENT_TEAM = APCDDQL9RC;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = AudioProbe;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Scans the research peer (IOSR-BT) to exercise on-device Bluetooth parsing.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = research.iosprobe.AudioProbe;
