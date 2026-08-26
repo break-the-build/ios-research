@@ -133,8 +133,13 @@ class SlowCrashStub(Target):
     def _run(self, data: bytes) -> ExecResult:
         time.sleep(0.025)
         if len(data) >= 4 and data[:4] == b"MOCK":
+            # Symbols feed the diagnostic SIGNATURE (classification + symbols),
+            # so they must vary per input: since #264 the record id is
+            # (target, signature)-global and constant signatures would collapse
+            # these fixtures into one shared record per workspace.
             diag = diagnostics.build(data, "OUT_OF_BOUNDS_READ",
-                                     f"StubParser_{data.hex()}", ["parse"])
+                                     f"StubParser_{data.hex()}",
+                                     [f"parse_{data.hex()}"])
             return ExecResult(outcome=Outcome.CRASH, detail="stub crash",
                               duration_ms=25, diagnostics=diag)
         return ExecResult(outcome=Outcome.REJECTED, detail="no", duration_ms=25)

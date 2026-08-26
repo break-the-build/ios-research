@@ -302,6 +302,9 @@ Positional arguments:
 
 ### `ios-research crash list`
 
+Options:
+
+- `--new-only` — only records not yet worked (status == 'new'). No pipeline stage transitions status today, so this currently matches every record; the flag exists so agents can rely on the contract once status transitions land (#264)
 
 ### `ios-research crash minimize`
 

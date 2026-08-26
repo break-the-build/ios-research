@@ -7,6 +7,20 @@ patch releases.
 
 ## Unreleased
 
+### Crash dedup
+
+- Workspace-global crash-signature deduplication (#264): crash record ids now
+  derive from `(target, signature)` instead of `(experiment, signature)`, so a
+  signature re-discovered by a later fuzz session/campaign day rolls
+  `count`/`last_seen` forward on the canonical record instead of re-recording
+  it and re-flowing through minimize/reproduce/analyze. Canonical records gain
+  an `experiment_ids` back-reference list for per-experiment attribution;
+  records persisted before this change load unchanged and backfill from the
+  legacy single `experiment_id`. `list(experiment_id=...)`/`get(...,
+  experiment_id=...)` match any contributing experiment, and `crash list`
+  gains `--new-only` (plus a `status` field per item) as the agent-facing
+  "not yet worked" view.
+
 ### Agent ergonomics
 
 - Workspace pinning via the `IOS_RESEARCH_WORKSPACE` environment variable

@@ -180,8 +180,14 @@ def test_minimize_populates_regression_corpus(workspace):
 
 # --- compare --------------------------------------------------------------
 def test_compare_same_signature_is_duplicate(workspace):
-    c1 = _record(workspace, b"MOCK\x01\xff\x00\x00", experiment_id="e1")
-    c2 = _record(workspace, b"MOCK\x01\xff\x00\x00", experiment_id="e2")
+    # Since #264 the record id is (target, signature)-global: two experiments
+    # hitting one signature share a single record, so genuinely distinct but
+    # matching records here come from two TARGETS sharing defect rule 1
+    # (identical classification + symbols => identical signature).
+    c1 = _record(workspace, b"MOCK\x01\x01\xff\xff", experiment_id="e1",
+                 target="mock:parser")
+    c2 = _record(workspace, b"MOCK\x01\x01\xff\xff", experiment_id="e2",
+                 target="mock:parser-v2")
     out = Triage(workspace).compare(c1, c2)
     assert out["same_signature"] is True
     assert out["likely_duplicate"] is True

@@ -11,6 +11,12 @@ def register(subparsers, parent) -> None:
     sub = p.add_subparsers(dest="subcommand", metavar="<action>")
 
     p_list = sub.add_parser("list", parents=[parent], help="list crashes")
+    p_list.add_argument("--new-only", action="store_true",
+                        help="only records not yet worked (status == 'new'). "
+                             "No pipeline stage transitions status today, so "
+                             "this currently matches every record; the flag "
+                             "exists so agents can rely on the contract "
+                             "once status transitions land (#264)")
     p_list.set_defaults(func=cmd_list)
 
     p_show = sub.add_parser("show", parents=[parent], help="show a crash")
@@ -46,9 +52,16 @@ def register(subparsers, parent) -> None:
 def cmd_list(ctx, args) -> Result:
     from ..crashes import CrashStore
     crashes = CrashStore(ctx.workspace()).list()
+    # --new-only (#264): the agent-facing "not yet worked" view. Crash status
+    # is only ever 'new' today (reproduce/minimize/analyze update
+    # reproduced/minimized_sha256/analysis_id but never transition status), so
+    # the filter currently equals the full listing — it is in place so agents
+    # can adopt it before status transitions exist.
+    if getattr(args, "new_only", False):
+        crashes = [c for c in crashes if c.status == "new"]
     items = [{"id": c.id, "classification": c.classification,
               "signature": c.signature, "count": c.count, "target": c.target,
-              "reproduced": c.reproduced} for c in crashes]
+              "reproduced": c.reproduced, "status": c.status} for c in crashes]
     return Result(command="crash list",
                   data={"crashes": items, "count": len(items)},
                   human=lambda d: "\n".join(

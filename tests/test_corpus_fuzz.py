@@ -139,10 +139,13 @@ def test_crash_store_dedupes_by_signature(workspace):
     assert len(store.list()) == 1
 
 
-def test_crash_store_isolated_by_workspace_and_experiment(tmp_path):
-    """Records from one workspace/experiment are never visible in another."""
+def test_crash_store_isolated_by_workspace_and_deduped_across_experiments(
+        tmp_path):
+    """Records from one workspace are never visible in another; WITHIN a
+    workspace the (target, signature) identity is global across experiments
+    (#264): a re-discovery under exp-b attributes exp-b on exp-a's canonical
+    record instead of raising or duplicating."""
     from ios_research import __version__
-    from ios_research.errors import ValidationError
     from ios_research.workspace import Workspace
 
     ws_a = Workspace(tmp_path / "a" / ".ios-research")
@@ -155,10 +158,15 @@ def test_crash_store_isolated_by_workspace_and_experiment(tmp_path):
                            fmt="mock", data=b"MOCK\x01\xff\x00\x00",
                            exec_result=result)
     assert [c.id for c in store_a.list(experiment_id="exp-a")] == [crash.id]
-    assert store_a.list(experiment_id="exp-b") == []
     assert CrashStore(ws_b).list() == []
-    with pytest.raises(ValidationError, match="not in experiment"):
-        store_a.bump_count(crash.id, 1, experiment_id="exp-b")
+    # Cross-experiment re-discovery (#264): attribution + count roll-up.
+    store_a.bump_count(crash.id, 1, experiment_id="exp-b")
+    merged = store_a.get(crash.id)
+    assert merged.count == 2
+    assert sorted(merged.experiment_ids) == ["exp-a", "exp-b"]
+    # Both contributing experiments scope to the shared record.
+    assert [c.id for c in store_a.list(experiment_id="exp-b")] == [crash.id]
+    assert [c.id for c in store_a.list(experiment_id="exp-a")] == [crash.id]
 
 
 def test_crash_store_rejects_abnormal_outcomes(workspace):
