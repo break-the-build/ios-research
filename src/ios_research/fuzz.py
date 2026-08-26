@@ -880,7 +880,12 @@ class FuzzEngine:
                     parent_sha = sha256_bytes(base)
                     signature = result.diagnostics.signature \
                         if result.diagnostics else "sig_none"
-                    crash_id = make_id("crash", session.experiment_id, signature)
+                    # Workspace-global crash identity (#264): derived from the
+                    # TARGET and signature, not the experiment, so a signature
+                    # already known from an earlier session maps onto the same
+                    # canonical record at flush time instead of being
+                    # re-recorded (and re-triaged) as a fresh duplicate.
+                    crash_id = make_id("crash", session.target, signature)
                     session.crashes += 1
                     crash_counts[crash_id] = crash_counts.get(crash_id, 0) + 1
                     if crash_id not in crash_first:
@@ -984,7 +989,13 @@ class FuzzEngine:
                        crash_counts: dict[str, int],
                        crash_first: dict[str, tuple]) -> None:
         """Persist accumulated crashes: record each unique crash once, then add
-        its total occurrence count in a single write."""
+        its total occurrence count in a single write.
+
+        Since #264 the crash id is workspace-global per (target, signature),
+        so the existence-check below also hits for signatures first recorded
+        under an EARLIER experiment; ``bump_count`` then rolls count/last_seen
+        forward and attributes ``session.experiment_id`` on the canonical
+        record instead of duplicating it."""
         for crash_id, count in crash_counts.items():
             if self.ws.path(f"crashes/{crash_id}/crash.json").exists():
                 self.crash_store.bump_count(

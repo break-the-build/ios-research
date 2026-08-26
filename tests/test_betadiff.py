@@ -149,12 +149,17 @@ def test_tag_corpus_flows_beta_provenance_into_reports(workspace, tmp_path):
     assert beta is not None
     assert beta["diff_id"] == diff["id"]
     assert beta["release_a"]["os_name"] == "macOS"
-    # Reports without tagged corpora carry no beta section.
+    # Reports without tagged corpora carry no beta section. The second crash
+    # uses a DIFFERENT defect rule (null dispatch vs OOB read): since #264 the
+    # record id is (target, signature)-global, so the same signature would
+    # merge into the tagged canonical record instead of forming an untagged one.
     plain_experiment = ExperimentStore(workspace).create(
         target="mock:parser", device="d", os_version="17.6",
         config_hash="cfg_plain")
+    crash2_data = b"MOCK\x01\xff\x00\x00"
     crash2 = CrashStore(workspace).record(
         experiment_id=plain_experiment.id, target="mock:parser", fmt="m",
-        data=data + b"x", exec_result=create("mock:parser").execute(data + b"x"))
+        data=crash2_data,
+        exec_result=create("mock:parser").execute(crash2_data))
     report2 = ReportGenerator(workspace).create(crash2.id)
     assert "beta_provenance" not in report2.sections
