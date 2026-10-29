@@ -34,11 +34,38 @@ sys.path.insert(0, str(_REPO / "src"))
 
 from ios_research import mutation  # noqa: E402
 from ios_research.targets import create  # noqa: E402
+from ios_research.targets._mac_real_seeds import DEFAULT_LIMIT, real_file_seeds  # noqa: E402
 from ios_research.targets.base import Outcome  # noqa: E402
 
 
-def _seed_corpus(target) -> list[bytes]:
-    seeds = target.seeds()
+SEED_DIR_MAX_BYTES = 1024 * 1024
+
+
+def _dir_seeds(dirs) -> list[bytes]:
+    """Every regular file (<= 1 MiB) under each directory, in sorted order.
+
+    Used to replay a coverage corpus -- e.g. Jackalope's out/samples, grown
+    with coverage measured inside the framework -- under the Guard Malloc
+    harness, which detects what the coverage fuzzer cannot.
+    """
+    out: list[bytes] = []
+    for d in dirs or ():
+        for path in sorted(pathlib.Path(d).rglob("*")):
+            if path.is_file() and 0 < path.stat().st_size <= SEED_DIR_MAX_BYTES:
+                out.append(path.read_bytes())
+    return out
+
+
+def _seed_corpus(target, target_id: str = "", real_seeds: int = 0,
+                 seed_dirs=None) -> list[bytes]:
+    """Built-in format seeds, seed directories and, for mac:<framework>, real files.
+
+    The built-in seeds are tiny synthetic containers (1x1 images, empty audio
+    headers); real files carry the structure that deep codec paths need.
+    """
+    seeds = list(target.seeds()) + _dir_seeds(seed_dirs)
+    if real_seeds > 0 and target_id.startswith("mac:"):
+        seeds += real_file_seeds(target_id.split(":", 1)[1], limit=real_seeds)
     return seeds or [b"\x00" * 16]
 
 
@@ -57,7 +84,8 @@ def _crash_record(res, seen_sigs) -> dict:
 
 def run_campaign(target_id: str, cases: int, seed: int, batch: int,
                  workers: int = 1, engine: str = "auto",
-                 runs: int = 100_000, max_total_time=None):
+                 runs: int = 100_000, max_total_time=None,
+                 real_seeds: int = 0, seed_dirs=None):
     target = create(target_id)
     if not getattr(target, "available", lambda: True)():
         print(f"error: harness for {target_id} is not built/available.\n"
@@ -71,11 +99,10 @@ def run_campaign(target_id: str, cases: int, seed: int, batch: int,
     # driver. "auto" uses libFuzzer whenever the built harness supports it.
     use_lf = engine == "libfuzzer" or (
         engine == "auto" and getattr(target, "is_libfuzzer", lambda: False)())
+    corpus = _seed_corpus(target, target_id, real_seeds, seed_dirs)
     if use_lf:
         return _run_libfuzzer(target, target_id, seed, workers, runs,
-                              max_total_time)
-
-    corpus = _seed_corpus(target)
+                              max_total_time, corpus)
     counts: dict[str, int] = {o: 0 for o in Outcome.ALL}
     crashes: list[dict] = []
     crash_inputs: list[bytes] = []
@@ -134,9 +161,10 @@ def run_campaign(target_id: str, cases: int, seed: int, batch: int,
     }, crash_inputs
 
 
-def _run_libfuzzer(target, target_id, seed, workers, runs, max_total_time):
+def _run_libfuzzer(target, target_id, seed, workers, runs, max_total_time,
+                   seeds=None):
     """In-process persistent-mode libFuzzer campaign (#20)."""
-    seeds = target.seeds() or [b"\x00" * 16]
+    seeds = seeds or target.seeds() or [b"\x00" * 16]
     unique, stats = target.fuzz_corpus(
         seeds, runs=runs, workers=max(1, workers),
         max_total_time=max_total_time)
@@ -186,6 +214,12 @@ def main(argv=None) -> int:
     ap.add_argument("--report", default=None, help="write JSON summary to this path")
     ap.add_argument("--save-crashes", default=None,
                     help="directory to write one input file per unique crash")
+    ap.add_argument("--real-seeds", type=int, default=DEFAULT_LIMIT,
+                    help=("add up to N real files from this Mac (fonts, images, "
+                          "audio, PDFs) to the seed corpus; 0 = built-in seeds only"))
+    ap.add_argument("--seed-dir", action="append", default=[],
+                    help=("add every file in DIR to the seed corpus (repeatable); "
+                          "e.g. a Jackalope out/samples coverage corpus"))
     args = ap.parse_args(argv)
 
     workers = args.workers
@@ -195,7 +229,9 @@ def main(argv=None) -> int:
         workers = max(1, min(6, (os.cpu_count() or 2) // 2))
     out = run_campaign(args.target, args.cases, args.seed, max(1, args.batch),
                        workers=workers, engine=args.engine, runs=args.runs,
-                       max_total_time=args.max_total_time)
+                       max_total_time=args.max_total_time,
+                       real_seeds=max(0, args.real_seeds),
+                       seed_dirs=args.seed_dir)
     if out is None:
         return 3
     summary, crash_inputs = out

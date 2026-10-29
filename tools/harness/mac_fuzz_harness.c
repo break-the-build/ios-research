@@ -92,6 +92,20 @@ typedef const struct __CFData *CFDataRef;
 typedef const struct __CFDictionary *CFDictionaryRef;
 typedef signed long CFIndex;
 
+/* Small structs that Apple APIs take and return BY VALUE. Declaring such a
+ * parameter as a pointer is an ABI bug, not a style choice: on arm64 a CGRect
+ * (four doubles) travels in d0-d3 and a CFRange in two integer registers, so a
+ * pointer shifts every later argument. Both bugs shipped here once and made the
+ * ImageIO pixel decode and the CoreText frame layout silent no-ops
+ * (tests/test_mac_harness_abi.py now guards every by-value parameter). */
+typedef struct { double x, y, w, h; } IOSR_CGRect;
+typedef struct { CFIndex loc, len; } IOSR_CFRange;
+
+/* Optional per-input depth metric printed on the DONE line ("pixels=123"),
+ * proving that the deep stage of an entry point actually ran. */
+static const char *g_depth_name = NULL;
+static long g_depth_value = 0;
+
 static void *cf_handle = NULL;
 static void *fw_handle = NULL;
 
@@ -134,7 +148,7 @@ static size_t (*p_CGImageGetHeight)(CGImageRef) = NULL;
 static CGContextRef (*p_CGBitmapContextCreate)(void *, size_t, size_t, size_t, size_t, CGColorSpaceRef, uint32_t) = NULL;
 static CGColorSpaceRef (*p_CGColorSpaceCreateDeviceRGB)(void) = NULL;
 static void (*p_CGColorSpaceRelease)(CGColorSpaceRef) = NULL;
-static void (*p_CGContextDrawImage)(CGContextRef, void *, CGImageRef) = NULL;
+static void (*p_CGContextDrawImage)(CGContextRef, IOSR_CGRect, CGImageRef) = NULL;
 static void (*p_CGContextRelease)(CGContextRef) = NULL;
 
 static int resolve_target(void) {
@@ -165,7 +179,16 @@ static int resolve_target(void) {
 
 #define IOSR_IMGIO_MAX_DIM 512u  /* bound decode memory */
 
+/* Count non-zero bytes so the depth metric proves pixels were really decoded. */
+static long count_nonzero(const uint8_t *p, size_t n) {
+    long c = 0;
+    for (size_t i = 0; i < n; i++) c += p[i] != 0;
+    return c;
+}
+
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
+    (void)data; (void)size;
+    g_depth_name = "pixels";
     CGImageSourceRef src = p_CGImageSourceCreateWithData(cfdata, NULL);
     if (!src) return 0;
     int decoded = 0;
@@ -179,19 +202,20 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
         if (h > IOSR_IMGIO_MAX_DIM) h = IOSR_IMGIO_MAX_DIM;
         if (w && h) {
             CGColorSpaceRef cs = p_CGColorSpaceCreateDeviceRGB();
-            if (cs) {
+            uint8_t *pixels = calloc(w * h, 4);
+            if (cs && pixels) {
                 CGContextRef ctx = p_CGBitmapContextCreate(
-                    NULL, w, h, 8, w * 4, cs, 2 /* premul first */);
+                    pixels, w, h, 8, w * 4, cs, 2 /* premul first */);
                 if (ctx) {
-                    double rect[4] = {0};   /* CGRect: origin + size as doubles */
-                    double *r = (double *)rect;
-                    r[2] = (double)w; r[3] = (double)h;
-                    p_CGContextDrawImage(ctx, rect, img);
+                    IOSR_CGRect rect = {0, 0, (double)w, (double)h};
+                    p_CGContextDrawImage(ctx, rect, img);   /* full pixel decode */
                     p_CGContextRelease(ctx);
+                    g_depth_value += count_nonzero(pixels, w * h * 4);
                     decoded = 1;
                 }
-                p_CGColorSpaceRelease(cs);
             }
+            free(pixels);
+            if (cs) p_CGColorSpaceRelease(cs);
         }
         p_CFRelease(img);
     }
@@ -409,7 +433,7 @@ typedef OSStatus (*AudioFile_WriteProc)(void *, SInt64, UInt32, const void *, UI
 typedef SInt64 (*AudioFile_GetSizeProc)(void *);
 typedef OSStatus (*AudioFile_SetSizeProc)(void *, SInt64);
 
-#pragma pack(push, 4)
+/* AudioStreamBasicDescription, naturally aligned like the SDK header. */
 typedef struct {
     double mSampleRate;
     FourCharCode mFormatID;
@@ -421,7 +445,6 @@ typedef struct {
     UInt32 mBitsPerChannel;
     UInt32 mReserved;
 } IOSR_ASBD;
-#pragma pack(pop)
 
 static OSStatus (*p_AudioFileOpenWithCallbacks)(
     void *, AudioFile_ReadProc, AudioFile_WriteProc,
@@ -429,18 +452,30 @@ static OSStatus (*p_AudioFileOpenWithCallbacks)(
 static OSStatus (*p_AudioFileClose)(AudioFileID) = NULL;
 static OSStatus (*p_AudioFileGetProperty)(AudioFileID, FourCharCode,
                                           UInt32 *, void *) = NULL;
-static OSStatus (*p_AudioFileReadPacketData)(AudioFileID, int,
-                                             UInt32 *, void *, SInt64, UInt32, void *) = NULL;
+/* CoreAudio base types use NATURAL alignment (CoreAudioBaseTypes.h has no
+ * #pragma pack): AudioBufferList.mBuffers starts at offset 8. A 4-packed copy
+ * put it at 4, which AudioToolbox rejects in
+ * CrashIfClientProvidedBogusAudioBufferList (and broke the old PCM path). */
+typedef struct { SInt64 mStartOffset; UInt32 mVariableFramesInPacket; UInt32 mDataByteSize; } IOSR_ASPD;
+typedef struct { UInt32 mNumberChannels; UInt32 mDataByteSize; void *mData; } IOSR_AudioBuffer;
+typedef struct { UInt32 mNumberBuffers; IOSR_AudioBuffer mBuffers[1]; } IOSR_ABL;
+
+/* AudioConverterComplexInputDataProc */
+typedef OSStatus (*IOSR_ACInputProc)(void *, UInt32 *, IOSR_ABL *, IOSR_ASPD **, void *);
+
+/* AudioFileReadPacketData(file, inUseCache, ioNumBytes, outPacketDescriptions,
+ * inStartingPacket, ioNumPackets, outBuffer). ioNumPackets is a POINTER: it was
+ * once declared by value, which handed AudioToolbox the buffer size as an
+ * address and made every valid file read as "rejected". */
+static OSStatus (*p_AudioFileReadPacketData)(AudioFileID, int, UInt32 *, IOSR_ASPD *,
+                                             SInt64, UInt32 *, void *) = NULL;
 static OSStatus (*p_AudioConverterNew)(const IOSR_ASBD *, const IOSR_ASBD *, void **) = NULL;
 static void (*p_AudioConverterDispose)(void *) = NULL;
-static OSStatus (*p_AudioConverterConvertComplexBuffer)(void *, UInt32,
-                                                        void *, void *) = NULL;
-
-/* AudioConverterConvertComplexBuffer parameter structs (packed layouts). */
-#pragma pack(push, 4)
-typedef struct { UInt32 mNumberBuffers; struct { UInt32 mNumberChannels; UInt32 mDataByteSize; void *mData; } mBuffers[1]; } IOSR_ACB1;
-typedef struct { UInt32 mNumberBuffers; struct { UInt32 mNumberChannels; UInt32 mDataByteSize; void *mData; } mBuffers[1]; } IOSR_ACB2;
-#pragma pack(pop)
+static OSStatus (*p_AudioConverterSetProperty)(void *, UInt32, UInt32, const void *) = NULL;
+/* FillComplexBuffer decodes compressed formats (AAC, ALAC, MP3, ...); the
+ * previously used ConvertComplexBuffer is PCM-to-PCM only, so no codec ran. */
+static OSStatus (*p_AudioConverterFillComplexBuffer)(void *, IOSR_ACInputProc, void *,
+                                                     UInt32 *, IOSR_ABL *, IOSR_ASPD *) = NULL;
 
 typedef struct { const uint8_t *data; size_t size; } MemFile;
 
@@ -470,19 +505,94 @@ static int resolve_target(void) {
     p_AudioFileReadPacketData = dlsym(fw_handle, "AudioFileReadPacketData");
     p_AudioConverterNew = dlsym(fw_handle, "AudioConverterNew");
     p_AudioConverterDispose = dlsym(fw_handle, "AudioConverterDispose");
-    p_AudioConverterConvertComplexBuffer = dlsym(fw_handle, "AudioConverterConvertComplexBuffer");
+    p_AudioConverterSetProperty = dlsym(fw_handle, "AudioConverterSetProperty");
+    p_AudioConverterFillComplexBuffer = dlsym(fw_handle, "AudioConverterFillComplexBuffer");
     return p_AudioFileOpenWithCallbacks && p_AudioFileClose
         && p_AudioFileGetProperty && p_AudioFileReadPacketData
         && p_AudioConverterNew && p_AudioConverterDispose
-        && p_AudioConverterConvertComplexBuffer;
+        && p_AudioConverterSetProperty && p_AudioConverterFillComplexBuffer;
 }
 
-#define IOSR_AT_PROP_FORMAT 0x61736264UL  /* 'asbd' kAudioFilePropertyDataFormat */
+/* Property IDs exactly as in the SDK's AudioFile.h / AudioConverter.h. The
+ * format ID was once 'asbd' -- not a property at all ('pty?' error) -- so the
+ * harness never read a format and stopped after the container header. */
+#define IOSR_AT_PROP_FORMAT 0x64666d74UL  /* 'dfmt' kAudioFilePropertyDataFormat */
+#define IOSR_AT_PROP_COOKIE 0x6d676963UL  /* 'mgic' kAudioFilePropertyMagicCookieData */
+#define IOSR_AC_PROP_COOKIE 0x646d6763UL  /* 'dmgc' kAudioConverterDecompressionMagicCookie */
 #define IOSR_AT_MAX_PACKETS 64u
 #define IOSR_AT_BUF_BYTES (64u * 1024u)
+#define IOSR_AT_COOKIE_MAX 4096u
+#define IOSR_AT_MAX_FILLS 64              /* bound decode work per input */
+
+/* Feeds the packets read from the file to the converter exactly once. */
+typedef struct {
+    uint8_t *data;
+    UInt32 bytes, packets, channels;
+    IOSR_ASPD *descs;
+    int consumed;
+} PacketFeed;
+
+static OSStatus feed_packets(void *conv, UInt32 *io_packets, IOSR_ABL *io_data,
+                             IOSR_ASPD **out_descs, void *user) {
+    (void)conv;
+    PacketFeed *f = (PacketFeed *)user;
+    io_data->mNumberBuffers = 1;
+    if (f->consumed) {                 /* no more input: end of stream */
+        *io_packets = 0;
+        io_data->mBuffers[0].mDataByteSize = 0;
+        io_data->mBuffers[0].mData = NULL;
+        return 0;
+    }
+    f->consumed = 1;
+    *io_packets = f->packets;
+    io_data->mBuffers[0].mNumberChannels = f->channels;
+    io_data->mBuffers[0].mDataByteSize = f->bytes;
+    io_data->mBuffers[0].mData = f->data;
+    if (out_descs) *out_descs = f->descs;   /* VBR codecs need per-packet sizes */
+    return 0;
+}
+
+/* Decode the packets to 16-bit stereo PCM through the real codec pipeline. */
+static void decode_packets(AudioFileID af, const IOSR_ASBD *src, uint8_t *pkts,
+                           UInt32 nbytes, UInt32 npackets, IOSR_ASPD *descs) {
+    IOSR_ASBD dst = *src;
+    dst.mSampleRate = 44100.0;
+    dst.mFormatID = 0x6c70636dUL;      /* 'lpcm' */
+    dst.mFormatFlags = 0x0000000cUL;   /* signed | packed */
+    dst.mBytesPerPacket = 4;
+    dst.mFramesPerPacket = 1;
+    dst.mBytesPerFrame = 4;
+    dst.mChannelsPerFrame = 2;
+    dst.mBitsPerChannel = 16;
+    dst.mReserved = 0;
+    void *conv = NULL;
+    if (p_AudioConverterNew(src, &dst, &conv) != 0 || !conv) return;
+    /* AAC/ALAC/... decoders are configured by the file's magic cookie, itself
+     * parsed by the decoder (e.g. an MPEG-4 ESDS) -- attack surface too. */
+    static uint8_t cookie[IOSR_AT_COOKIE_MAX];
+    UInt32 csz = sizeof(cookie);
+    if (p_AudioFileGetProperty(af, IOSR_AT_PROP_COOKIE, &csz, cookie) == 0 && csz > 0)
+        p_AudioConverterSetProperty(conv, IOSR_AC_PROP_COOKIE, csz, cookie);
+    PacketFeed feed = { pkts, nbytes, npackets, src->mChannelsPerFrame, descs, 0 };
+    static uint8_t pcm[IOSR_AT_BUF_BYTES];
+    for (int i = 0; i < IOSR_AT_MAX_FILLS; i++) {
+        IOSR_ABL out;
+        out.mNumberBuffers = 1;
+        out.mBuffers[0].mNumberChannels = 2;
+        out.mBuffers[0].mDataByteSize = IOSR_AT_BUF_BYTES;
+        out.mBuffers[0].mData = pcm;
+        UInt32 frames = IOSR_AT_BUF_BYTES / dst.mBytesPerFrame;
+        OSStatus st = p_AudioConverterFillComplexBuffer(conv, feed_packets, &feed,
+                                                        &frames, &out, NULL);
+        g_depth_value += (long)frames;
+        if (st != 0 || frames == 0) break;
+    }
+    p_AudioConverterDispose(conv);
+}
 
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     (void)cfdata;
+    g_depth_name = "frames";
     MemFile mf = { data, size };
     AudioFileID af = NULL;
     OSStatus st = p_AudioFileOpenWithCallbacks(&mf, mem_read, NULL,
@@ -493,41 +603,14 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     IOSR_ASBD src_fmt;
     UInt32 sz = sizeof(src_fmt);
     if (p_AudioFileGetProperty(af, IOSR_AT_PROP_FORMAT, &sz, &src_fmt) == 0) {
-        /* Read packets through the demuxer. */
-        static UInt8 pktbuf[IOSR_AT_BUF_BYTES];
-        static IOSR_ASBD dst_fmt;
-        static UInt8 convbuf[IOSR_AT_BUF_BYTES];
-        UInt32 npackets = IOSR_AT_MAX_PACKETS;
-        void *pktdescs = NULL;
-        if (p_AudioFileReadPacketData(af, 0 /* !cache */, &npackets,
-                                      pktdescs, 0, IOSR_AT_BUF_BYTES,
-                                      pktbuf) == 0 && npackets > 0) {
-            exercised = 1;
-            /* Convert to 16-bit stereo PCM through the codec pipeline. */
-            dst_fmt = src_fmt;
-            dst_fmt.mSampleRate = 44100.0;
-            dst_fmt.mFormatID = 0x6c70636dUL;      /* 'lpcm' */
-            dst_fmt.mFormatFlags = 0x0000000cUL;   /* signed | packed */
-            dst_fmt.mBytesPerPacket = 4;
-            dst_fmt.mFramesPerPacket = 1;
-            dst_fmt.mBytesPerFrame = 4;
-            dst_fmt.mChannelsPerFrame = 2;
-            dst_fmt.mBitsPerChannel = 16;
-            dst_fmt.mReserved = 0;
-            void *conv = NULL;
-            if (p_AudioConverterNew(&src_fmt, &dst_fmt, &conv) == 0 && conv) {
-                IOSR_ACB1 in; in.mNumberBuffers = 1;
-                in.mBuffers[0].mNumberChannels = src_fmt.mChannelsPerFrame;
-                in.mBuffers[0].mDataByteSize = IOSR_AT_BUF_BYTES;
-                in.mBuffers[0].mData = pktbuf;
-                IOSR_ACB2 out; out.mNumberBuffers = 1;
-                out.mBuffers[0].mNumberChannels = 2;
-                out.mBuffers[0].mDataByteSize = IOSR_AT_BUF_BYTES;
-                out.mBuffers[0].mData = convbuf;
-                /* Best effort: conversion may legitimately fail on garbage. */
-                p_AudioConverterConvertComplexBuffer(conv, npackets, &in, &out);
-                p_AudioConverterDispose(conv);
-            }
+        /* Read packets through the demuxer (with descriptions for VBR). */
+        static uint8_t pktbuf[IOSR_AT_BUF_BYTES];
+        static IOSR_ASPD descs[IOSR_AT_MAX_PACKETS];
+        UInt32 nbytes = IOSR_AT_BUF_BYTES, npackets = IOSR_AT_MAX_PACKETS;
+        p_AudioFileReadPacketData(af, 0 /* !cache */, &nbytes, descs, 0, &npackets, pktbuf);
+        if (npackets > 0 && npackets <= IOSR_AT_MAX_PACKETS && nbytes <= IOSR_AT_BUF_BYTES) {
+            exercised = 1;     /* a short read at end-of-file still yields packets */
+            decode_packets(af, &src_fmt, pktbuf, nbytes, npackets, descs);
         }
     }
     p_AudioFileClose(af);
@@ -598,12 +681,14 @@ typedef struct {
     void *decompressionOutputRefCon;
 } IOSR_VT_CALLBACK_RECORD;
 
+/* parameterSetCount is size_t: a uint32_t leaves the upper half of the
+ * register unspecified on arm64, so the callee could read a garbage count. */
 static OSStatus (*p_CMVideoFormatDescriptionCreateFromH264ParameterSets)(
-    CFAllocatorRef, uint32_t, const uint8_t * const *, const size_t *,
-    uint32_t, CMFormatDescriptionRef *) = NULL;
+    CFAllocatorRef, size_t, const uint8_t * const *, const size_t *,
+    int, CMFormatDescriptionRef *) = NULL;
 static OSStatus (*p_CMVideoFormatDescriptionCreateFromHEVCParameterSets)(
-    CFAllocatorRef, uint32_t, const uint8_t * const *, const size_t *,
-    uint32_t, CFDictionaryRef, CMFormatDescriptionRef *) = NULL;
+    CFAllocatorRef, size_t, const uint8_t * const *, const size_t *,
+    int, CFDictionaryRef, CMFormatDescriptionRef *) = NULL;
 static OSStatus (*p_CMBlockBufferCreateWithMemoryBlock)(
     CFAllocatorRef, void *, size_t, CFAllocatorRef, void *, size_t, size_t,
     uint32_t, CMBlockBufferRef *) = NULL;
@@ -855,8 +940,6 @@ typedef CFTypeRef CTFrameRef;
 /* CGAffineTransform fields are CGFloat (double on arm64) — a float struct
  * would be read past by the framework (48-byte ABI, 24-byte object). */
 typedef struct { double a, b, c, d, tx, ty; } IOSR_CGAffineTransform;
-typedef struct { double x, y, w, h; } IOSR_CGRect;
-typedef struct { long loc, len; } IOSR_CFRange;
 
 static CFArrayRef (*p_CTFontManagerCreateFontDescriptorsFromData)(CFDataRef) = NULL;
 static CTFontRef (*p_CTFontCreateWithFontDescriptor)(CTFontDescriptorRef,
@@ -877,10 +960,12 @@ static CTLineRef (*p_CTLineCreateWithAttributedString)(CFTypeRef) = NULL;
 static CTFramesetterRef (*p_CTFramesetterCreateWithAttributedString)(
     CFAttributedStringRef) = NULL;
 /* CTFramesetterCreateFrame takes FOUR args (framesetter, stringRange, path,
- * frameAttributes) — omitting the last reads it from garbage. */
+ * frameAttributes), and stringRange is a CFRange BY VALUE. As a pointer it
+ * shifted path into the range and NULL into path: the frame was never laid out. */
 static CTFrameRef (*p_CTFramesetterCreateFrame)(CTFramesetterRef,
-                                                const IOSR_CFRange *,
+                                                IOSR_CFRange,
                                                 CGPathRef, void *) = NULL;
+static CFArrayRef (*p_CTFrameGetLines)(CTFrameRef) = NULL;
 static CGMutablePathRef (*p_CGPathCreateMutable)(void) = NULL;
 static void (*p_CGPathAddRect)(CGMutablePathRef, const IOSR_CGAffineTransform *,
                                IOSR_CGRect) = NULL;
@@ -936,8 +1021,13 @@ static int shape_line(CTFontRef font) {
                         p_CGPathAddRect(path, NULL, bounds);
                         IOSR_CFRange all = {0, 0};   /* whole string */
                         CTFrameRef frame =
-                            p_CTFramesetterCreateFrame(fs, &all, path, NULL);
-                        if (frame) { p_CFRelease(frame); shaped = 1; }
+                            p_CTFramesetterCreateFrame(fs, all, path, NULL);
+                        if (frame) {
+                            CFArrayRef lines = p_CTFrameGetLines ? p_CTFrameGetLines(frame) : NULL;
+                            if (lines) g_depth_value += p_CFArrayGetCount(lines);
+                            p_CFRelease(frame);
+                            shaped = 1;
+                        }
                         p_CGPathRelease(path);
                     }
                     p_CFRelease(fs);
@@ -978,6 +1068,7 @@ static int resolve_target(void) {
     p_CTFramesetterCreateWithAttributedString = dlsym(
         fw_handle, "CTFramesetterCreateWithAttributedString");
     p_CTFramesetterCreateFrame = dlsym(fw_handle, "CTFramesetterCreateFrame");
+    p_CTFrameGetLines = dlsym(fw_handle, "CTFrameGetLines");
     p_CFDictionaryCreateMutable = dlsym(cf_handle, "CFDictionaryCreateMutable");
     p_CFDictionarySetValue = dlsym(cf_handle, "CFDictionarySetValue");
     p_CFStringCreateWithCString = dlsym(cf_handle, "CFStringCreateWithCString");
@@ -1000,6 +1091,7 @@ static int resolve_target(void) {
 
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     (void)data; (void)size;
+    g_depth_name = "lines";
     CFArrayRef descs = p_CTFontManagerCreateFontDescriptorsFromData(cfdata);
     if (!descs) return 0;
     int decoded = 0;
@@ -1052,6 +1144,8 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     g_last_decoded = 0;
+    g_depth_name = NULL;
+    g_depth_value = 0;
     if (!g_ready && !resolve_target()) return 0;
     /* CoreFoundation is optional (the self-test target needs no framework). */
     CFDataRef cfdata = p_CFDataCreate ? p_CFDataCreate(NULL, data, (CFIndex)size)
@@ -1068,19 +1162,26 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 }
 
 #ifdef HARNESS_STANDALONE
+#include "harness_runtime.h"
 /*
  * Standalone driver: builds on the stock Apple toolchain (no libFuzzer runtime
  * required). Runs one or more input files through LLVMFuzzerTestOneInput and
  * emits the stdout protocol documented at the top of this file. Batching many
  * files into one process amortizes the dlopen + process-spawn cost.
  */
-static int run_one_file(const char *path, int index) {
-    printf("RUN %d\n", index);
-    fflush(stdout);
+/*
+ * Persistent entry point for binary-instrumentation fuzzers (Jackalope /
+ * TinyInst), which hook a named function and loop it in place:
+ *   -target_module <framework>_fuzzer -target_method _iosr_fuzz_file
+ *   -nargs 1 -persist -loop -- ./<framework>_fuzzer @@
+ * Exported and never inlined so the instrumenter can find it. Returns 1 if the
+ * input was read and run, 0 if the file could not be read.
+ */
+__attribute__((noinline, visibility("default")))
+int iosr_fuzz_file(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) {
-        printf("DONE %d rejected\n", index);
-        fflush(stdout);
+        g_last_decoded = 0;
         return 0;
     }
     fseek(f, 0, SEEK_END);
@@ -1090,20 +1191,37 @@ static int run_one_file(const char *path, int index) {
     uint8_t *buf = (uint8_t *)malloc((size_t)n ? (size_t)n : 1);
     size_t rd = buf ? fread(buf, 1, (size_t)n, f) : 0;
     fclose(f);
+    LLVMFuzzerTestOneInput(buf, rd);  /* may abort here on a finding */
+    free(buf);
+    return 1;
+}
+
+static int run_one_file(const char *path, int index) {
+    printf("RUN %d\n", index);
+    fflush(stdout);
     #ifdef HARNESS_SANCOV
     sancov_reset();
     #endif
-    LLVMFuzzerTestOneInput(buf, rd);  /* may abort here on a sanitizer finding */
+    if (!iosr_fuzz_file(path)) {
+        printf("DONE %d rejected\n", index);
+        fflush(stdout);
+        return 0;
+    }
     #ifdef HARNESS_SANCOV
     sancov_write_map();
     #endif
-    printf("DONE %d %s\n", index, g_last_decoded ? "decoded" : "rejected");
+    if (g_depth_name)
+        printf("DONE %d %s %s=%ld\n", index, g_last_decoded ? "decoded" : "rejected",
+               g_depth_name, g_depth_value);
+    else
+        printf("DONE %d %s\n", index, g_last_decoded ? "decoded" : "rejected");
     fflush(stdout);
-    free(buf);
     return 0;
 }
 
 int main(int argc, char **argv) {
+    iosr_arm_guard_malloc(argv);          /* may re-exec under libgmalloc */
+    iosr_install_crash_reporter();
     LLVMFuzzerInitialize(&argc, &argv);
     if (argc < 2) {
         fprintf(stderr, "usage: %s <input-file> [<input-file> ...]\n", argv[0]);

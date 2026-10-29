@@ -750,7 +750,9 @@ def test_selftest_real_crash_pipeline(tmp_path):
     build = REPO / "tools" / "harness" / "build.sh"
     env = dict(os.environ)
     env["CC"] = _selftest_clang()
-    r = subprocess.run(["bash", str(build), "selftest"],
+    # This test checks the ASan report path specifically; the default build
+    # profile is Guard Malloc (see test_mac_oracle.py for that path).
+    r = subprocess.run(["bash", str(build), "--sanitizer", "asan-ubsan", "selftest"],
                        capture_output=True, env=env, timeout=180)
     assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
     binary = REPO / "tools" / "harness" / "build" / "selftest_fuzzer"

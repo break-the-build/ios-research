@@ -6,12 +6,21 @@ pipeline (fuzz → triage → minimize → analyze → differential → report) 
 but until now it never operated on a **real** crash.
 
 The `mac:<framework>` targets change that. Many iOS parsing libraries ship the
-**same binaries on macOS** (ImageIO, CoreGraphics, AudioToolbox, …). A native
-`-fsanitize=fuzzer,address,undefined` harness `dlopen`s the framework, calls a
-real decode entry point, and — when the sanitizer catches a defect — emits a
-report with a **real faulting address, registers, stack, and modules**. The
-target normalizes that report into the same `Diagnostics` the rest of the
-pipeline already consumes. No iPhone required.
+**same binaries on macOS** (ImageIO, CoreGraphics, AudioToolbox, CoreText, …).
+A native harness `dlopen`s the framework, calls a real decode entry point, and
+— when it detects a defect — emits a report with a **real faulting address,
+access kind, stack, and modules**. The target normalizes that report into the
+same `Diagnostics` the rest of the pipeline already consumes. No iPhone required.
+
+> **The oracle is Guard Malloc, not ASan.** Compiler sanitizers only check code
+> compiled with them — here, the harness. ImageIO & co. are precompiled Apple
+> binaries, so a heap overflow or use-after-free *inside the framework* returned
+> normally under the old ASan build (measured with an uninstrumented stand-in
+> library). The default build therefore links no sanitizer and re-execs itself
+> under `/usr/lib/libgmalloc.dylib`, which faults on exactly those bugs, and a
+> crash reporter turns the fault into `IOSR-CRASH` / `IOSR-FRAME` lines
+> (`tools/harness/harness_runtime.h` → `targets/sigcrash.py`). See
+> [Detection](#detection-guard-malloc) and [Framework coverage](#framework-coverage-jackalope-two-stage).
 
 > **Authorized / own-machine research only.** The harness only feeds bytes to a
 > parsing entry point in a framework already installed on your machine. It does
@@ -29,8 +38,12 @@ pipeline already consumes. No iPhone required.
 
 ## Requirements (opt-in; CI stays mock-only)
 
-Two build modes (see below). The **default driver mode** needs only ASan/UBSan,
-which the Apple toolchain provides — but note:
+The **default build (`gmalloc` profile)** needs no sanitizer runtime at all, so
+it builds with any clang, including the Command Line Tools, and keeps working
+across toolchain upgrades (an ASan harness linked against Homebrew LLVM's
+runtime stopped launching entirely once that LLVM was upgraded). It needs
+`/usr/lib/libgmalloc.dylib`, present on stock macOS. For the optional ASan and
+libFuzzer modes:
 
 - The **Command Line Tools** clang's ASan runtime CHECK-fails
   (`asan_init_is_running`) when the harness `dlopen`s a system framework. Use a
@@ -49,9 +62,12 @@ only `available` once its harness binary is built. CI never builds or runs them.
 ## Build the harness
 
 ```bash
-# default: standalone ASan/UBSan driver — works on the stock Apple (Xcode) clang
+# default: standalone driver under Guard Malloc — any clang, no sanitizer runtime
 tools/harness/build.sh imageio
 tools/harness/build.sh all
+
+# ASan/UBSan instead (debugging the harness's OWN code; blind inside frameworks)
+tools/harness/build.sh --sanitizer asan-ubsan imageio
 
 # libFuzzer mode (needs a fuzzer-capable clang, e.g. Homebrew LLVM)
 CC=$(brew --prefix llvm)/bin/clang tools/harness/build.sh --libfuzzer imageio
@@ -153,12 +169,79 @@ empty map falls back safely to the pre-existing deterministic schedule. Guard
 IDs are build-specific performance signals, not source locations or a claim of
 coverage across an iOS device.
 
+## Detection: Guard Malloc
+
+`/usr/lib/libgmalloc.dylib` places every allocation against an unmapped guard
+page and unmaps freed memory, so an overflow past an allocation or any touch of
+freed memory faults at the bad access — inside uninstrumented framework code.
+The harness arms it itself (re-exec with `DYLD_INSERT_LIBRARIES`), verifies the
+library actually loaded, and prints a loud `WARNING` if it did not. On a fatal
+signal it prints:
+
+```
+IOSR-CRASH signal=SIGSEGV addr=0x... pc=0x... access=write
+IOSR-FRAME 0 0x... ImageIO+0x1947c <symbol>
+```
+
+`access` comes from the arm64 exception syndrome (read / write / exec), frames
+from a frame-pointer walk with module+offset (stable across ASLR), so
+`sigcrash.parse` produces deduplicable signatures. Notes:
+
+- Allocations are 16-byte aligned by default: overflows of 1–15 bytes into the
+  alignment slack are missed. `MALLOC_STRICT_SIZE=1` is byte-exact but can
+  false-fault in SIMD code. `MALLOC_PROTECT_BEFORE=1` guards the start of each
+  allocation (underflows) instead — alternate campaigns.
+- Overflow onto the guard page and use-after-free both fault as SIGSEGV/SIGBUS;
+  triage (minimize + analyze) separates spatial from temporal.
+- Measured cost on ImageIO: 0.5 ms/input, *faster* than the ASan build (0.7 ms).
+
+### Depth metric
+
+Each decoded input reports how deep it got on its `DONE` line —
+`pixels=N` (ImageIO: non-zero bytes drawn), `lines=N` (CoreText frame layout),
+`frames=N` (AudioToolbox PCM decoded through the codec). It exists because
+several stages silently never ran: a `CGRect`/`CFRange` passed as a pointer
+(ABI bug) made ImageIO draw 0 pixels and CoreText lay out no frame; AudioToolbox
+asked for property `'asbd'` (not a property; `kAudioFilePropertyDataFormat` is
+`'dfmt'`) and so rejected every valid file. `tests/test_mac_harness_abi.py`
+lints every hand-written prototype and property ID against the SDK in CI.
+
+## Framework coverage: Jackalope (two-stage)
+
+The harness's own SanitizerCoverage sees only harness code. For coverage
+*inside* the framework, `tools/harness/jackalope.sh` runs
+[Jackalope](https://github.com/googleprojectzero/Jackalope) + TinyInst, which
+instrument the precompiled framework and loop the harness's persistent entry
+point `iosr_fuzz_file()`:
+
+```bash
+# one-time: git clone Jackalope (+ TinyInst into it); with CMake 4:
+#   cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build .
+tools/harness/jackalope.sh imageio 600 4          # stage 1: grow a coverage corpus
+python tools/mac_campaign/run.py --target mac:imageio \
+    --seed-dir tools/harness/jackalope-out/imageio/out/samples --cases 200000
+                                                  # stage 2: replay + mutate under Guard Malloc
+```
+
+Two stages because the tools interfere: TinyInst + Guard Malloc in one process
+dropped from ~21,000 to 72 executions per minute. Instrumented modules default
+to where parsing really happens (`ImageIO AppleJPEG`, `libFontParser.dylib
+CoreText`, `AudioToolboxCore AudioCodecs`, `CoreGraphics`). The wrapper signs
+the harness with `debuggable.entitlements` (get-task-allow) so the same-user
+fuzzer can attach without root, and passes `-generate_unwind`: without it,
+ImageIO's internal C++ exceptions could not unwind through instrumented code
+and every malformed input aborted as a fake crash
+(`terminating due to uncaught exception of type int`). Measured: 33k code
+offsets in ImageIO + AppleJPEG in 60 s on 4 threads.
+
 ## Run it
 
 ### Campaign runner (recommended)
 
 ```bash
-# out-of-process driver engine (default driver build):
+# out-of-process driver engine (default driver build). Seeds = built-in format
+# seeds + up to --real-seeds N real files from this Mac (fonts, images, audio,
+# PDFs; default 200) + every file in each --seed-dir:
 python tools/mac_campaign/run.py --target mac:imageio --cases 20000 \
     --batch 512 --workers 0 --save-crashes /tmp/crashes
 

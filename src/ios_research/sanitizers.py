@@ -60,6 +60,16 @@ PROFILES: dict[str, SanitizerProfile] = {
     profile.id: profile
     for profile in (
         SanitizerProfile(
+            id="gmalloc",
+            description=("Guard Malloc (libgmalloc): page-guarded heap that faults "
+                         "on overflows and use-after-free INSIDE uninstrumented "
+                         "system frameworks; default for mac:<framework> harnesses"),
+            compile_flags=("-DHARNESS_GMALLOC",
+                           "-fsanitize-coverage=trace-pc-guard"),
+            runtime_env={"DYLD_INSERT_LIBRARIES": "/usr/lib/libgmalloc.dylib"},
+            platforms=("darwin",),
+        ),
+        SanitizerProfile(
             id="baseline",
             description="no sanitizer instrumentation",
             compile_flags=("-fsanitize-coverage=trace-pc-guard",),
@@ -123,17 +133,34 @@ PROFILES: dict[str, SanitizerProfile] = {
     )
 }
 
-# Profiles that must never be combined in one build.
+# Profiles that must never be combined in one build. Guard Malloc and every
+# sanitizer that ships its own allocator each replace malloc, so they exclude
+# one another.
+_GUARD_MALLOC = "guard-malloc"
 _INCOMPATIBLE = {
     frozenset({"address", "thread"}),
     frozenset({"memory", "thread"}),
     frozenset({"memory", "address"}),
+    *(frozenset({_GUARD_MALLOC, other})
+      for other in ("address", "thread", "memory", "hwaddress")),
 }
 
 # Profile-specific triage notes surfaced with validation results. These are
 # documentation, not enforcement: they record known detection deltas so
 # multi-sanitizer comparisons stay honest.
 PROFILE_NOTES: dict[str, tuple[str, ...]] = {
+    "gmalloc": (
+        "compiler sanitizers only check code compiled with them; Apple "
+        "frameworks are precompiled, so for mac:<framework> targets ASan misses "
+        "heap bugs inside the framework while Guard Malloc catches them",
+        "allocations are 16-byte aligned by default, so overflows of 1-15 bytes "
+        "into the alignment slack are missed; MALLOC_STRICT_SIZE=1 trades that "
+        "for possible false faults in SIMD code",
+        "MALLOC_PROTECT_BEFORE=1 guards the start of each allocation instead "
+        "(underflows); alternate campaigns to cover both directions",
+        "overflow onto the guard page and use-after-free both fault as "
+        "SIGSEGV/SIGBUS; triage separates spatial from temporal",
+    ),
     "mte": (
         "tag checks cover heap allocations; stack tagging requires "
         "-fsanitize-hwaddress-abi=platform support in the toolchain",
@@ -183,6 +210,9 @@ def check_combination(profile_ids: list[str]) -> dict:
     """Validate a campaign matrix of profiles for mutual compatibility."""
     seen: set[str] = set()
     for pid in profile_ids:
+        if pid == "gmalloc":
+            seen.add(_GUARD_MALLOC)        # a runtime allocator, not a -fsanitize flag
+            continue
         flags = get_profile(pid).compile_flags[0]
         if flags.startswith("-fsanitize="):
             seen |= set(flags.replace("-fsanitize=", "").split(","))
