@@ -4,284 +4,212 @@
 Authorized local security research only (own machine). See README.md.
 
 Modes:
-  proxy  listen on --listen (default 4450), forward to a real SMB server on
-         --upstream (default 1445), log every frame both directions into
-         seeds/*.bin  -> builds the replay corpus.
-  fuzz   replay recorded server-side responses (mutated) to whatever the
-         client sends; unknown commands get mutated garbage sized like the
-         recorded template. Every outgoing buffer is saved BEFORE sending,
-         so the last-saved case after a kernel panic is the suspect.
+  proxy   listen on --listen (default 4450), forward to a real SMB server on
+          --upstream (default 1445), log every frame both directions into
+          seeds/run-*/*.smbr -> builds the replay corpus.
+  fuzz    answer the client from the recorded corpus (see corpus.py), with
+          structure-aware mutations (see mutators.py). Every outgoing PDU is
+          fsync'd to cases/run-*/ BEFORE it is sent, so the newest case after
+          a kernel panic is the suspect.
+  corpus  report which seed runs are usable and what templates they yield;
+          --quarantine moves unusable runs to seeds/_quarantine/.
 
-Frame format on disk (seed files): NBSS already stripped; each record =
-  u32 magic 'SMBR' | u8 direction(0=req,1=resp) | u8 cmd | u32 msgid | u32 len | bytes
+Seed record format: u32 magic 'SMBR' | u8 dir(0=req,1=resp) | u8 cmd | u32 msgid
+| u32 len | payload (NBSS stripped). cmd/msgid are labels only; fuzz mode
+re-parses the payload.
 """
-import argparse, os, socket, struct, sys, time, random
+from __future__ import annotations
 
-MAGIC = b"SMBR"
-SMB2_SIG = b"\xfeSMB"
-HDR = 64
+import argparse
+import os
+import random
+import select
+import socket
+import sys
+import time
 
+import corpus as corpus_mod
+import smb2
+from cases import CaseWriter
+from fuzz_session import FuzzSession, Knobs
 
-def nbss_split(buf):
-    """Yield complete NBSS PDUs (type, payload) from a buffer; return rest."""
-    out, off = [], 0
-    while len(buf) - off >= 4:
-        n = int.from_bytes(buf[off + 1:off + 4], "big")
-        if len(buf) - off < 4 + n:
-            break
-        out.append((buf[off], buf[off + 4:off + 4 + n]))
-        off += 4 + n
-    return out, buf[off:]
-
-
-def parse_smb2(payload):
-    """Return (cmd, status, flags, msgid, body) or None."""
-    if len(payload) < HDR or payload[:4] != SMB2_SIG:
-        return None
-    cmd = struct.unpack_from("<H", payload, 14)[0]
-    msgid = struct.unpack_from("<Q", payload, 28)[0]
-    body = payload[HDR:]
-    return cmd, msgid, body
-
-
-CMD_NAMES = {0: "NEGOTIATE", 1: "SESSION_SETUP", 2: "LOGOFF", 3: "TREE_CONNECT",
-             4: "TREE_DISCONNECT", 5: "CREATE", 6: "CLOSE", 7: "FLUSH",
-             8: "READ", 9: "WRITE", 16: "ECHO", 18: "QUERY_DIR",
-             19: "CHANGE_NOTIFY", 20: "INFO"}
+CLIENT_TIMEOUT_S = 15
 
 
 class Recorder:
-    def __init__(self, dirpath):
+    def __init__(self, dirpath: str) -> None:
         self.dir = dirpath
         os.makedirs(dirpath, exist_ok=True)
         self.n = 0
         self.idx = os.path.join(dirpath, "INDEX.tsv")
 
-    def save(self, direction, cmd, msgid, data):
-        fn = f"{self.n:06d}_{ 'req' if direction==0 else 'rsp'}_{CMD_NAMES.get(cmd,cmd):>14}_{msgid:#x}.smbr"
+    def save(self, direction: int, payload: bytes) -> None:
+        chain = smb2.split_chain(payload)
+        cmd, msgid = (chain[0].header.command, chain[0].header.message_id) if chain else (-1, 0)
+        name = "+".join(smb2.cmd_name(e.header.command) for e in chain) or "NON_SMB2"
+        fn = f"{self.n:06d}_{'req' if direction == 0 else 'rsp'}_{name}_{msgid:#x}.smbr"
         with open(os.path.join(self.dir, fn), "wb") as f:
-            f.write(MAGIC + struct.pack("<BBII", direction, cmd & 0xFF, msgid & 0xFFFFFFFF, len(data)) + data)
+            f.write(corpus_mod.write_record(direction, cmd, msgid, payload))
         with open(self.idx, "a") as f:
-            f.write(f"{fn}\t{direction}\t{cmd}\t{msgid}\t{len(data)}\n")
+            f.write(f"{fn}\t{direction}\t{cmd}\t{msgid}\t{len(payload)}\n")
         self.n += 1
 
 
-def pump(src, dst, recorder, direction, state):
-    """Read from src, log + forward each NBSS PDU to dst."""
-    try:
-        src.settimeout(0.25)
-        while True:
-            try:
-                chunk = src.recv(65536)
-            except socket.timeout:
-                return True
-            except OSError:
-                return False
-            if not chunk:
-                return False
-            state["buf"] += chunk
-            pdus, state["buf"] = nbss_split(state["buf"])
-            for _t, payload in pdus:
-                p = parse_smb2(payload)
-                cmd, msgid = (p[0], p[1]) if p else (-1, 0)
-                recorder.save(direction, cmd, msgid, payload)
-                if direction == 1:
-                    state["last_rsp"] = (cmd, payload)
-                try:
-                    dst.sendall(payload)
-                except OSError:
-                    return False
-    finally:
-        pass
-
-
-def do_proxy(args):
-    rec = Recorder(os.path.join(args.seeds, time.strftime("run-%Y%m%d-%H%M%S")))
+def _listen(bind: str, port: int) -> socket.socket:
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((args.bind, args.listen))
+    srv.bind((bind, port))
     srv.listen(1)
-    print(f"[proxy] listening {args.bind}:{args.listen} -> {args.upstream}  (Ctrl-C to stop)")
+    return srv
+
+
+def _relay(cli: socket.socket, up: socket.socket, rec: Recorder) -> None:
+    """select()-based bidirectional relay; EOF on either side ends the session."""
+    bufs = {cli: b"", up: b""}
+    for s in (cli, up):
+        s.settimeout(None)                            # blocking; select() gates recv
+    while True:
+        rlist, _, xlist = select.select([cli, up], [], [cli, up])
+        if xlist:
+            return
+        for src in rlist:
+            dst, direction = (up, 0) if src is cli else (cli, 1)
+            try:
+                chunk = src.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            pdus, bufs[src] = smb2.nbss_split(bufs[src] + chunk)
+            for _t, payload in pdus:
+                rec.save(direction, payload)
+                try:
+                    dst.sendall(smb2.nbss_wrap(payload))
+                except OSError:
+                    return
+
+
+def do_proxy(args: argparse.Namespace) -> None:
+    rec = Recorder(os.path.join(args.seeds, time.strftime("run-%Y%m%d-%H%M%S")))
+    srv = _listen(args.bind, args.listen)
+    print(f"[proxy] listening {args.bind}:{args.listen} -> {args.upstream_host}:{args.upstream}")
     while True:
         cli, addr = srv.accept()
         print(f"[proxy] client {addr}")
-        up = None
         try:
             up = socket.create_connection((args.upstream_host, args.upstream), timeout=10)
         except OSError as e:
             print(f"[proxy] upstream connect failed: {e}")
             cli.close()
             continue
-        st_c, st_s = {"buf": b""}, {"buf": b""}
-        while True:
-            progressed = False
-            if pump(cli, up, rec, 0, st_c):
-                progressed = True
-            if pump(up, cli, rec, 1, st_s):
-                progressed = True
-            if not progressed:
-                # idle heartbeat; drop connection if both sides closed
-                try:
-                    cli.setblocking(False); cli.close()
-                except OSError:
-                    pass
-                try:
-                    up.close()
-                except OSError:
-                    pass
-                break
-        print("[proxy] session ended")
+        try:
+            _relay(cli, up, rec)
+        finally:
+            for s in (cli, up):
+                s.close()
+        print(f"[proxy] session ended, frames={rec.n}")
 
 
 # ---------------- fuzz mode ----------------
 
-def load_templates(seed_dirs):
-    """Latest response per command becomes the template."""
-    best = {}
-    import glob
-    files = []
-    for d in seed_dirs:
-        files += glob.glob(os.path.join(d, "*.smbr"))
-    for fp in sorted(files):
-        raw = open(fp, "rb").read()
-        if raw[:4] != MAGIC:
-            continue
-        direction, cmd, msgid, ln = struct.unpack_from("<BBII", raw, 4)
-        if direction == 1 and ln >= HDR:
-            best[cmd] = raw[16:16 + ln]
-    return best
+def read_pdu(sock: socket.socket, buf: bytes) -> tuple[bytes, bytes]:
+    """Block until one full NBSS PDU is buffered; return (payload, rest)."""
+    while True:
+        pdus, _rest = smb2.nbss_split(buf)
+        if pdus:
+            consumed = 4 + len(pdus[0][1])
+            return pdus[0][1], buf[consumed:]
+        chunk = sock.recv(65536)
+        if not chunk:
+            raise ConnectionResetError("client closed")
+        buf += chunk
 
 
-def mutate(body, rng):
-    """Field-stomp + bitflip mutation on a response body copy."""
-    b = bytearray(body)
-    if not b:
-        return bytes(b)
-    for _ in range(rng.randint(1, 4)):
-        op = rng.random()
-        if op < 0.45 and len(b) >= 2:                       # u16 field stomp
-            o = rng.randrange(0, len(b) - 1)
-            v = rng.choice([0x0000, 0x0001, 0xFFFF, 0x7FFF, 0x0100])
-            struct.pack_into("<H", b, o, v)
-        elif op < 0.75 and len(b) >= 4:                     # u32 field stomp
-            o = rng.randrange(0, len(b) - 3)
-            v = rng.choice([0, 1, 0xFFFFFFFF, 0x7FFFFFFF, 0xFFFFFF00, rng.getrandbits(32)])
-            struct.pack_into("<I", b, o, v)
-        else:                                               # byte flips
-            for _ in range(rng.randint(1, 8)):
-                o = rng.randrange(len(b))
-                b[o] ^= 1 << rng.randrange(8)
-    return bytes(b)
+def serve_connection(sock: socket.socket, session: FuzzSession, writer: CaseWriter,
+                     conn: int) -> None:
+    """Answer one client until it disconnects, times out, or sends ECHO."""
+    buf = b""
+    while True:
+        payload, buf = read_pdu(sock, buf)
+        outs = session.respond(payload)
+        if not outs and payload[:4] != smb2.SMB2_SIG:
+            writer.save(conn, "UNKNOWN_REQ", payload, "unanswered non-SMB2 request", ext="unknown")
+        for out in outs:
+            writer.save(conn, out.kind, out.pdu, out.desc)   # PROVENANCE: durable before send
+            sock.sendall(smb2.nbss_wrap(out.pdu))
+        if session.saw_echo:
+            # client idles into ECHO keepalives: the cycle is over; dropping the
+            # connection also exercises smbfs reconnect
+            return
 
 
-CANNED_NEGOTIATE = (
-    struct.pack("<HHI", 65, 0, 0)           # StructSize=65, SecurityMode=0, Capabilities=0
-    + b"\x00" * 16                          # GUID
-    + struct.pack("<HIHI", 0x02FF, 0, 1, 0)  # MaxDialect.. actually rough; client re-negotiates
-    + struct.pack("<H", 0x0202)             # dialect 2.0.2 fallback
-)
-# NOTE: canned fallbacks are intentionally minimal; real seeds from proxy mode
-# are what drive deep parsing.
-
-
-def do_fuzz(args):
-    tmpl = load_templates(args.seeds)
-    if not tmpl:
-        sys.exit("no seed templates found — run proxy mode first")
-    print(f"[fuzz] templates for commands: {[CMD_NAMES.get(k,k) for k in sorted(tmpl)]}")
-    rng = random.Random(args.seed)
-    os.makedirs(args.cases, exist_ok=True)
-    caseno = 0
-
-    srv = socket.socket()
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((args.bind, args.listen))
-    srv.listen(1)
+def do_fuzz(args: argparse.Namespace) -> None:
+    corp = corpus_mod.load_corpus(args.seeds)
+    _print_corpus(corp)
+    if not corp.templates:
+        sys.exit("no usable seed templates — run proxy mode first (see `corpus` mode)")
+    seed = args.seed if args.seed is not None else int(time.time())
+    knobs = Knobs(mutate_handshake=args.mutate_handshake)
+    writer = CaseWriter(args.cases, seed, {"first_conn": args.first_conn, "knobs": knobs.__dict__,
+                                           "seeds": os.path.abspath(args.seeds)})
+    srv = _listen(args.bind, args.listen)
+    print(f"[fuzz] seed={seed} cases -> {writer.dir}")
     print(f"[fuzz] listening {args.bind}:{args.listen}; run mount_smbfs against this port")
-
+    conn = args.first_conn
     while True:
         cli, addr = srv.accept()
-        print(f"[fuzz] client {addr} case#{caseno}")
-        buf = b""
-        sess = 0
+        # per-connection RNG: `--seed S --first-conn N` replays connection N exactly
+        session = FuzzSession(corp, random.Random(f"{seed}:{conn}"), knobs)
+        print(f"[fuzz] conn#{conn} from {addr} (case {writer.n + 1})")
         try:
-            cli.settimeout(15)
-            while True:
-                # read one request PDU
-                while len(buf) < 4:
-                    c = cli.recv(65536)
-                    if not c:
-                        raise ConnectionReset
-                    buf += c
-                n = int.from_bytes(buf[1:4], "big")
-                while len(buf) < 4 + n:
-                    c = cli.recv(65536)
-                    if not c:
-                        raise ConnectionReset
-                    buf += c
-                payload, buf = buf[4:4 + n], buf[4 + n:]
-                p = parse_smb2(payload)
-                if p is None:
-                    continue
-                cmd, msgid, body = p
-
-                base = tmpl.get(cmd)
-                if base is None:
-                    # synthesize minimal error/success reply so client keeps talking
-                    hdr = SMB2_SIG + struct.pack("<HHIQIHHQQ", 64, 0, 0xC0000001,
-                                                 cmd, 1, 0x1, 0, msgid) + b"\x00" * 24
-                    resp = hdr[:HDR]
-                else:
-                    resp = bytearray(base)
-                    struct.pack_into("<Q", resp, 28, msgid)          # match msgid
-                    struct.pack_into("<I", resp, 8, 0)               # STATUS_SUCCESS
-                    if sess:
-                        struct.pack_into("<Q", resp, 40, sess)
-                    body_mut = mutate(bytes(resp[HDR:]), rng)
-                    resp = bytes(resp[:HDR]) + body_mut
-
-                caseno += 1
-                casefile = os.path.join(args.cases, f"{caseno:07d}.rsp")
-                open(casefile, "wb").write(resp)                     # PROVENANCE: saved pre-send
-                try:
-                    cli.sendall(b"\x00" + len(resp).to_bytes(3, "big") + resp)
-                except OSError:
-                    raise ConnectionReset
-
-                if cmd == 1:  # SESSION_SETUP: capture granted session id from our own template
-                    try:
-                        sess = struct.unpack_from("<Q", resp, 40)[0]
-                    except Exception:
-                        sess = 0
-                if cmd == 16:  # ECHO → healthy liveness exit for the driver script
-                    print("[fuzz] ECHO seen; session cycle done")
-                    break
-        except (ConnectionReset, socket.timeout, OSError):
-            pass
+            cli.settimeout(CLIENT_TIMEOUT_S)
+            serve_connection(cli, session, writer, conn)
+        except (ConnectionResetError, socket.timeout, OSError) as e:
+            print(f"[fuzz] conn#{conn} ended: {type(e).__name__}: {e}")
         finally:
-            try:
-                cli.close()
-            except OSError:
-                pass
-        print(f"[fuzz] cycle complete, cases={caseno}")
+            cli.close()
+        print(f"[fuzz] conn#{conn} done, cases={writer.n}")
+        conn += 1
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("mode", choices=["proxy", "fuzz"])
+# ---------------- corpus mode ----------------
+
+def _print_corpus(corp: corpus_mod.Corpus) -> None:
+    for r in corp.runs:
+        state = "ok" if r.usable else "UNUSABLE"
+        note = f" stale-labels={r.stale_labels}" if r.stale_labels else ""
+        print(f"[corpus] {os.path.basename(r.path)}: {state} frames={r.frames} "
+              f"responses={r.responses} bad={r.bad_frames}{note}")
+    print(f"[corpus] templates: {' '.join(corp.summary()) or '(none)'}")
+    print(f"[corpus] multi-protocol negotiate reply: {'yes' if corp.mp_negotiate else 'NO'}")
+
+
+def do_corpus(args: argparse.Namespace) -> None:
+    corp = corpus_mod.load_corpus(args.seeds)
+    _print_corpus(corp)
+    if args.quarantine:
+        for dest in corpus_mod.quarantine(args.seeds, corp.runs):
+            print(f"[corpus] quarantined -> {dest}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("mode", choices=["proxy", "fuzz", "corpus"])
     ap.add_argument("--bind", default="127.0.0.1")
     ap.add_argument("--listen", type=int, default=4450)
     ap.add_argument("--upstream", type=int, default=1445, help="real smbd port")
     ap.add_argument("--upstream-host", default="127.0.0.1")
     ap.add_argument("--seeds", default="seeds")
     ap.add_argument("--cases", default="cases")
-    ap.add_argument("--seed", type=int, default=1337)
-    a = ap.parse_args()
-
-    if a.mode == "proxy":
-        do_proxy(a)
-    else:
-        do_fuzz(a)
+    ap.add_argument("--seed", type=int, default=None,
+                    help="RNG seed (default: current time; recorded in the run's meta.json)")
+    ap.add_argument("--first-conn", type=int, default=0,
+                    help="starting connection number; with --seed, replays that connection")
+    ap.add_argument("--mutate-handshake", action="store_true",
+                    help="also mutate NEGOTIATE/SESSION_SETUP (can wedge mount() unkillably)")
+    ap.add_argument("--quarantine", action="store_true", help="corpus mode: move unusable runs aside")
+    a = ap.parse_args(argv)
+    {"proxy": do_proxy, "fuzz": do_fuzz, "corpus": do_corpus}[a.mode](a)
 
 
 if __name__ == "__main__":
