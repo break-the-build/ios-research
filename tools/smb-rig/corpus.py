@@ -20,6 +20,7 @@ import random
 import shutil
 import struct
 from dataclasses import dataclass, field
+from functools import cached_property
 
 import smb2
 
@@ -94,7 +95,15 @@ class Corpus:
         if exact:
             return exact
         # no exact sub-type recorded: any response for this command
-        return tuple(el for (c, _s), els in self.templates.items() if c == cmd for el in els)
+        return self._by_command.get(cmd, ())
+
+    @cached_property
+    def _by_command(self) -> dict[int, tuple[smb2.Element, ...]]:
+        """All templates per command, built once (looked up on every reply miss)."""
+        out: dict[int, list[smb2.Element]] = {}
+        for (cmd, _subkey), els in self.templates.items():
+            out.setdefault(cmd, []).extend(els)
+        return {cmd: tuple(els) for cmd, els in out.items()}
 
     def summary(self) -> list[str]:
         return [f"{smb2.cmd_name(c)}[{s if s is None else hex(s)}]x{len(v)}"

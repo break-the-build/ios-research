@@ -21,10 +21,13 @@ macOS kernel (smbfs) ──mount_smbfs──> smb_rig.py :4450
 | `smb_rig.py` | CLI: `proxy`, `fuzz`, `corpus`, `replay`, `stats`; threaded socket loops |
 | `smb2.py` | header layout (MS-SMB2 2.2.1.2), compound chains, NBSS framing |
 | `corpus.py` | seed loading: re-parses payloads, pairs responses to requests, seed identity |
-| `fuzz_session.py` | per-connection response engine with mutation budget (no sockets) |
+| `fuzz_session.py` | per-connection response engine: templates, realism, mutation families (no sockets) |
+| `budget.py` | when to mutate: per-mount budget, warm-up protection, spread over the mount |
 | `mutators.py` | offset/length, NextEntryOffset-chain, status, pending, oplock-break mutators |
 | `cases.py` | crash-durable case storage (fsync + F_FULLFSYNC, one dir per run) + index reader |
-| `triage.py` | run depth statistics and byte-exact connection replay |
+| `triage.py` | run depth statistics, kernel-log summary, byte-exact connection replay |
+| `klog.py` | streams smbfs kernel log messages: coverage proxy + memory-safety ALERTs |
+| `favored.py` | keeps mutated replies that produced new kernel messages; mutations stack on them |
 | `runner.sh` | client driver: mount, bounded workload, wedge + panic detection |
 
 * **proxy mode** builds ground-truth seeds by sitting between the stock client
@@ -41,18 +44,39 @@ macOS kernel (smbfs) ──mount_smbfs──> smb_rig.py :4450
   `AAPL`, directory entries, stream/EA info, change-notify records), compound
   `NextCommand`, error replies that carry data (`STATUS_STOPPED_ON_SYMLINK`
   symlink error response, `STATUS_BUFFER_OVERFLOW`), `STATUS_PENDING` interim
-  + async final (sometimes completed twice), unsolicited oplock breaks
-  against live FileIds, and absurd credit grants. ECHO ends a cycle (and
-  exercises reconnect).
+  + async final (sometimes completed twice), unsolicited **lease breaks
+  carrying the client's live LeaseKey** (and oplock breaks against live
+  FileIds), and absurd credit grants. ECHO ends a cycle (and exercises
+  reconnect).
   Mutation is **budgeted**: `--budget N` events (default 2) per mount,
   refilled at each TREE_CONNECT because smbfs reuses one TCP session across
   mounts. A client drops a session after its first malformed reply, so
   mutating every reply would mostly fuzz the abort path; a small budget keeps
-  sessions deep and pins any crash on one reply. NEGOTIATE, SESSION_SETUP and
-  TREE_CONNECT replies stay clean unless `--mutate-handshake`. Credits are
-  granted from the client's CreditRequest (capped at 512). Connections are
-  served concurrently — the kernel keeps idle sessions open while new mounts
-  connect.
+  sessions deep and pins any crash on one reply. The budget is **spread** over
+  the mount (chance = budget left / requests expected to remain, learned per
+  session) and the first 2 requests after TREE_CONNECT (mount_smbfs's share
+  check) are protected 90% of the time. A flat 25% chance put 62% of
+  mutations on those two requests and failed ~half of those mounts; spreading
+  raised mount success from 63% to 93% and moved mutations 6+ requests deep
+  from 7 to 78 per 40 rounds. NEGOTIATE, SESSION_SETUP and TREE_CONNECT replies
+  stay clean unless `--mutate-handshake`; 4-byte replies (LOGOFF,
+  TREE_DISCONNECT, FLUSH, ECHO) never get body mutations.
+  Replies are made realistic before mutation: every successful CREATE gets a
+  fresh FileId (recorded ones collided in the client's fid table), IOCTL
+  replies echo the request's FileId, lease contexts echo the LeaseKey, and
+  break acknowledgments get well-formed replies. Credits are granted from the
+  client's CreditRequest (capped at 512). Connections are served concurrently —
+  the kernel keeps idle sessions open while new mounts connect.
+  **Kernel-log feedback** (on by default; `--no-klog` disables): the rig
+  streams `log stream` for `sender == "smbfs"`, normalises each message to a
+  template, and records it in `klog.tsv` against the newest case. A template
+  never seen under `--cases` before (`cases/klog-seen.txt`) means a reply
+  reached a new error branch; mutated replies sent in the 2 s before it are
+  promoted to `favored/`, and later mutations start from a favored reply half
+  the time (`fav+` in the case description). Messages matching memory-safety
+  words (corrupt, overflow, zone, refcount, assert, …) are flagged `ALERT`,
+  fsync'd, and printed. Run one `--clean` campaign first so its templates
+  become the baseline.
   `--clean` disables mutation entirely: a conformance check that the client
   mounts and reaches the file-op parsers before you fuzz.
 * **replay mode** (`--run cases/run-… --conn N`) re-serves a recorded
@@ -61,7 +85,8 @@ macOS kernel (smbfs) ──mount_smbfs──> smb_rig.py :4450
   reproducer for a panic suspect.
 * **stats mode** prints per-run depth (how many connections reached CREATE /
   QUERY_DIR / READ …), mounts, the share of sessions that ended on a mutated
-  reply, and the newest mutated cases.
+  reply, the newest mutated cases, and the kernel-log summary (new templates
+  and ALERTs with the case that preceded each).
 * **corpus mode** reports which seed runs are usable and the template keys they
   yield; `--quarantine` moves unusable runs to `seeds/_quarantine/`. Record
   labels are ignored — payloads are re-parsed — so runs captured before the

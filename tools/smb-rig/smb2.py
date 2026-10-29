@@ -230,12 +230,67 @@ def echo_lease_key(req_body: bytes, rsp_body: bytes) -> bytes:
     return bytes(out)
 
 
+CREATE_RSP_FILE_ID = 64                # CREATE response FileId (16 bytes)
+IOCTL_FILE_ID = 8                      # IOCTL request/response FileId (16 bytes)
+FILE_ID_LEN = 16
+
+
+def _splice(body: bytes, off: int, data: bytes) -> bytes:
+    if off + len(data) > len(body):
+        return body
+    return body[:off] + data + body[off + len(data):]
+
+
+def with_create_file_id(rsp_body: bytes, file_id: bytes) -> bytes:
+    """Give a replayed CREATE reply a fresh FileId.
+
+    Recorded replies reuse the recording's FileIds, so separate opens collide
+    in the client's fid table (observed: "No SMB 2/3 fid found", "Failed to
+    remove fid from internal table") and sessions desync before going deep.
+    """
+    return _splice(rsp_body, CREATE_RSP_FILE_ID, file_id)
+
+
+def echo_ioctl_file_id(req_body: bytes, rsp_body: bytes) -> bytes:
+    if len(req_body) < IOCTL_FILE_ID + FILE_ID_LEN:
+        return rsp_body
+    return _splice(rsp_body, IOCTL_FILE_ID, req_body[IOCTL_FILE_ID:IOCTL_FILE_ID + FILE_ID_LEN])
+
+
+def lease_key_of(create_req_body: bytes) -> bytes | None:
+    """LeaseKey the client put in a CREATE request's RqLs context."""
+    for name, off, ln in create_contexts(create_req_body, False):
+        if name == LEASE_CONTEXT and ln >= 16 and off + 16 <= len(create_req_body):
+            return bytes(create_req_body[off:off + 16])
+    return None
+
+
+OPLOCK_BREAK_ACK_SIZE = 24             # 2.2.24.1 / 2.2.25.1
+LEASE_BREAK_ACK_SIZE = 36              # 2.2.24.2 / 2.2.25.2
+
+
+def break_ack_response(req_body: bytes) -> bytes | None:
+    """Well-formed reply to a client's oplock/lease break acknowledgment."""
+    if len(req_body) < 2:
+        return None
+    size = struct.unpack_from("<H", req_body, 0)[0]
+    if size == OPLOCK_BREAK_ACK_SIZE and len(req_body) >= OPLOCK_BREAK_ACK_SIZE:
+        return bytes(req_body[:OPLOCK_BREAK_ACK_SIZE])           # same layout, echoed
+    if size == LEASE_BREAK_ACK_SIZE and len(req_body) >= LEASE_BREAK_ACK_SIZE:
+        return bytes(req_body[:LEASE_BREAK_ACK_SIZE])
+    return None
+
+
 def is_smb1_negotiate(payload: bytes) -> bool:
     return payload[:4] == SMB1_SIG and len(payload) > 4 and payload[4] == SMB1_NEGOTIATE
 
 
-def nbss_wrap(payload: bytes) -> bytes:
-    return b"\x00" + len(payload).to_bytes(3, "big") + payload
+NBSS_SESSION_MESSAGE = 0x00
+NBSS_KEEPALIVE = 0x85
+
+
+def nbss_wrap(payload: bytes, kind: int = NBSS_SESSION_MESSAGE) -> bytes:
+    return bytes([kind]) + len(payload).to_bytes(3, "big") + payload
 
 
 def nbss_split(buf: bytes) -> tuple[list[tuple[int, bytes]], bytes]:

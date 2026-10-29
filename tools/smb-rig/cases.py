@@ -16,6 +16,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from typing import NamedTuple
 
 
 def _full_sync(fd: int) -> None:
@@ -73,23 +74,29 @@ class CaseWriter:
         durable_write(self.index, ("\t".join(self.INDEX_COLUMNS) + "\n").encode())
 
     def save(self, conn: int, kind: str, data: bytes, desc: str, ext: str = "rsp",
-             req: int = 0, mutated: bool = False) -> str:
-        """Persist one case durably; returns its path. Call BEFORE sending.
+             req: int = 0, mutated: bool = False) -> SavedCase:
+        """Persist one case durably. Call BEFORE sending.
 
         Serialised across connection threads so case numbers and index order
         match the global send order (the post-panic suspect is the last line).
         """
         with self._lock:
             self.n += 1
-            path = os.path.join(self.dir, f"{self.n:07d}.{ext}")
+            number = self.n
+            path = os.path.join(self.dir, f"{number:07d}.{ext}")
             durable_write(path, data)
-            line = "\t".join((f"{self.n:07d}", utc_stamp(), str(conn), str(req), str(int(mutated)),
+            line = "\t".join((f"{number:07d}", utc_stamp(), str(conn), str(req), str(int(mutated)),
                               kind, str(len(data)), desc.replace("\t", " ").replace("\n", " ")))
             with open(self.index, "a") as f:
                 f.write(line + "\n")
                 f.flush()
                 _full_sync(f.fileno())
-            return path
+        return SavedCase(number, path)
+
+
+class SavedCase(NamedTuple):
+    number: int
+    path: str
 
 
 @dataclass(frozen=True)

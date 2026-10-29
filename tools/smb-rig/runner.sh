@@ -58,11 +58,18 @@ bounded() {
   return 0
 }
 
+# wait_mounted PID: 0 once mounted; 1 as soon as mount_smbfs exits without a
+# mount (a rejected reply fails the mount in milliseconds — waiting out the
+# deadline cost 25 s per failure, ~40% of rounds in the first campaign)
 wait_mounted() {
-  local n=0
-  while (( n < MOUNT_WAIT * 2 )); do
+  local pid=$1 n=0
+  while (( n < MOUNT_WAIT * 4 )); do
     is_mounted && return 0
-    sleep 0.5; (( n++ ))
+    if ! kill -0 $pid 2>/dev/null; then
+      is_mounted && return 0
+      return 1
+    fi
+    sleep 0.25; (( n++ ))
   done
   return 1
 }
@@ -107,7 +114,7 @@ for (( i = 1; i <= ROUNDS; i++ )); do
   log "round $i: mount (last-case=$(last_case))"
   mount_smbfs "$URL" "$MNT" </dev/null >/dev/null 2>&1 &!
 
-  if wait_mounted; then
+  if wait_mounted $!; then
     log "round $i: mounted — exercising"
     exercise $i
   else

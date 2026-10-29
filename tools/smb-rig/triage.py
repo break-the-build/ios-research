@@ -10,6 +10,7 @@ replay — re-serve one recorded connection byte-for-byte. Only MessageIds are
 """
 from __future__ import annotations
 
+import os
 import struct
 from collections import Counter
 from dataclasses import dataclass
@@ -65,6 +66,38 @@ def format_stats(s: RunStats) -> list[str]:
         lines.append("newest mutated cases (panic suspects, newest last):")
         lines += [f"  {r.case} {r.utc} conn={r.conn} req={r.req} {r.kind}: {r.desc[:120]}"
                   for r in s.suspects]
+    return lines
+
+
+KLOG_FILE = "klog.tsv"
+KLOG_SHOWN = 15
+
+
+def format_klog(run_dir: str) -> list[str]:
+    """Kernel-log coverage for a run: templates, first sightings and their cases."""
+    path = os.path.join(run_dir, KLOG_FILE)
+    if not os.path.exists(path):
+        return ["kernel log: not captured (run without --no-klog)"]
+    counts: Counter[str] = Counter()
+    new: list[tuple[str, str]] = []
+    alerts: list[tuple[str, str]] = []
+    with open(path) as f:
+        for line in f:
+            cols = line.rstrip("\n").split("\t")
+            if len(cols) < 4:
+                continue                              # torn final line after a panic
+            counts[cols[3]] += 1
+            flags = cols[2].split(",")
+            if "NEW" in flags:
+                new.append((cols[1], cols[3]))
+            if "ALERT" in flags:
+                alerts.append((cols[1], cols[4] if len(cols) > 4 else cols[3]))
+    lines = [(f"kernel log: {sum(counts.values())} smbfs messages, {len(counts)} templates, "
+              f"{len(new)} new this run, {len(alerts)} ALERT")]
+    lines += [f"  ALERT @case {case}: {msg[:110]}" for case, msg in alerts[:KLOG_SHOWN]]
+    lines += [f"  NEW @case {case}: {tmpl[:110]}" for case, tmpl in new[:KLOG_SHOWN]]
+    if len(new) > KLOG_SHOWN:
+        lines.append(f"  ... {len(new) - KLOG_SHOWN} more in {path}")
     return lines
 
 

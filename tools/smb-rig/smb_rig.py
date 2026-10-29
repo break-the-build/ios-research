@@ -15,7 +15,8 @@ Modes:
           --quarantine moves unusable runs to seeds/_quarantine/.
   replay  re-serve one recorded connection (--run DIR --conn N) byte-for-byte:
           the reproducer for a panic suspect.
-  stats   connection depth, rejected-mutation rate, newest mutated cases.
+  stats   connection depth, rejected-mutation rate, newest mutated cases,
+          kernel-log coverage and ALERTs.
 
 Seed record format: u32 magic 'SMBR' | u8 dir(0=req,1=resp) | u8 cmd | u32 msgid
 | u32 len | payload (NBSS stripped). cmd/msgid are labels only; fuzz mode
@@ -24,9 +25,12 @@ re-parses the payload.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import logging
 import os
 import random
 import select
+import signal
 import socket
 import sys
 import threading
@@ -37,10 +41,18 @@ from typing import Callable
 import corpus as corpus_mod
 import smb2
 from cases import CaseWriter, latest_run, read_index
-from fuzz_session import FuzzSession, Knobs
-from triage import ReplaySession, format_stats, run_stats
+from favored import FavoredStore, RecentMutations
+from fuzz_session import FuzzSession, Knobs, Outgoing, Responder
+from klog import KernelLogTap
+from triage import ReplaySession, format_klog, format_stats, run_stats
 
+KLOG_SEEN_FILE = "klog-seen.txt"       # templates seen by any campaign under --cases
 CLIENT_TIMEOUT_S = 15
+LISTEN_BACKLOG = 16
+RECV_CHUNK = 65536
+
+log = logging.getLogger("smb-rig")
+OnSent = Callable[[int, Outgoing], None]
 
 
 class Recorder:
@@ -66,9 +78,11 @@ def _listen(bind: str, port: int) -> socket.socket:
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((bind, port))
-    srv.listen(16)
+    srv.listen(LISTEN_BACKLOG)
     return srv
 
+
+# ---------------- proxy mode ----------------
 
 def _relay(cli: socket.socket, up: socket.socket, rec: Recorder) -> None:
     """select()-based bidirectional relay; EOF on either side ends the session."""
@@ -82,16 +96,17 @@ def _relay(cli: socket.socket, up: socket.socket, rec: Recorder) -> None:
         for src in rlist:
             dst, direction = (up, 0) if src is cli else (cli, 1)
             try:
-                chunk = src.recv(65536)
+                chunk = src.recv(RECV_CHUNK)
             except OSError:
                 return
             if not chunk:
                 return
             pdus, bufs[src] = smb2.nbss_split(bufs[src] + chunk)
-            for _t, payload in pdus:
-                rec.save(direction, payload)
+            for kind, payload in pdus:
+                if kind == smb2.NBSS_SESSION_MESSAGE:
+                    rec.save(direction, payload)
                 try:
-                    dst.sendall(smb2.nbss_wrap(payload))
+                    dst.sendall(smb2.nbss_wrap(payload, kind))   # keepalives pass through as-is
                 except OSError:
                     return
 
@@ -99,14 +114,14 @@ def _relay(cli: socket.socket, up: socket.socket, rec: Recorder) -> None:
 def do_proxy(args: argparse.Namespace) -> None:
     rec = Recorder(os.path.join(args.seeds, time.strftime("run-%Y%m%d-%H%M%S")))
     srv = _listen(args.bind, args.listen)
-    print(f"[proxy] listening {args.bind}:{args.listen} -> {args.upstream_host}:{args.upstream}")
+    log.info("[proxy] listening %s:%d -> %s:%d", args.bind, args.listen, args.upstream_host, args.upstream)
     while True:
         cli, addr = srv.accept()
-        print(f"[proxy] client {addr}")
+        log.info("[proxy] client %s", addr)
         try:
             up = socket.create_connection((args.upstream_host, args.upstream), timeout=10)
         except OSError as e:
-            print(f"[proxy] upstream connect failed: {e}")
+            log.warning("[proxy] upstream connect failed: %s", e)
             cli.close()
             continue
         try:
@@ -114,26 +129,32 @@ def do_proxy(args: argparse.Namespace) -> None:
         finally:
             for s in (cli, up):
                 s.close()
-        print(f"[proxy] session ended, frames={rec.n}")
+        log.info("[proxy] session ended, frames=%d", rec.n)
 
 
-# ---------------- fuzz mode ----------------
+# ---------------- fuzz / replay serving ----------------
 
 def read_pdu(sock: socket.socket, buf: bytes) -> tuple[bytes, bytes]:
-    """Block until one full NBSS PDU is buffered; return (payload, rest)."""
+    """Block until one NBSS session message is buffered; return (payload, rest).
+
+    Keepalive frames (0x85) carry no SMB and are consumed silently.
+    """
     while True:
         pdus, _rest = smb2.nbss_split(buf)
         if pdus:
-            consumed = 4 + len(pdus[0][1])
-            return pdus[0][1], buf[consumed:]
-        chunk = sock.recv(65536)
+            kind, payload = pdus[0]
+            buf = buf[4 + len(payload):]
+            if kind == smb2.NBSS_KEEPALIVE:
+                continue
+            return payload, buf
+        chunk = sock.recv(RECV_CHUNK)
         if not chunk:
             raise ConnectionResetError("client closed")
         buf += chunk
 
 
-def serve_connection(sock: socket.socket, session: FuzzSession, writer: CaseWriter,
-                     conn: int) -> None:
+def serve_connection(sock: socket.socket, session: Responder, writer: CaseWriter,
+                     conn: int, on_sent: OnSent | None = None) -> None:
     """Answer one client until it disconnects, times out, or sends ECHO."""
     buf = b""
     while True:
@@ -143,7 +164,9 @@ def serve_connection(sock: socket.socket, session: FuzzSession, writer: CaseWrit
             writer.save(conn, "UNKNOWN_REQ", payload, "unanswered non-SMB2 request", ext="unknown")
         for out in outs:
             # PROVENANCE: durable before send
-            writer.save(conn, out.kind, out.pdu, out.desc, req=out.req, mutated=out.mutated)
+            saved = writer.save(conn, out.kind, out.pdu, out.desc, req=out.req, mutated=out.mutated)
+            if on_sent is not None:
+                on_sent(saved.number, out)
             sock.sendall(smb2.nbss_wrap(out.pdu))
         if session.saw_echo:
             # client idles into ECHO keepalives: the cycle is over; dropping the
@@ -151,29 +174,21 @@ def serve_connection(sock: socket.socket, session: FuzzSession, writer: CaseWrit
             return
 
 
-def _load_corpus_or_exit(seeds: str) -> corpus_mod.Corpus:
-    corp = corpus_mod.load_corpus(seeds)
-    _print_corpus(corp)
-    if not corp.templates:
-        sys.exit("no usable seed templates — run proxy mode first (see `corpus` mode)")
-    return corp
-
-
-def _handle(cli: socket.socket, session: FuzzSession | ReplaySession, writer: CaseWriter,
-            conn: int, tag: str) -> None:
+def _handle(cli: socket.socket, session: Responder, writer: CaseWriter, conn: int, tag: str,
+            on_sent: OnSent | None = None) -> None:
     try:
         cli.settimeout(CLIENT_TIMEOUT_S)
-        serve_connection(cli, session, writer, conn)
-    except (ConnectionResetError, socket.timeout, OSError) as e:
-        print(f"[{tag}] conn#{conn} ended: {type(e).__name__}: {e}")
-    except Exception:  # noqa: BLE001 — rig bug: record it, keep the campaign alive
+        serve_connection(cli, session, writer, conn, on_sent)
+    except OSError as e:                              # reset, timeout, closed socket
+        log.info("[%s] conn#%d ended: %s: %s", tag, conn, type(e).__name__, e)
+    except Exception:  # noqa: BLE001 -- rig bug: record it, keep the campaign alive
         err = os.path.join(writer.dir, f"conn-{conn}.error.txt")
         with open(err, "w") as f:
             f.write(traceback.format_exc())
-        print(f"[{tag}] conn#{conn} RIG ERROR (traceback -> {err})")
+        log.error("[%s] conn#%d RIG ERROR (traceback -> %s)", tag, conn, err)
     finally:
         cli.close()
-    print(f"[{tag}] conn#{conn} done, cases={writer.n}")
+    log.info("[%s] conn#%d done, cases=%d", tag, conn, writer.n)
 
 
 def _spawn_thread(fn: Callable[[], None]) -> None:
@@ -181,8 +196,9 @@ def _spawn_thread(fn: Callable[[], None]) -> None:
 
 
 def _serve_forever(srv: socket.socket, writer: CaseWriter, first_conn: int,
-                   make_session: Callable[[int], FuzzSession | ReplaySession], tag: str,
-                   spawn: Callable[[Callable[[], None]], None] = _spawn_thread) -> None:
+                   make_session: Callable[[int], Responder], tag: str,
+                   spawn: Callable[[Callable[[], None]], None] = _spawn_thread,
+                   on_sent: OnSent | None = None) -> None:
     """Accept forever; every connection is served concurrently.
 
     smbfs keeps idle sessions open and opens new connections for new mounts
@@ -193,9 +209,40 @@ def _serve_forever(srv: socket.socket, writer: CaseWriter, first_conn: int,
     while True:
         cli, addr = srv.accept()
         session = make_session(conn)
-        print(f"[{tag}] conn#{conn} from {addr} (case {writer.n + 1})")
-        spawn(lambda cli=cli, session=session, conn=conn: _handle(cli, session, writer, conn, tag))
+        log.info("[%s] conn#%d from %s (case %d)", tag, conn, addr, writer.n + 1)
+        spawn(lambda cli=cli, session=session, conn=conn:
+              _handle(cli, session, writer, conn, tag, on_sent))
         conn += 1
+
+
+def start_feedback(writer: CaseWriter, cases_root: str) -> tuple[FavoredStore, OnSent, KernelLogTap]:
+    """Wire klog -> favored: a new kernel log template promotes recent mutations."""
+    favored, recent = FavoredStore(writer.dir), RecentMutations()
+
+    def on_new(template: str, case: int) -> None:
+        promoted = 0
+        for mcase, elements in recent.window():
+            for key, el in elements:
+                favored.add(key, el, template, mcase)
+                promoted += 1
+        log.info("[klog] NEW @case %d: %s  (promoted %d)", case, template[:110], promoted)
+
+    def on_alert(message: str, case: int) -> None:
+        log.warning("[klog] *** ALERT @case %d: %s  -- triage: stats + replay this conn",
+                    case, message[:200])
+
+    tap = KernelLogTap(writer.dir, os.path.join(cases_root, KLOG_SEEN_FILE), lambda: writer.n,
+                       on_new, on_alert=on_alert)
+    tap.start()
+    return favored, lambda case, out: recent.add(case, out.mutated_elements), tap
+
+
+def _load_corpus_or_exit(seeds: str) -> corpus_mod.Corpus:
+    corp = corpus_mod.load_corpus(seeds)
+    _print_corpus(corp)
+    if not corp.templates:
+        sys.exit("no usable seed templates — run proxy mode first (see `corpus` mode)")
+    return corp
 
 
 def do_fuzz(args: argparse.Namespace) -> None:
@@ -203,15 +250,28 @@ def do_fuzz(args: argparse.Namespace) -> None:
     seed = args.seed if args.seed is not None else int(time.time())
     knobs = Knobs.clean() if args.clean else Knobs(mutate_handshake=args.mutate_handshake,
                                                     budget=args.budget)
-    writer = CaseWriter(args.cases, seed, {"first_conn": args.first_conn, "knobs": knobs.__dict__,
+    writer = CaseWriter(args.cases, seed, {"first_conn": args.first_conn,
+                                           "knobs": dataclasses.asdict(knobs),
                                            "seeds": os.path.abspath(args.seeds)},
                         tag="clean" if args.clean else None)
-    srv = _listen(args.bind, args.listen)
-    print(f"[fuzz] seed={seed} budget={knobs.budget} cases -> {writer.dir}")
-    print(f"[fuzz] listening {args.bind}:{args.listen}; run mount_smbfs against this port")
-    # per-connection RNG: `--seed S --first-conn N` replays connection N exactly
-    _serve_forever(srv, writer, args.first_conn,
-                   lambda conn: FuzzSession(corp, random.Random(f"{seed}:{conn}"), knobs), "fuzz")
+    favored: FavoredStore | None = None
+    on_sent: OnSent | None = None
+    tap: KernelLogTap | None = None
+    if not args.no_klog:
+        favored, on_sent, tap = start_feedback(writer, args.cases)
+        log.info("[fuzz] kernel-log feedback on (%d templates already known)", len(tap.seen))
+    try:
+        srv = _listen(args.bind, args.listen)
+        log.info("[fuzz] seed=%d budget=%d cases -> %s", seed, knobs.budget, writer.dir)
+        log.info("[fuzz] listening %s:%d; run mount_smbfs against this port", args.bind, args.listen)
+        # per-connection RNG: `--seed S --first-conn N` replays connection N exactly
+        # (with feedback on, favored picks also depend on what the kernel logged)
+        _serve_forever(srv, writer, args.first_conn,
+                       lambda conn: FuzzSession(corp, random.Random(f"{seed}:{conn}"), knobs, favored),
+                       "fuzz", on_sent=on_sent)
+    finally:
+        if tap is not None:
+            tap.stop()                                # never leave `log stream` orphaned
 
 
 def do_replay(args: argparse.Namespace) -> None:
@@ -224,21 +284,21 @@ def do_replay(args: argparse.Namespace) -> None:
     writer = CaseWriter(args.cases, 0, {"replay_of": os.path.abspath(args.run), "conn": args.conn},
                         tag=f"replay-conn{args.conn}")
     srv = _listen(args.bind, args.listen)
-    print(f"[replay] {len(rows)} cases of conn#{args.conn} from {args.run} -> {writer.dir}")
+    log.info("[replay] %d cases of conn#%d from %s -> %s", len(rows), args.conn, args.run, writer.dir)
     _serve_forever(srv, writer, 0, lambda _c: ReplaySession(
         rows, FuzzSession(corp, random.Random(0), Knobs.clean())), "replay")
 
+
+# ---------------- reports (plain stdout) ----------------
 
 def do_stats(args: argparse.Namespace) -> None:
     run = args.run or latest_run(args.cases)
     if run is None:
         sys.exit(f"no runs under {args.cases}")
     print(f"[stats] {run}")
-    for line in format_stats(run_stats(read_index(run))):
+    for line in format_stats(run_stats(read_index(run))) + format_klog(run):
         print(f"[stats] {line}")
 
-
-# ---------------- corpus mode ----------------
 
 def _print_corpus(corp: corpus_mod.Corpus) -> None:
     for r in corp.runs:
@@ -262,32 +322,71 @@ def do_corpus(args: argparse.Namespace) -> None:
             print(f"[corpus] quarantined -> {dest}")
 
 
-def main(argv: list[str] | None = None) -> None:
+# ---------------- CLI ----------------
+
+def _non_negative(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {value}")
+    return value
+
+
+def _port(text: str) -> int:
+    value = int(text)
+    if not 0 < value < 65536:
+        raise argparse.ArgumentTypeError(f"not a TCP port: {value}")
+    return value
+
+
+def _exit_on_sigterm() -> None:
+    """Turn SIGTERM into SystemExit so `finally` cleanup runs (stops `log stream`).
+
+    Python's default SIGTERM action kills the process without unwinding, which
+    would leave the kernel-log subprocess running until its next write fails.
+    """
+    signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
+
+
+def _setup_logging() -> None:
+    logging.Formatter.converter = time.gmtime         # UTC, to line up with INDEX.tsv and panics
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                        format="%(asctime)sZ %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
+
+
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mode", choices=["proxy", "fuzz", "corpus", "replay", "stats"])
     ap.add_argument("--bind", default="127.0.0.1")
-    ap.add_argument("--listen", type=int, default=4450)
-    ap.add_argument("--upstream", type=int, default=1445, help="real smbd port")
+    ap.add_argument("--listen", type=_port, default=4450)
+    ap.add_argument("--upstream", type=_port, default=1445, help="real smbd port")
     ap.add_argument("--upstream-host", default="127.0.0.1")
     ap.add_argument("--seeds", default="seeds")
     ap.add_argument("--cases", default="cases")
     ap.add_argument("--seed", type=int, default=None,
                     help="RNG seed (default: current time; recorded in the run's meta.json)")
-    ap.add_argument("--first-conn", type=int, default=0,
+    ap.add_argument("--first-conn", type=_non_negative, default=0,
                     help="starting connection number; with --seed, replays that connection")
     ap.add_argument("--mutate-handshake", action="store_true",
-                    help="also mutate NEGOTIATE/SESSION_SETUP (can wedge mount() unkillably)")
-    ap.add_argument("--budget", type=int, default=Knobs.budget,
-                    help="fuzz mode: mutation events per connection")
+                    help="also mutate NEGOTIATE/SESSION_SETUP/TREE_CONNECT (can wedge mount() unkillably)")
+    ap.add_argument("--budget", type=_non_negative, default=Knobs.budget,
+                    help="fuzz mode: mutation events per mount (refilled at each TREE_CONNECT)")
     ap.add_argument("--clean", action="store_true",
                     help="fuzz mode: no mutation (conformance check that the client mounts deep)")
+    ap.add_argument("--no-klog", action="store_true",
+                    help="fuzz mode: disable kernel-log coverage feedback")
     ap.add_argument("--quarantine", action="store_true", help="corpus mode: move unusable runs aside")
     ap.add_argument("--run", default=None, help="replay/stats: cases/run-* directory (stats: default newest)")
-    ap.add_argument("--conn", type=int, default=None, help="replay: connection number to re-serve")
-    a = ap.parse_args(argv)
+    ap.add_argument("--conn", type=_non_negative, default=None, help="replay: connection number to re-serve")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    _setup_logging()
     {"proxy": do_proxy, "fuzz": do_fuzz, "corpus": do_corpus,
-     "replay": do_replay, "stats": do_stats}[a.mode](a)
+     "replay": do_replay, "stats": do_stats}[args.mode](args)
 
 
 if __name__ == "__main__":
+    _exit_on_sigterm()        # process-level disposition: entry point only, not main()
     main()
