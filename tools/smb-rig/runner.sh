@@ -13,7 +13,10 @@ cd "${0:A:h}"
 ROUNDS=${1:-20}
 MNT=${SMB_RIG_MNT:-/tmp/smbmnt}
 LOG=${SMB_RIG_LOG:-/tmp/smb-rig-driver.log}
-URL=${SMB_RIG_URL:-"//research:researchpw@127.0.0.1:4450/fuzzshare"}
+# Must be the identity the seeds were recorded with (`smb_rig.py corpus`
+# prints it). Seeds recorded against Samba's map-to-guest are GUEST sessions;
+# mounting as a named user then fails with "Authentication error".
+URL=${SMB_RIG_URL:-"//GUEST:@127.0.0.1:4450/fuzzshare"}
 MOUNT_WAIT=25      # s for the mount to appear
 OP_WAIT=5          # s per workload command
 UNMOUNT_WAIT=10    # s for the forced unmount
@@ -29,7 +32,7 @@ log() { echo "[$(ts)] $*" | tee -a "$LOG" }
 last_case() {
   local runs=(cases/run-*(N/om)) run
   run=${runs[1]:-}
-  if [[ -n $run && -f $run/INDEX.tsv ]]; then
+  if [[ -n $run && -f $run/INDEX.tsv ]] && (( $(wc -l < "$run/INDEX.tsv") > 1 )); then
     echo "${run:t}/$(tail -1 "$run/INDEX.tsv" | cut -f1-3 | tr '\t' ' ')"
   else
     echo none
@@ -107,7 +110,9 @@ for (( i = 1; i <= ROUNDS; i++ )); do
   else
     log "round $i: MOUNT FAILED/TIMEOUT (last-case=$(last_case))"
   fi
-  bounded $UNMOUNT_WAIT diskutil unmount force "$MNT" || bounded $UNMOUNT_WAIT umount -f "$MNT"
+  # umount(2) first: `diskutil unmount` goes through DiskArbitration and was
+  # observed hanging 10 s on smbfs before sending any SMB traffic
+  bounded $UNMOUNT_WAIT umount -f "$MNT" || bounded $UNMOUNT_WAIT diskutil unmount force "$MNT"
 done
 log "driver done, last-case=$(last_case)"
 

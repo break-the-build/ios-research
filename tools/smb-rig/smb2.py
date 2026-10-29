@@ -28,6 +28,8 @@ NEGOTIATE, SESSION_SETUP, LOGOFF, TREE_CONNECT, TREE_DISCONNECT = 0, 1, 2, 3, 4
 CREATE, CLOSE, FLUSH, READ, WRITE, LOCK, IOCTL, CANCEL = 5, 6, 7, 8, 9, 10, 11, 12
 ECHO, QUERY_DIRECTORY, CHANGE_NOTIFY, QUERY_INFO, SET_INFO, OPLOCK_BREAK = 13, 14, 15, 16, 17, 18
 MAX_COMMAND = OPLOCK_BREAK
+# session-establishment commands: replayed per connection state, not by request match
+SESSION_GLUE = (NEGOTIATE, SESSION_SETUP, TREE_CONNECT)
 
 CMD_NAMES = {
     NEGOTIATE: "NEGOTIATE", SESSION_SETUP: "SESSION_SETUP", LOGOFF: "LOGOFF",
@@ -161,6 +163,20 @@ def request_subkey(cmd: int, body: bytes) -> int | None:
     if cmd == IOCTL and len(body) >= 8:
         return struct.unpack_from("<I", body, 4)[0]   # CtlCode
     return None
+
+
+CREATE_NAME_FIELDS = 44              # CREATE request: NameOffset H, NameLength H
+
+
+def create_name(body: bytes) -> bytes:
+    """Raw UTF-16LE name of a CREATE request ("" = share root)."""
+    if len(body) < CREATE_NAME_FIELDS + 4:
+        return b""
+    off, ln = struct.unpack_from("<HH", body, CREATE_NAME_FIELDS)
+    start = off - HDR
+    if start < 0 or ln == 0:
+        return b""
+    return bytes(body[start:start + ln])
 
 
 def is_smb1_negotiate(payload: bytes) -> bool:

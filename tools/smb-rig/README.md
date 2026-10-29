@@ -18,12 +18,13 @@ macOS kernel (smbfs) ──mount_smbfs──> smb_rig.py :4450
 
 | File | Role |
 |---|---|
-| `smb_rig.py` | CLI: `proxy`, `fuzz`, `corpus`; socket loops |
+| `smb_rig.py` | CLI: `proxy`, `fuzz`, `corpus`, `replay`, `stats`; threaded socket loops |
 | `smb2.py` | header layout (MS-SMB2 2.2.1.2), compound chains, NBSS framing |
-| `corpus.py` | seed loading: re-parses payloads, pairs responses to requests |
-| `fuzz_session.py` | per-connection response engine (no sockets; unit-tested) |
+| `corpus.py` | seed loading: re-parses payloads, pairs responses to requests, seed identity |
+| `fuzz_session.py` | per-connection response engine with mutation budget (no sockets) |
 | `mutators.py` | offset/length, NextEntryOffset-chain, status, pending, oplock-break mutators |
-| `cases.py` | crash-durable case storage (fsync + F_FULLFSYNC, one dir per run) |
+| `cases.py` | crash-durable case storage (fsync + F_FULLFSYNC, one dir per run) + index reader |
+| `triage.py` | run depth statistics and byte-exact connection replay |
 | `runner.sh` | client driver: mount, bounded workload, wedge + panic detection |
 
 * **proxy mode** builds ground-truth seeds by sitting between the stock client
@@ -40,8 +41,27 @@ macOS kernel (smbfs) ──mount_smbfs──> smb_rig.py :4450
   `AAPL`, directory entries, stream/EA info, change-notify records), compound
   `NextCommand`, error replies that carry data (`STATUS_STOPPED_ON_SYMLINK`
   symlink error response, `STATUS_BUFFER_OVERFLOW`), `STATUS_PENDING` interim
-  + async final (sometimes completed twice), and unsolicited oplock breaks
-  against live FileIds. ECHO ends a cycle (and exercises reconnect).
+  + async final (sometimes completed twice), unsolicited oplock breaks
+  against live FileIds, and absurd credit grants. ECHO ends a cycle (and
+  exercises reconnect).
+  Mutation is **budgeted**: `--budget N` events (default 2) per mount,
+  refilled at each TREE_CONNECT because smbfs reuses one TCP session across
+  mounts. A client drops a session after its first malformed reply, so
+  mutating every reply would mostly fuzz the abort path; a small budget keeps
+  sessions deep and pins any crash on one reply. NEGOTIATE, SESSION_SETUP and
+  TREE_CONNECT replies stay clean unless `--mutate-handshake`. Credits are
+  granted from the client's CreditRequest (capped at 512). Connections are
+  served concurrently — the kernel keeps idle sessions open while new mounts
+  connect.
+  `--clean` disables mutation entirely: a conformance check that the client
+  mounts and reaches the file-op parsers before you fuzz.
+* **replay mode** (`--run cases/run-… --conn N`) re-serves a recorded
+  connection byte-for-byte, re-patching only MessageIds to match the live
+  client, and answers anything past the recording cleanly. This is the
+  reproducer for a panic suspect.
+* **stats mode** prints per-run depth (how many connections reached CREATE /
+  QUERY_DIR / READ …), mounts, the share of sessions that ended on a mutated
+  reply, and the newest mutated cases.
 * **corpus mode** reports which seed runs are usable and the template keys they
   yield; `--quarantine` moves unusable runs to `seeds/_quarantine/`. Record
   labels are ignored — payloads are re-parsed — so runs captured before the
@@ -57,29 +77,40 @@ macOS kernel (smbfs) ──mount_smbfs──> smb_rig.py :4450
    mkdir -p /tmp/smbshare && echo hello > /tmp/smbshare/hello.txt
    /opt/homebrew/sbin/smbd --no-process-group -s /opt/homebrew/etc/smb.conf -D
    ```
-2. Credentials the client will use against BOTH smbd and the rig:
-   ```sh
-   sudo dscl . -create /Users/research ResearchPassword researchpw   # or use an existing acct
-   ```
+2. Client identity. **The fuzzing client must mount as the same identity the
+   seeds were recorded with** — a replayed session is only valid for that
+   identity (a recorded guest grant after a named-user login makes
+   `mount_smbfs` fail with "Authentication error"). Guest is the simplest:
+   unsigned, no session keys to replay. `smb_rig.py corpus` prints the
+   identity found in the seeds; `runner.sh` defaults to `//GUEST:@…`.
 3. Mount target dir: `mkdir -p /tmp/smbmnt`
 
 ## Recording session
 
 ```sh
 python3 smb_rig.py proxy                       # terminal A
-printf 'researchpw\n' | mount_smbfs //research@127.0.0.1:4450/fuzzshare /tmp/smbmnt
-ls /tmp/smbmnt; cat /tmp/smbshare/hello.txt    # exercise reads/writes
-diskutil unmount /tmp/smbmnt
+# terminal B: the runner's workload makes good seeds (xattrs, symlinks, ...)
+SMB_RIG_URL=//GUEST:@127.0.0.1:4450/fuzzshare ./runner.sh 1
 # Ctrl-C the proxy → seeds/run-*/ now holds the full exchange
 ```
 
 ## Fuzzing session
 
 ```sh
-python3 smb_rig.py corpus                      # sanity: usable runs + template keys
-python3 smb_rig.py fuzz                        # terminal A (seed = time; logged in meta.json)
-./runner.sh 50                                 # terminal B
+python3 smb_rig.py corpus                      # sanity: usable runs, templates, identity
+python3 smb_rig.py fuzz --clean                # conformance first: expect 100% mounts
+./runner.sh 3 && python3 smb_rig.py stats      # depth should reach CREATE/QUERY_DIR
+python3 smb_rig.py fuzz                        # then fuzz (seed = time; in meta.json)
+./runner.sh 500
+python3 smb_rig.py stats                       # tune --budget if sessions die early
 ```
+
+Measured on macOS 26.5.2 against the 2026-10-29 seeds with `--clean`: 6/6
+mounts (13 tree connects, 349 replies in 28 s), ~4.6 s per mount + 14-op
+workload + unmount, every file-op command with a template reached. Replies
+are matched to the recorded request chain (incl. CREATE file name); before
+that, random template picks gave the share-root CREATE a file's reply and
+stalled `mount_smbfs` in about half the rounds.
 
 `runner.sh` never waits on a process that touches the mount (a thread wedged
 in smbfs is unkillable); every mount/op/unmount is detached and polled with a
@@ -89,14 +120,17 @@ stuck — that state is itself worth recording (reboot to clear). Overrides:
 
 ## After a panic
 
-1. `cases/run-<UTC>-seed<S>/INDEX.tsv` — last line is the last PDU sent
-   (case, UTC ms, connection, command chain, mutation description). It was
-   fsync'd before the send, so it survived the panic.
-2. Match its UTC against the panic report
+1. `python3 smb_rig.py stats` — lists the newest **mutated** cases. Those
+   are the suspects, not merely the last case sent: clean replies can follow a
+   corrupting one. Every case and index line was fsync'd before its send, so
+   they survived the panic. INDEX.tsv columns: case, UTC ms, conn, req, mut,
+   command chain, bytes, mutation description.
+2. Match the suspects' UTC against the panic report
    (`/Library/Logs/DiagnosticReports/*.panic`; the driver log prints
    `NEW PANIC REPORT` when one appears).
-3. Reproduce: `python3 smb_rig.py fuzz --seed S --first-conn N` replays
-   connection N's mutation stream exactly (per-connection RNG).
+3. Reproduce byte-exactly: `python3 smb_rig.py replay --run cases/run-… --conn N`
+   and `./runner.sh 1`. (`fuzz --seed S --first-conn N` regenerates the same
+   mutation stream too, but only if the client's requests repeat exactly.)
 4. Minimize the suspect case's mutation, then escalate via the standard
    pipeline (reproduce → minimize → analyze).
 
@@ -111,9 +145,12 @@ never overwritten.
   reports, and a panic costs a VM restore instead of a host reboot.
 * Everything binds 127.0.0.1 by default. Never expose :4450 beyond loopback
   (when the client is a VM, bind the host-only bridge address, not 0.0.0.0).
-* `--mutate-handshake` also mutates NEGOTIATE/SESSION_SETUP; it reaches the
-  negotiate-context and SPNEGO parsers but can wedge `mount()` unkillably.
-* Seed breadth bounds coverage: record sessions that exercise xattrs, ACLs
+* `--mutate-handshake` also mutates NEGOTIATE/SESSION_SETUP/TREE_CONNECT; it
+  reaches the negotiate-context and SPNEGO parsers but can wedge `mount()`
+  unkillably.
+* Seed breadth bounds coverage. The 2026-10-29 seeds have no WRITE or LOCK
+  template, and their CREATE replies never led the client to READ. Record
+  sessions that exercise reads of non-empty files, writes, locks, xattrs, ACLs
   (`ls -le`), symlinks, change-notify (Finder window open on the mount),
   leases/oplocks (two clients on one file) and DFS referrals.
 * Scope: this is the **macOS** kernel client. iOS's Files-app SMB client is a
