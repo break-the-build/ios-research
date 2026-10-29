@@ -13,7 +13,10 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import threading
 import time
+from dataclasses import dataclass
+from typing import NamedTuple
 
 
 def _full_sync(fd: int) -> None:
@@ -50,11 +53,13 @@ def utc_stamp(t: float | None = None) -> str:
 class CaseWriter:
     """cases/run-<UTC>-seed<S>/NNNNNNN.<ext> + INDEX.tsv + meta.json."""
 
-    INDEX_COLUMNS = ("case", "utc", "conn", "kind", "bytes", "desc")
+    # req = ordinal of the client request answered (replay groups by it);
+    # mut = 1 when this PDU carries a mutation (the post-panic suspect set)
+    INDEX_COLUMNS = ("case", "utc", "conn", "req", "mut", "kind", "bytes", "desc")
 
-    def __init__(self, root: str, seed: int, meta: dict) -> None:
+    def __init__(self, root: str, seed: int, meta: dict, tag: str | None = None) -> None:
         stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-        base = os.path.join(root, f"run-{stamp}-seed{seed}")
+        base = os.path.join(root, f"run-{stamp}-{tag or f'seed{seed}'}")
         path, n = base, 1
         while os.path.exists(path):                   # two starts in one second
             n += 1
@@ -62,20 +67,69 @@ class CaseWriter:
         os.makedirs(path)
         self.dir = path
         self.n = 0
+        self._lock = threading.Lock()
         self.index = os.path.join(path, "INDEX.tsv")
         durable_write(os.path.join(path, "meta.json"),
                       json.dumps({"seed": seed, "started": utc_stamp(), **meta}, indent=2).encode())
         durable_write(self.index, ("\t".join(self.INDEX_COLUMNS) + "\n").encode())
 
-    def save(self, conn: int, kind: str, data: bytes, desc: str, ext: str = "rsp") -> str:
-        """Persist one case durably; returns its path. Call BEFORE sending."""
-        self.n += 1
-        path = os.path.join(self.dir, f"{self.n:07d}.{ext}")
-        durable_write(path, data)
-        line = "\t".join((f"{self.n:07d}", utc_stamp(), str(conn), kind, str(len(data)),
-                          desc.replace("\t", " ").replace("\n", " ")))
-        with open(self.index, "a") as f:
-            f.write(line + "\n")
-            f.flush()
-            _full_sync(f.fileno())
-        return path
+    def save(self, conn: int, kind: str, data: bytes, desc: str, ext: str = "rsp",
+             req: int = 0, mutated: bool = False) -> SavedCase:
+        """Persist one case durably. Call BEFORE sending.
+
+        Serialised across connection threads so case numbers and index order
+        match the global send order (the post-panic suspect is the last line).
+        """
+        with self._lock:
+            self.n += 1
+            number = self.n
+            path = os.path.join(self.dir, f"{number:07d}.{ext}")
+            durable_write(path, data)
+            line = "\t".join((f"{number:07d}", utc_stamp(), str(conn), str(req), str(int(mutated)),
+                              kind, str(len(data)), desc.replace("\t", " ").replace("\n", " ")))
+            with open(self.index, "a") as f:
+                f.write(line + "\n")
+                f.flush()
+                _full_sync(f.fileno())
+        return SavedCase(number, path)
+
+
+class SavedCase(NamedTuple):
+    number: int
+    path: str
+
+
+@dataclass(frozen=True)
+class CaseRow:
+    case: str
+    utc: str
+    conn: int
+    req: int
+    mutated: bool
+    kind: str
+    size: int
+    desc: str
+    path: str
+
+
+def read_index(run_dir: str) -> list[CaseRow]:
+    """Parse a run's INDEX.tsv (tolerates a torn final line after a panic)."""
+    rows: list[CaseRow] = []
+    with open(os.path.join(run_dir, "INDEX.tsv")) as f:
+        header = f.readline().rstrip("\n").split("\t")
+        for line in f:
+            vals = line.rstrip("\n").split("\t")
+            if len(vals) != len(header):
+                continue
+            r = dict(zip(header, vals))
+            ext = "unknown" if r["kind"] == "UNKNOWN_REQ" else "rsp"
+            rows.append(CaseRow(r["case"], r["utc"], int(r["conn"]), int(r.get("req", 0)),
+                                r.get("mut", "0") == "1", r["kind"], int(r["bytes"]), r["desc"],
+                                os.path.join(run_dir, f"{r['case']}.{ext}")))
+    return rows
+
+
+def latest_run(root: str) -> str | None:
+    runs = sorted((os.path.join(root, d) for d in os.listdir(root) if d.startswith("run-")),
+                  key=os.path.getmtime) if os.path.isdir(root) else []
+    return runs[-1] if runs else None

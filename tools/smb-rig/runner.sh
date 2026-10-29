@@ -13,7 +13,10 @@ cd "${0:A:h}"
 ROUNDS=${1:-20}
 MNT=${SMB_RIG_MNT:-/tmp/smbmnt}
 LOG=${SMB_RIG_LOG:-/tmp/smb-rig-driver.log}
-URL=${SMB_RIG_URL:-"//research:researchpw@127.0.0.1:4450/fuzzshare"}
+# Must be the identity the seeds were recorded with (`smb_rig.py corpus`
+# prints it). Seeds recorded against Samba's map-to-guest are GUEST sessions;
+# mounting as a named user then fails with "Authentication error".
+URL=${SMB_RIG_URL:-"//GUEST:@127.0.0.1:4450/fuzzshare"}
 MOUNT_WAIT=25      # s for the mount to appear
 OP_WAIT=5          # s per workload command
 UNMOUNT_WAIT=10    # s for the forced unmount
@@ -29,7 +32,7 @@ log() { echo "[$(ts)] $*" | tee -a "$LOG" }
 last_case() {
   local runs=(cases/run-*(N/om)) run
   run=${runs[1]:-}
-  if [[ -n $run && -f $run/INDEX.tsv ]]; then
+  if [[ -n $run && -f $run/INDEX.tsv ]] && (( $(wc -l < "$run/INDEX.tsv") > 1 )); then
     echo "${run:t}/$(tail -1 "$run/INDEX.tsv" | cut -f1-3 | tr '\t' ' ')"
   else
     echo none
@@ -55,11 +58,18 @@ bounded() {
   return 0
 }
 
+# wait_mounted PID: 0 once mounted; 1 as soon as mount_smbfs exits without a
+# mount (a rejected reply fails the mount in milliseconds — waiting out the
+# deadline cost 25 s per failure, ~40% of rounds in the first campaign)
 wait_mounted() {
-  local n=0
-  while (( n < MOUNT_WAIT * 2 )); do
+  local pid=$1 n=0
+  while (( n < MOUNT_WAIT * 4 )); do
     is_mounted && return 0
-    sleep 0.5; (( n++ ))
+    if ! kill -0 $pid 2>/dev/null; then
+      is_mounted && return 0
+      return 1
+    fi
+    sleep 0.25; (( n++ ))
   done
   return 1
 }
@@ -70,6 +80,9 @@ exercise() {
   bounded $OP_WAIT ls -lae@O "$m"                     # QUERY_DIR + ACL/xattr/flags lookups
   bounded $OP_WAIT stat -x "$m/hello.txt"             # QUERY_INFO file classes
   bounded $OP_WAIT cat "$m/hello.txt"                 # CREATE + READ
+  bounded $OP_WAIT dd if="$m/data.bin" of=/dev/null bs=65536   # multi-READ, large DataLength
+  bounded $OP_WAIT ls -laR "$m/sub"                   # multi-entry QUERY_DIR, nested dirs
+  bounded $OP_WAIT python3 -c 'import fcntl,sys; f=open(sys.argv[1],"r+b"); fcntl.lockf(f,fcntl.LOCK_EX|fcntl.LOCK_NB,4,0); fcntl.lockf(f,fcntl.LOCK_UN,4,0)' "$m/hello.txt"   # LOCK
   bounded $OP_WAIT xattr -l "$m/hello.txt"            # named streams (FileStreamInformation)
   bounded $OP_WAIT xattr -w com.research.probe "v$i" "$m/hello.txt"
   bounded $OP_WAIT df -k "$m"                         # QUERY_INFO filesystem classes
@@ -101,13 +114,15 @@ for (( i = 1; i <= ROUNDS; i++ )); do
   log "round $i: mount (last-case=$(last_case))"
   mount_smbfs "$URL" "$MNT" </dev/null >/dev/null 2>&1 &!
 
-  if wait_mounted; then
+  if wait_mounted $!; then
     log "round $i: mounted — exercising"
     exercise $i
   else
     log "round $i: MOUNT FAILED/TIMEOUT (last-case=$(last_case))"
   fi
-  bounded $UNMOUNT_WAIT diskutil unmount force "$MNT" || bounded $UNMOUNT_WAIT umount -f "$MNT"
+  # umount(2) first: `diskutil unmount` goes through DiskArbitration and was
+  # observed hanging 10 s on smbfs before sending any SMB traffic
+  bounded $UNMOUNT_WAIT umount -f "$MNT" || bounded $UNMOUNT_WAIT diskutil unmount force "$MNT"
 done
 log "driver done, last-case=$(last_case)"
 

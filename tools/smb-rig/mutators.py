@@ -193,6 +193,29 @@ def oplock_break(file_id: bytes, rng: random.Random) -> tuple[smb2.Element, str]
     return smb2.Element(hdr, body), f"oplock_break:level={level:#x}"
 
 
+LEASE_BREAK_SIZE = 44                 # Lease Break Notification (2.2.23.2)
+LEASE_ACK_REQUIRED = 0x01
+LEASE_STATES = (0x0, 0x1, 0x3, 0x5, 0x7, 0x2, 0x4, 0xFFFFFFFF)   # R=1 H=2 W=4, plus invalid
+
+
+def lease_break(lease_key: bytes, rng: random.Random) -> tuple[smb2.Element, str]:
+    """Server-initiated lease break against a lease the client really holds.
+
+    The client keys its lease table by LeaseKey; a break for a live key drives
+    smbfs's lease state machine (state downgrade, ack, epoch handling) rather
+    than bouncing off the size check the way an oplock-shaped break does.
+    """
+    epoch = rng.choice((0, 1, 2, 0x7FFF, 0xFFFF))
+    flags = rng.choice((0, LEASE_ACK_REQUIRED, 0xFFFFFFFF))
+    cur, new = rng.choice(LEASE_STATES), rng.choice(LEASE_STATES)
+    reason, access, share = 0, rng.choice((0, 0xFFFFFFFF)), rng.choice((0, 7))
+    body = (struct.pack("<HHI", LEASE_BREAK_SIZE, epoch, flags) + lease_key[:16].ljust(16, b"\x00")
+            + struct.pack("<IIIII", cur, new, reason, access, share))
+    hdr = smb2.Header(status=smb2.STATUS_SUCCESS, command=smb2.OPLOCK_BREAK,
+                      flags=smb2.FLAG_RESPONSE, message_id=smb2.NO_MESSAGE_ID, credits=0)
+    return smb2.Element(hdr, body), f"lease_break:epoch={epoch:#x},flags={flags:#x},{cur:#x}->{new:#x}"
+
+
 def next_command_override(n_elements: int, rng: random.Random) -> tuple[dict[int, int], str]:
     idx = rng.randrange(n_elements - 1)
     val = rng.choice((0, 1, 8, smb2.HDR - 8, smb2.HDR, 0x7FFFFFF8, 0xFFFFFFF8))

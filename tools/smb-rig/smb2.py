@@ -28,6 +28,8 @@ NEGOTIATE, SESSION_SETUP, LOGOFF, TREE_CONNECT, TREE_DISCONNECT = 0, 1, 2, 3, 4
 CREATE, CLOSE, FLUSH, READ, WRITE, LOCK, IOCTL, CANCEL = 5, 6, 7, 8, 9, 10, 11, 12
 ECHO, QUERY_DIRECTORY, CHANGE_NOTIFY, QUERY_INFO, SET_INFO, OPLOCK_BREAK = 13, 14, 15, 16, 17, 18
 MAX_COMMAND = OPLOCK_BREAK
+# session-establishment commands: replayed per connection state, not by request match
+SESSION_GLUE = (NEGOTIATE, SESSION_SETUP, TREE_CONNECT)
 
 CMD_NAMES = {
     NEGOTIATE: "NEGOTIATE", SESSION_SETUP: "SESSION_SETUP", LOGOFF: "LOGOFF",
@@ -163,12 +165,132 @@ def request_subkey(cmd: int, body: bytes) -> int | None:
     return None
 
 
+CREATE_NAME_FIELDS = 44              # CREATE request: NameOffset H, NameLength H
+
+
+def create_name(body: bytes) -> bytes:
+    """Raw UTF-16LE name of a CREATE request ("" = share root)."""
+    if len(body) < CREATE_NAME_FIELDS + 4:
+        return b""
+    off, ln = struct.unpack_from("<HH", body, CREATE_NAME_FIELDS)
+    start = off - HDR
+    if start < 0 or ln == 0:
+        return b""
+    return bytes(body[start:start + ln])
+
+
+# CREATE contexts (2.2.13.2): CreateContextsOffset/Length live at body 48/52
+# in a request and 80/84 in a response; offsets are header-relative.
+CTX_FIELDS_REQUEST = 48
+CTX_FIELDS_RESPONSE = 80
+LEASE_CONTEXT = b"RqLs"
+LEASE_V2_DATA_LEN = 52                  # v2 adds ParentLeaseKey at data+32
+MAX_CREATE_CONTEXTS = 32
+
+
+def create_contexts(body: bytes, response: bool) -> list[tuple[bytes, int, int]]:
+    """(name, body-relative data offset, data length) for each create context."""
+    fields = CTX_FIELDS_RESPONSE if response else CTX_FIELDS_REQUEST
+    if len(body) < fields + 8:
+        return []
+    off, length = struct.unpack_from("<II", body, fields)
+    if not off or not length:
+        return []
+    pos, out = off - HDR, []
+    for _ in range(MAX_CREATE_CONTEXTS):
+        if pos < 0 or pos + 16 > len(body):
+            break
+        nxt, name_off, name_len, _rsv, data_off, data_len = struct.unpack_from("<IHHHHI", body, pos)
+        name = bytes(body[pos + name_off:pos + name_off + name_len])
+        out.append((name, pos + data_off, data_len))
+        if not nxt:
+            break
+        pos += nxt
+    return out
+
+
+def echo_lease_key(req_body: bytes, rsp_body: bytes) -> bytes:
+    """Copy the request's LeaseKey (and v2 ParentLeaseKey) into a replayed lease reply.
+
+    A recorded lease response carries the key the client chose in the
+    recording; the live client ignores a lease granted for a key it never
+    asked for (observed: it then never issues READ).
+    """
+    req_lease = [c for c in create_contexts(req_body, False) if c[0] == LEASE_CONTEXT]
+    rsp_lease = [c for c in create_contexts(rsp_body, True) if c[0] == LEASE_CONTEXT]
+    if not req_lease or not rsp_lease:
+        return rsp_body
+    (_n, rq_off, rq_len), (_m, rs_off, rs_len) = req_lease[0], rsp_lease[0]
+    out = bytearray(rsp_body)
+    spans = [(0, 16)] + ([(32, 16)] if min(rq_len, rs_len) >= LEASE_V2_DATA_LEN else [])
+    for rel, n in spans:
+        src, dst = rq_off + rel, rs_off + rel
+        if src + n <= len(req_body) and dst + n <= len(out) and rel + n <= min(rq_len, rs_len):
+            out[dst:dst + n] = req_body[src:src + n]
+    return bytes(out)
+
+
+CREATE_RSP_FILE_ID = 64                # CREATE response FileId (16 bytes)
+IOCTL_FILE_ID = 8                      # IOCTL request/response FileId (16 bytes)
+FILE_ID_LEN = 16
+
+
+def _splice(body: bytes, off: int, data: bytes) -> bytes:
+    if off + len(data) > len(body):
+        return body
+    return body[:off] + data + body[off + len(data):]
+
+
+def with_create_file_id(rsp_body: bytes, file_id: bytes) -> bytes:
+    """Give a replayed CREATE reply a fresh FileId.
+
+    Recorded replies reuse the recording's FileIds, so separate opens collide
+    in the client's fid table (observed: "No SMB 2/3 fid found", "Failed to
+    remove fid from internal table") and sessions desync before going deep.
+    """
+    return _splice(rsp_body, CREATE_RSP_FILE_ID, file_id)
+
+
+def echo_ioctl_file_id(req_body: bytes, rsp_body: bytes) -> bytes:
+    if len(req_body) < IOCTL_FILE_ID + FILE_ID_LEN:
+        return rsp_body
+    return _splice(rsp_body, IOCTL_FILE_ID, req_body[IOCTL_FILE_ID:IOCTL_FILE_ID + FILE_ID_LEN])
+
+
+def lease_key_of(create_req_body: bytes) -> bytes | None:
+    """LeaseKey the client put in a CREATE request's RqLs context."""
+    for name, off, ln in create_contexts(create_req_body, False):
+        if name == LEASE_CONTEXT and ln >= 16 and off + 16 <= len(create_req_body):
+            return bytes(create_req_body[off:off + 16])
+    return None
+
+
+OPLOCK_BREAK_ACK_SIZE = 24             # 2.2.24.1 / 2.2.25.1
+LEASE_BREAK_ACK_SIZE = 36              # 2.2.24.2 / 2.2.25.2
+
+
+def break_ack_response(req_body: bytes) -> bytes | None:
+    """Well-formed reply to a client's oplock/lease break acknowledgment."""
+    if len(req_body) < 2:
+        return None
+    size = struct.unpack_from("<H", req_body, 0)[0]
+    if size == OPLOCK_BREAK_ACK_SIZE and len(req_body) >= OPLOCK_BREAK_ACK_SIZE:
+        return bytes(req_body[:OPLOCK_BREAK_ACK_SIZE])           # same layout, echoed
+    if size == LEASE_BREAK_ACK_SIZE and len(req_body) >= LEASE_BREAK_ACK_SIZE:
+        return bytes(req_body[:LEASE_BREAK_ACK_SIZE])
+    return None
+
+
 def is_smb1_negotiate(payload: bytes) -> bool:
     return payload[:4] == SMB1_SIG and len(payload) > 4 and payload[4] == SMB1_NEGOTIATE
 
 
-def nbss_wrap(payload: bytes) -> bytes:
-    return b"\x00" + len(payload).to_bytes(3, "big") + payload
+NBSS_SESSION_MESSAGE = 0x00
+NBSS_KEEPALIVE = 0x85
+
+
+def nbss_wrap(payload: bytes, kind: int = NBSS_SESSION_MESSAGE) -> bytes:
+    return bytes([kind]) + len(payload).to_bytes(3, "big") + payload
 
 
 def nbss_split(buf: bytes) -> tuple[list[tuple[int, bytes]], bytes]:

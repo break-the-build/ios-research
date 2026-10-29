@@ -20,6 +20,7 @@ import random
 import shutil
 import struct
 from dataclasses import dataclass, field
+from functools import cached_property
 
 import smb2
 
@@ -29,6 +30,18 @@ REC_HDR_LEN = len(MAGIC) + struct.calcsize(REC_HDR)
 QUARANTINE_DIR = "_quarantine"
 
 Key = tuple[int, "int | None"]
+ElementSig = tuple[int, "int | None", bytes]          # cmd, subkey, CREATE name
+ChainSig = tuple[ElementSig, ...]
+
+
+def chain_signature(chain: list[smb2.Element]) -> ChainSig | None:
+    """Request-chain identity for whole-chain matching; None for session glue."""
+    if not chain or any(el.header.command in smb2.SESSION_GLUE or el.header.command == smb2.CANCEL
+                        for el in chain):
+        return None
+    return tuple((el.header.command, smb2.request_subkey(el.header.command, el.body),
+                  smb2.create_name(el.body) if el.header.command == smb2.CREATE else b"")
+                 for el in chain)
 
 
 @dataclass(frozen=True)
@@ -38,6 +51,7 @@ class RunReport:
     responses: int
     bad_frames: int
     stale_labels: int
+    auth_users: tuple[str, ...] = ()
 
     @property
     def usable(self) -> bool:
@@ -49,6 +63,22 @@ class Corpus:
     templates: dict[Key, tuple[smb2.Element, ...]]
     mp_negotiate: bytes | None
     runs: tuple[RunReport, ...] = field(default=())
+    # NTLM user names the recorded client authenticated as ("" = anonymous).
+    # A replayed session is only accepted by a client mounting as the same
+    # identity: e.g. a recorded guest grant is an "Authentication error" for
+    # a client that logged in as a named user.
+    auth_users: tuple[str, ...] = field(default=())
+    # Whole recorded reply chains keyed by the request chain that produced
+    # them (command, sub-type, CREATE name per element). Replaying a matching
+    # chain keeps replies consistent with what was asked — e.g. the share-root
+    # CREATE gets a directory's attributes, not a random file's, which
+    # otherwise stalls mount_smbfs's share check.
+    chains: dict[ChainSig, tuple[tuple[smb2.Element, ...], ...]] = field(default_factory=dict)
+
+    def chain_pick(self, sig: ChainSig | None, rng: random.Random
+                   ) -> tuple[smb2.Element, ...] | None:
+        cands = self.chains.get(sig) if sig is not None else None
+        return rng.choice(cands) if cands else None
 
     def latest(self, cmd: int, subkey: int | None) -> smb2.Element | None:
         """Deterministic choice (handshake glue): newest exact match."""
@@ -65,11 +95,35 @@ class Corpus:
         if exact:
             return exact
         # no exact sub-type recorded: any response for this command
-        return tuple(el for (c, _s), els in self.templates.items() if c == cmd for el in els)
+        return self._by_command.get(cmd, ())
+
+    @cached_property
+    def _by_command(self) -> dict[int, tuple[smb2.Element, ...]]:
+        """All templates per command, built once (looked up on every reply miss)."""
+        out: dict[int, list[smb2.Element]] = {}
+        for (cmd, _subkey), els in self.templates.items():
+            out.setdefault(cmd, []).extend(els)
+        return {cmd: tuple(els) for cmd, els in out.items()}
 
     def summary(self) -> list[str]:
         return [f"{smb2.cmd_name(c)}[{s if s is None else hex(s)}]x{len(v)}"
                 for (c, s), v in sorted(self.templates.items(), key=lambda kv: (kv[0][0], kv[0][1] or -1))]
+
+
+NTLMSSP_SIG = b"NTLMSSP\x00"
+NTLM_AUTHENTICATE = 3
+
+
+def ntlm_auth_user(body: bytes) -> str | None:
+    """User name from an NTLMSSP AUTHENTICATE inside a SESSION_SETUP request."""
+    i = body.find(NTLMSSP_SIG)
+    if i < 0 or len(body) - i < 44:
+        return None
+    msg = body[i:]
+    if struct.unpack_from("<I", msg, 8)[0] != NTLM_AUTHENTICATE:
+        return None
+    ln, _max, off = struct.unpack_from("<HHI", msg, 36)          # UserNameFields
+    return msg[off:off + ln].decode("utf-16-le", errors="replace")
 
 
 def read_record(raw: bytes) -> tuple[int, int, int, bytes] | None:
@@ -130,12 +184,32 @@ class _RunPairer:
         return key
 
 
-def scan_run(run_dir: str, sink: dict[Key, list[smb2.Element]] | None = None
+def _pair_chain(chain: list[smb2.Element], direction: int, pending: dict[int, ChainSig],
+                chain_sink: dict[ChainSig, list[tuple[smb2.Element, ...]]] | None) -> None:
+    """Remember request-chain signatures; file the matching response chain."""
+    first = chain[0].header.message_id
+    if direction == 0:
+        if chain[0].header.command == smb2.NEGOTIATE:
+            pending.clear()                           # new connection: MessageIds restart
+        sig = chain_signature(chain)
+        if sig is not None:
+            pending[first] = sig
+        return
+    sig = pending.pop(first, None)
+    if (chain_sink is not None and sig is not None and len(sig) == len(chain)
+            and all(el.header.status != smb2.STATUS_PENDING for el in chain)):
+        chain_sink.setdefault(sig, []).append(tuple(chain))
+
+
+def scan_run(run_dir: str, sink: dict[Key, list[smb2.Element]] | None = None,
+             chain_sink: dict[ChainSig, list[tuple[smb2.Element, ...]]] | None = None
              ) -> tuple[RunReport, bytes | None]:
-    """Validate one run; when sink is given, add its templates to it."""
+    """Validate one run; when sinks are given, add its templates to them."""
     pairer = _RunPairer()
+    pending: dict[int, ChainSig] = {}
     frames = responses = bad = stale = 0
     mp: bytes | None = None
+    users: list[str] = []
     for direction, rec_cmd, rec_mid, payload in _frames(run_dir):
         frames += 1
         if payload[:4] == smb2.SMB1_SIG:
@@ -150,9 +224,14 @@ def scan_run(run_dir: str, sink: dict[Key, list[smb2.Element]] | None = None
         first = chain[0].header
         if (first.command & 0xFF, first.message_id & 0xFFFFFFFF) != (rec_cmd, rec_mid):
             stale += 1
+        _pair_chain(chain, direction, pending, chain_sink)
         for el in chain:
             if direction == 0:
                 pairer.on_request(el)
+                user = (ntlm_auth_user(el.body) if el.header.command == smb2.SESSION_SETUP
+                        else None)
+                if user is not None and user not in users:
+                    users.append(user)
                 continue
             if el.header.status == smb2.STATUS_PENDING:
                 continue                              # interim reply, not a template
@@ -164,22 +243,24 @@ def scan_run(run_dir: str, sink: dict[Key, list[smb2.Element]] | None = None
                 continue
             if sink is not None:
                 sink.setdefault(pairer.key_for(el), []).append(el)
-    report = RunReport(run_dir, frames, responses, bad, stale)
+    report = RunReport(run_dir, frames, responses, bad, stale, tuple(users))
     return report, mp
 
 
 def load_corpus(seeds_dir: str) -> Corpus:
     templates: dict[Key, list[smb2.Element]] = {}
+    chains: dict[ChainSig, list[tuple[smb2.Element, ...]]] = {}
     reports, mp = [], None
     for d in run_dirs(seeds_dir):
         report, _ = scan_run(d)
         reports.append(report)
         if not report.usable:
             continue
-        _, run_mp = scan_run(d, templates)
+        _, run_mp = scan_run(d, templates, chains)
         mp = run_mp or mp                             # newest usable run wins
     frozen = {k: tuple(v) for k, v in templates.items()}
-    return Corpus(frozen, mp, tuple(reports))
+    users = tuple(dict.fromkeys(u for r in reports if r.usable for u in r.auth_users))
+    return Corpus(frozen, mp, tuple(reports), users, {k: tuple(v) for k, v in chains.items()})
 
 
 def quarantine(seeds_dir: str, reports: tuple[RunReport, ...]) -> list[str]:
