@@ -109,6 +109,44 @@ def test_replay_reserves_recorded_bytes_then_falls_back_clean(seeds, tmp_path):
     assert not rs.saw_echo
 
 
+# ---------------- leak oracle ----------------
+
+def _run_with_names(tmp_path, *names):
+    w = cases.CaseWriter(str(tmp_path / "cases"), 1, {})
+    for n in names:
+        w.save(0, "QUERY_DIR", b"\x00" * 8 + n.encode("utf-16-le") + b"\x00" * 8, "clean")
+    return cases.read_index(w.dir)
+
+
+def test_find_leaks_flags_names_never_sent(tmp_path):
+    rows = _run_with_names(tmp_path, "hello.txt", "Café.txt")       # NFD on the wire
+    listings = {".": "t0", "hello.txt": "t1", "Café.txt": "t2",     # NFC from the client
+                "hello.txt\x07\x99junk": "t3"}
+    leaks = triage.find_leaks(rows, listings)
+    assert leaks == [triage.LeakCandidate("t3", "hello.txt\x07\x99junk")]
+    lines = triage.format_leaks(leaks, len(listings))
+    assert "4 listed names checked, 1 not found" in lines[0] and "LEAK?" in lines[1]
+    assert "no listings captured" in triage.format_leaks([], 0)[0]
+
+
+def test_find_leaks_tolerates_torn_case_files(tmp_path):
+    rows = _run_with_names(tmp_path, "a.txt")
+    Path(rows[0].path).unlink()                                         # lost to a panic
+    assert [c.name for c in triage.find_leaks(rows, {"a.txt": "t"})] == ["a.txt"]
+
+
+def test_read_listings_window_and_first_sighting(tmp_path):
+    path = tmp_path / "listings.tsv"
+    path.write_text("2026-10-29T10:00:00Z\told\n"
+                    "2026-10-29T10:00:05Z\tx\n"
+                    "2026-10-29T10:00:06Z\tx\n"
+                    "2026-10-29T10:00:09Z\tlate\n"
+                    "garbage-without-tab\n")
+    got = triage.read_listings(str(path), "2026-10-29T10:00:05.250Z", "2026-10-29T10:00:08.999Z")
+    assert got == {"x": "2026-10-29T10:00:05Z"}
+    assert triage.read_listings(str(tmp_path / "missing.tsv")) == {}
+
+
 def test_case_writer_is_thread_safe(tmp_path):
     w = cases.CaseWriter(str(tmp_path), 1, {})
     threads = [threading.Thread(target=lambda c=c: [w.save(c, "CREATE", b"x", "d") for _ in range(10)])

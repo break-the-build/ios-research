@@ -180,10 +180,12 @@ def test_unsolicited_break_targets_live_lease(seeds):
 
 def test_spread_places_budget_across_the_mount_and_protects_warmup(seeds):
     c = corpus.load_corpus(str(seeds))
+    # per-mount budget of 2 in both arms: this pins the placement policy, not the refill rate
     flat = mount_positions(FuzzSession(c, random.Random(7), Knobs(
-        spread=False, warmup=0, p_mutate=0.25, p_pending=0, p_next=0, p_oplock=0, p_credit=0)))
-    spread = mount_positions(FuzzSession(c, random.Random(7), Knobs(
+        budget=2, refill_every=0, spread=False, warmup=0, p_mutate=0.25,
         p_pending=0, p_next=0, p_oplock=0, p_credit=0)))
+    spread = mount_positions(FuzzSession(c, random.Random(7), Knobs(
+        budget=2, refill_every=0, p_pending=0, p_next=0, p_oplock=0, p_credit=0)))
     def early(h):
         return sum(h[p] for p in (1, 2, 3, 4)) / max(1, sum(h.values()))
 
@@ -228,6 +230,28 @@ def test_budget_refills_and_learns_mount_length():
     b.new_mount()                                  # previous mount: 20 requests after its TC
     assert b.left == 2 and b.mount_pos == 0
     assert b.mount_len == pytest.approx(0.7 * 10 + 0.3 * 20)
+
+
+def test_budget_refills_every_window_within_a_long_mount():
+    b = make_budget(budget=1, refill_every=5, warmup=2)
+    b.new_mount()
+    spent_at = []
+    for pos in range(1, 23):
+        b.on_request()
+        if b.spend(1.0):
+            spent_at.append(pos)
+    # warm-up (1-2) protected; then one event per 5-request window: 3-7, 8-12, 13-17, 18-22
+    assert spent_at == [3, 8, 13, 18]
+
+
+def test_budget_spread_uses_the_refill_window():
+    b = make_budget(budget=2, refill_every=10, warmup=0)
+    b.new_mount()
+    b.on_request()
+    assert b.body_p() == pytest.approx(2 / 10)
+    for _ in range(9):
+        b.on_request()
+    assert b.body_p() == pytest.approx(1.0)          # last slot of the window
 
 
 def test_budget_body_p_flat_vs_spread():
