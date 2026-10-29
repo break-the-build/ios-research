@@ -179,6 +179,57 @@ def create_name(body: bytes) -> bytes:
     return bytes(body[start:start + ln])
 
 
+# CREATE contexts (2.2.13.2): CreateContextsOffset/Length live at body 48/52
+# in a request and 80/84 in a response; offsets are header-relative.
+CTX_FIELDS_REQUEST = 48
+CTX_FIELDS_RESPONSE = 80
+LEASE_CONTEXT = b"RqLs"
+LEASE_V2_DATA_LEN = 52                  # v2 adds ParentLeaseKey at data+32
+MAX_CREATE_CONTEXTS = 32
+
+
+def create_contexts(body: bytes, response: bool) -> list[tuple[bytes, int, int]]:
+    """(name, body-relative data offset, data length) for each create context."""
+    fields = CTX_FIELDS_RESPONSE if response else CTX_FIELDS_REQUEST
+    if len(body) < fields + 8:
+        return []
+    off, length = struct.unpack_from("<II", body, fields)
+    if not off or not length:
+        return []
+    pos, out = off - HDR, []
+    for _ in range(MAX_CREATE_CONTEXTS):
+        if pos < 0 or pos + 16 > len(body):
+            break
+        nxt, name_off, name_len, _rsv, data_off, data_len = struct.unpack_from("<IHHHHI", body, pos)
+        name = bytes(body[pos + name_off:pos + name_off + name_len])
+        out.append((name, pos + data_off, data_len))
+        if not nxt:
+            break
+        pos += nxt
+    return out
+
+
+def echo_lease_key(req_body: bytes, rsp_body: bytes) -> bytes:
+    """Copy the request's LeaseKey (and v2 ParentLeaseKey) into a replayed lease reply.
+
+    A recorded lease response carries the key the client chose in the
+    recording; the live client ignores a lease granted for a key it never
+    asked for (observed: it then never issues READ).
+    """
+    req_lease = [c for c in create_contexts(req_body, False) if c[0] == LEASE_CONTEXT]
+    rsp_lease = [c for c in create_contexts(rsp_body, True) if c[0] == LEASE_CONTEXT]
+    if not req_lease or not rsp_lease:
+        return rsp_body
+    (_n, rq_off, rq_len), (_m, rs_off, rs_len) = req_lease[0], rsp_lease[0]
+    out = bytearray(rsp_body)
+    spans = [(0, 16)] + ([(32, 16)] if min(rq_len, rs_len) >= LEASE_V2_DATA_LEN else [])
+    for rel, n in spans:
+        src, dst = rq_off + rel, rs_off + rel
+        if src + n <= len(req_body) and dst + n <= len(out) and rel + n <= min(rq_len, rs_len):
+            out[dst:dst + n] = req_body[src:src + n]
+    return bytes(out)
+
+
 def is_smb1_negotiate(payload: bytes) -> bool:
     return payload[:4] == SMB1_SIG and len(payload) > 4 and payload[4] == SMB1_NEGOTIATE
 

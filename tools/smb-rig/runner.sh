@@ -73,6 +73,9 @@ exercise() {
   bounded $OP_WAIT ls -lae@O "$m"                     # QUERY_DIR + ACL/xattr/flags lookups
   bounded $OP_WAIT stat -x "$m/hello.txt"             # QUERY_INFO file classes
   bounded $OP_WAIT cat "$m/hello.txt"                 # CREATE + READ
+  bounded $OP_WAIT dd if="$m/data.bin" of=/dev/null bs=65536   # multi-READ, large DataLength
+  bounded $OP_WAIT ls -laR "$m/sub"                   # multi-entry QUERY_DIR, nested dirs
+  bounded $OP_WAIT python3 -c 'import fcntl,sys; f=open(sys.argv[1],"r+b"); fcntl.lockf(f,fcntl.LOCK_EX|fcntl.LOCK_NB,4,0); fcntl.lockf(f,fcntl.LOCK_UN,4,0)' "$m/hello.txt"   # LOCK
   bounded $OP_WAIT xattr -l "$m/hello.txt"            # named streams (FileStreamInformation)
   bounded $OP_WAIT xattr -w com.research.probe "v$i" "$m/hello.txt"
   bounded $OP_WAIT df -k "$m"                         # QUERY_INFO filesystem classes

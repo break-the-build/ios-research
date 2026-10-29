@@ -151,6 +151,8 @@ class FuzzSession:
             status, body, desc = smb2.STATUS_NOT_SUPPORTED, smb2.ERROR_BODY, "no-template"
         else:
             status, body = tmpl.header.status, tmpl.body
+            if cmd == smb2.CREATE:
+                body = smb2.echo_lease_key(req.body, body)
             desc = "clean"
             if cmd == smb2.SESSION_SETUP and sess == 0:
                 sess = tmpl.header.session_id

@@ -148,10 +148,15 @@ never overwritten.
 * `--mutate-handshake` also mutates NEGOTIATE/SESSION_SETUP/TREE_CONNECT; it
   reaches the negotiate-context and SPNEGO parsers but can wedge `mount()`
   unkillably.
-* Seed breadth bounds coverage. The 2026-10-29 seeds have no WRITE or LOCK
-  template, and their CREATE replies never led the client to READ. Record
-  sessions that exercise reads of non-empty files, writes, locks, xattrs, ACLs
-  (`ls -le`), symlinks, change-notify (Finder window open on the mount),
-  leases/oplocks (two clients on one file) and DFS referrals.
+* Seed breadth bounds coverage. Record with the runner's workload against a
+  share holding a large file and a nested directory (it reads `data.bin` and
+  lists `sub/` recursively); that reached READ/WRITE/SET_INFO/LOCK in clean
+  replay on 2026-10-29. Still unrecorded: LOCK replies (macOS sent no LOCK
+  through Samba), change-notify (Finder window open on the mount), xattr
+  streams (needs Samba `vfs objects = fruit streams_xattr`), two-client lease
+  breaks, and DFS referrals.
+* CREATE replies echo the client's LeaseKey (and v2 ParentLeaseKey) into the
+  recorded `RqLs` context: a lease granted for the recording's key is ignored
+  by the live client, which then never issues READ.
 * Scope: this is the **macOS** kernel client. iOS's Files-app SMB client is a
   userspace implementation and needs a separate harness.

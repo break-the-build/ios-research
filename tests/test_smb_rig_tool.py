@@ -678,6 +678,45 @@ def test_request_matched_chain_beats_random_template(tmp_path):
         assert smb2.split_chain(out.pdu)[0].body == create_rsp_body() + b"#"
 
 
+def lease_ctx(key, parent=b"", extra=b""):
+    data = key + struct.pack("<IIQ", 7, 0, 0) + parent + extra
+    name = b"RqLs"
+    ctx = struct.pack("<IHHHHI", 0, 16, 4, 0, 24, len(data)) + name + b"\x00" * 4 + data
+    return ctx
+
+
+def with_ctx(body_prefix, fields, ctx):
+    body = bytearray(body_prefix)
+    struct.pack_into("<II", body, fields, smb2.HDR + len(body), len(ctx))
+    return bytes(body) + ctx
+
+
+@pytest.mark.parametrize("v2", [False, True])
+def test_echo_lease_key_copies_client_keys(v2):
+    parent_req = b"P" * 16 if v2 else b""
+    tail = b"\x00" * 4 if v2 else b""
+    req_body = with_ctx(create_req_body("")[:56], smb2.CTX_FIELDS_REQUEST,
+                        lease_ctx(b"K" * 16, parent_req, tail))
+    rsp_body = with_ctx(create_rsp_body()[:88], smb2.CTX_FIELDS_RESPONSE,
+                        lease_ctx(b"r" * 16, b"q" * 16 if v2 else b"", tail))
+    out = smb2.echo_lease_key(req_body, rsp_body)
+    (name, off, ln), = smb2.create_contexts(out, True)
+    assert name == b"RqLs" and out[off:off + 16] == b"K" * 16
+    assert out[off + 16:off + 32] == rsp_body[off + 16:off + 32]            # lease state untouched
+    if v2:
+        assert ln == smb2.LEASE_V2_DATA_LEN and out[off + 32:off + 48] == b"P" * 16
+    assert len(out) == len(rsp_body)
+
+
+def test_echo_lease_key_noop_without_lease_and_on_garbage():
+    rsp_body = create_rsp_body()
+    assert smb2.echo_lease_key(create_req_body("a"), rsp_body) == rsp_body
+    assert smb2.create_contexts(b"\x00" * 10, True) == []
+    bogus = bytearray(create_rsp_body(b"\xff" * 24))
+    struct.pack_into("<I", bogus, 88, 0)                         # Next=0 but garbage offsets
+    assert smb2.echo_lease_key(create_req_body(""), bytes(bogus)) == bytes(bogus)
+
+
 def test_stats_and_replay_cli(seeds, tmp_path, capsys):
     w = _record_conn(seeds, tmp_path, Knobs(budget=1, p_mutate=1.0))
     smb_rig.main(["stats", "--cases", str(tmp_path / "cases")])
