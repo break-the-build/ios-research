@@ -34,11 +34,38 @@ sys.path.insert(0, str(_REPO / "src"))
 
 from ios_research import mutation  # noqa: E402
 from ios_research.targets import create  # noqa: E402
+from ios_research.targets._mac_real_seeds import DEFAULT_LIMIT, real_file_seeds  # noqa: E402
 from ios_research.targets.base import Outcome  # noqa: E402
 
 
-def _seed_corpus(target) -> list[bytes]:
-    seeds = target.seeds()
+SEED_DIR_MAX_BYTES = 1024 * 1024
+
+
+def _dir_seeds(dirs) -> list[bytes]:
+    """Every regular file (<= 1 MiB) under each directory, in sorted order.
+
+    Used to replay a coverage corpus -- e.g. Jackalope's out/samples, grown
+    with coverage measured inside the framework -- under the Guard Malloc
+    harness, which detects what the coverage fuzzer cannot.
+    """
+    out: list[bytes] = []
+    for d in dirs or ():
+        for path in sorted(pathlib.Path(d).rglob("*")):
+            if path.is_file() and 0 < path.stat().st_size <= SEED_DIR_MAX_BYTES:
+                out.append(path.read_bytes())
+    return out
+
+
+def _seed_corpus(target, target_id: str = "", real_seeds: int = 0,
+                 seed_dirs=None) -> list[bytes]:
+    """Built-in format seeds, seed directories and, for mac:<framework>, real files.
+
+    The built-in seeds are tiny synthetic containers (1x1 images, empty audio
+    headers); real files carry the structure that deep codec paths need.
+    """
+    seeds = list(target.seeds()) + _dir_seeds(seed_dirs)
+    if real_seeds > 0 and target_id.startswith("mac:"):
+        seeds += real_file_seeds(target_id.split(":", 1)[1], limit=real_seeds)
     return seeds or [b"\x00" * 16]
 
 
@@ -55,9 +82,51 @@ def _crash_record(res, seen_sigs) -> dict:
     }
 
 
+def _iter_batches(corpus: list[bytes], seed: int, cases: int, batch: int):
+    """Yield the deterministic (seed, iteration) inputs one batch at a time.
+
+    Inputs are generated lazily: materializing every case up front held all
+    mutated inputs in memory at once -- harmless with 12-248-byte synthetic
+    seeds, but 11.8 GB after 25 minutes for 300k cases over real-file seeds.
+    """
+    for start_i in range(0, cases, batch):
+        chunk = []
+        for i in range(start_i, min(start_i + batch, cases)):
+            data, _strategy = mutation.mutate(corpus[i % len(corpus)], seed, i)
+            chunk.append(data)
+        yield chunk
+
+
+def _stream_batches(target, batches, workers: int, consume) -> None:
+    """Run batches with at most 2*workers in flight; consume results in order.
+
+    Consuming in submission order keeps crash discovery (and therefore which
+    input is saved per unique signature) deterministic for a given seed.
+    execute_batch spawns a subprocess (releasing the GIL while it waits), so
+    a thread pool spreads batches across CPU cores. workers=1 => serial.
+    """
+    if workers <= 1:
+        for chunk in batches:
+            consume(chunk, target.execute_batch(chunk))
+        return
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    in_flight: deque = deque()
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for chunk in batches:
+            in_flight.append((chunk, pool.submit(target.execute_batch, chunk)))
+            if len(in_flight) >= 2 * workers:
+                done_chunk, fut = in_flight.popleft()
+                consume(done_chunk, fut.result())
+        while in_flight:
+            done_chunk, fut = in_flight.popleft()
+            consume(done_chunk, fut.result())
+
+
 def run_campaign(target_id: str, cases: int, seed: int, batch: int,
                  workers: int = 1, engine: str = "auto",
-                 runs: int = 100_000, max_total_time=None):
+                 runs: int = 100_000, max_total_time=None,
+                 real_seeds: int = 0, seed_dirs=None):
     target = create(target_id)
     if not getattr(target, "available", lambda: True)():
         print(f"error: harness for {target_id} is not built/available.\n"
@@ -71,43 +140,23 @@ def run_campaign(target_id: str, cases: int, seed: int, batch: int,
     # driver. "auto" uses libFuzzer whenever the built harness supports it.
     use_lf = engine == "libfuzzer" or (
         engine == "auto" and getattr(target, "is_libfuzzer", lambda: False)())
+    corpus = _seed_corpus(target, target_id, real_seeds, seed_dirs)
     if use_lf:
         return _run_libfuzzer(target, target_id, seed, workers, runs,
-                              max_total_time)
-
-    corpus = _seed_corpus(target)
+                              max_total_time, corpus)
     counts: dict[str, int] = {o: 0 for o in Outcome.ALL}
     crashes: list[dict] = []
     crash_inputs: list[bytes] = []
     seen_sigs: set[str] = set()
 
-    # Materialize the deterministic (seed, iteration) inputs, split into batches.
-    batches: list[list[bytes]] = []
-    for start_i in range(0, cases, batch):
-        chunk = []
-        for i in range(start_i, min(start_i + batch, cases)):
-            base = corpus[i % len(corpus)]
-            data, _strategy = mutation.mutate(base, seed, i)
-            chunk.append(data)
-        batches.append(chunk)
-
     # More workers than batches is pure overhead.
-    workers = max(1, min(workers, len(batches)))
-
-    start = time.monotonic()
-    # execute_batch spawns a subprocess (releasing the GIL while it waits), so a
-    # thread pool spreads batches across CPU cores. workers=1 => serial.
-    if workers <= 1 or len(batches) <= 1:
-        batch_results = [(b, target.execute_batch(b)) for b in batches]
-    else:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            results_map = list(pool.map(target.execute_batch, batches))
-        batch_results = list(zip(batches, results_map))
-    elapsed = time.monotonic() - start
+    n_batches = max(1, -(-cases // batch))
+    workers = max(1, min(workers, n_batches))
 
     produced = 0
-    for chunk_inputs, results in batch_results:
+
+    def consume(chunk_inputs: list[bytes], results) -> None:
+        nonlocal produced
         for data, res in zip(chunk_inputs, results):
             produced += 1
             counts[res.outcome] = counts.get(res.outcome, 0) + 1
@@ -117,6 +166,10 @@ def run_campaign(target_id: str, cases: int, seed: int, batch: int,
                 if sig not in seen_sigs:
                     seen_sigs.add(sig)
                     crash_inputs.append(data)
+
+    start = time.monotonic()
+    _stream_batches(target, _iter_batches(corpus, seed, cases, batch), workers, consume)
+    elapsed = time.monotonic() - start
 
     return {
         "target": target_id,
@@ -134,9 +187,10 @@ def run_campaign(target_id: str, cases: int, seed: int, batch: int,
     }, crash_inputs
 
 
-def _run_libfuzzer(target, target_id, seed, workers, runs, max_total_time):
+def _run_libfuzzer(target, target_id, seed, workers, runs, max_total_time,
+                   seeds=None):
     """In-process persistent-mode libFuzzer campaign (#20)."""
-    seeds = target.seeds() or [b"\x00" * 16]
+    seeds = seeds or target.seeds() or [b"\x00" * 16]
     unique, stats = target.fuzz_corpus(
         seeds, runs=runs, workers=max(1, workers),
         max_total_time=max_total_time)
@@ -186,6 +240,12 @@ def main(argv=None) -> int:
     ap.add_argument("--report", default=None, help="write JSON summary to this path")
     ap.add_argument("--save-crashes", default=None,
                     help="directory to write one input file per unique crash")
+    ap.add_argument("--real-seeds", type=int, default=DEFAULT_LIMIT,
+                    help=("add up to N real files from this Mac (fonts, images, "
+                          "audio, PDFs) to the seed corpus; 0 = built-in seeds only"))
+    ap.add_argument("--seed-dir", action="append", default=[],
+                    help=("add every file in DIR to the seed corpus (repeatable); "
+                          "e.g. a Jackalope out/samples coverage corpus"))
     args = ap.parse_args(argv)
 
     workers = args.workers
@@ -195,7 +255,9 @@ def main(argv=None) -> int:
         workers = max(1, min(6, (os.cpu_count() or 2) // 2))
     out = run_campaign(args.target, args.cases, args.seed, max(1, args.batch),
                        workers=workers, engine=args.engine, runs=args.runs,
-                       max_total_time=args.max_total_time)
+                       max_total_time=args.max_total_time,
+                       real_seeds=max(0, args.real_seeds),
+                       seed_dirs=args.seed_dir)
     if out is None:
         return 3
     summary, crash_inputs = out

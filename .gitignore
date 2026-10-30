@@ -34,3 +34,6 @@ workspace/
 # local research findings / log (session output, not committed)
 research/findings/
 research/RESEARCH-LOG.md
+
+# Jackalope coverage-campaign output (tools/harness/jackalope.sh)
+tools/harness/jackalope-out/

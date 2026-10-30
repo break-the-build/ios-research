@@ -23,8 +23,15 @@
 # already include trace-cmp via -fsanitize=fuzzer.
 #
 # --sanitizer <profile> selects a named sanitizer profile (#31), mirroring
-# ios_research.sanitizers.PROFILES: baseline | asan-ubsan | cfi | tsan | lsan |
-# msan. Unsupported platform/profile combos fail before compiling.
+# ios_research.sanitizers.PROFILES: gmalloc | baseline | asan-ubsan | cfi | tsan |
+# lsan | msan. Unsupported platform/profile combos fail before compiling.
+#
+# DEFAULT is gmalloc. The frameworks under test are precompiled Apple binaries,
+# so ASan/UBSan here only check the harness's own code: a heap overflow or
+# use-after-free inside ImageIO returns normally under ASan. A gmalloc build
+# links no sanitizer runtime and re-execs itself under libgmalloc (Guard
+# Malloc), which faults on those bugs inside uninstrumented code. Use
+# --sanitizer asan-ubsan to debug the harness itself.
 #
 # Output: tools/harness/build/<framework>_fuzzer
 # The mac:<framework> target auto-discovers that path, or set:
@@ -39,11 +46,13 @@ SRC="$HERE/mac_fuzz_harness.c"
 OUT_DIR="$HERE/build"
 MODE="driver"
 TRACE_CMP=0
-SANITIZER_PROFILE="asan-ubsan"
+SANITIZER_PROFILE="gmalloc"
+GMALLOC_LIB="/usr/lib/libgmalloc.dylib"
 
 # Sanitizer profile flags (#31) — mirrors ios_research.sanitizers.PROFILES.
 profile_flags() {
   case "$1" in
+    gmalloc)    echo "-DHARNESS_GMALLOC" ;;
     baseline)   echo "" ;;
     asan-ubsan) echo "-fsanitize=address,undefined" ;;
     cfi)        echo "-fsanitize=cfi -flto -fvisibility=hidden" ;;
@@ -58,6 +67,15 @@ profile_supported_on() {
   # $1 = profile, $2 = uname (Darwin/Linux). Fail closed with an actionable
   # reason before any compilation happens.
   case "$1" in
+    gmalloc)
+      if [ "$2" != "Darwin" ]; then
+        echo "profile 'gmalloc' is not supported on '$2' (supported: darwin)" >&2
+        return 1
+      fi
+      if [ ! -r "$GMALLOC_LIB" ]; then
+        echo "profile 'gmalloc' needs $GMALLOC_LIB (not found)" >&2
+        return 1
+      fi ;;
     msan)
       if [ "$2" != "Linux" ]; then
         echo "profile 'msan' is not supported on '$2' (supported: linux)" >&2
@@ -118,6 +136,10 @@ sanitize_flags() {
       cov="$cov,trace-cmp"
     fi
     case "$SANITIZER_PROFILE" in
+      gmalloc)
+        # No compiler sanitizer (ASan would replace the allocator libgmalloc
+        # needs); the driver arms Guard Malloc at startup.
+        echo "-DHARNESS_GMALLOC $cov -DHARNESS_SANCOV -DHARNESS_STANDALONE" ;;
       baseline)
         # Coverage-only build: no sanitizer runtime (#31).
         echo "$cov -DHARNESS_SANCOV -DHARNESS_STANDALONE" ;;
@@ -171,7 +193,7 @@ main() {
         fi
         SANITIZER_PROFILE="$2"
         if ! profile_flags "$SANITIZER_PROFILE" >/dev/null 2>&1; then
-          echo "unknown sanitizer profile: '$SANITIZER_PROFILE' (want: baseline asan-ubsan cfi tsan lsan msan)" >&2
+          echo "unknown sanitizer profile: '$SANITIZER_PROFILE' (want: gmalloc baseline asan-ubsan cfi tsan lsan msan)" >&2
           exit 2
         fi
         shift ;;

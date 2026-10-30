@@ -31,7 +31,7 @@ import threading
 from pathlib import Path
 
 from .base import ExecResult, Outcome, Target
-from . import asan
+from . import asan, sigcrash
 from ..coverage import SanitizerCoverageFileAdapter
 
 # Frameworks exposed as ``mac:<framework>`` targets and the parse entry point the
@@ -88,14 +88,25 @@ _HARNESS_ENV = "IOS_RESEARCH_MAC_HARNESS"
 _SANCOV_ENV = "IOS_RESEARCH_SANCOV_FILE"
 
 
-def _decode_statuses(stdout: str) -> list[str]:
-    """Parse the standalone driver's ``DONE <i> <status>`` lines, in order."""
-    out: list[str] = []
+def _decode_lines(stdout: str) -> list[tuple[str, str]]:
+    """Parse ``DONE <i> <status> [<metric>=<n>]`` lines into (status, metric)."""
+    out: list[tuple[str, str]] = []
     for line in stdout.splitlines():
         parts = line.split()
-        if len(parts) == 3 and parts[0] == "DONE":
-            out.append(parts[2])
+        if len(parts) in (3, 4) and parts[0] == "DONE":
+            out.append((parts[2], parts[3] if len(parts) == 4 else ""))
     return out
+
+
+def _decode_statuses(stdout: str) -> list[str]:
+    """Parse the standalone driver's ``DONE <i> <status>`` lines, in order."""
+    return [status for status, _metric in _decode_lines(stdout)]
+
+
+def _accepted_detail(metric: str) -> str:
+    """The depth metric (pixels=/lines=/frames=) proves the deep stage ran."""
+    base = "input decoded without a finding"
+    return f"{base} ({metric})" if metric else base
 
 
 def _decode_status(stdout: str, index: int) -> str | None:
@@ -273,13 +284,14 @@ class MacFuzzTarget(Target):
             # distinguish "the decoder produced an object" (ACCEPTED) from "the
             # decoder rejected the input" (REJECTED). libFuzzer builds emit no
             # such marker, so fall back to ACCEPTED.
-            status = _decode_status(stdout, 0)
+            lines = _decode_lines(stdout)
+            status, metric = lines[0] if lines else ("", "")
             if status == "rejected":
                 return ExecResult(outcome=Outcome.REJECTED,
                                   detail="entry point rejected the input",
                                   duration_ms=max(dur, 1))
             return ExecResult(outcome=Outcome.ACCEPTED,
-                              detail="input decoded without a sanitizer finding",
+                              detail=_accepted_detail(metric),
                               duration_ms=max(dur, 1))
 
         if asan.is_crash_report(report):
@@ -287,6 +299,18 @@ class MacFuzzTarget(Target):
             first = report.splitlines()[0].strip() if report else ""
             return ExecResult(outcome=Outcome.CRASH,
                               detail=first[:500] or "sanitizer reported a crash",
+                              duration_ms=max(dur, 1), diagnostics=diag)
+
+        # Guard Malloc builds (the default) report a detection as a fatal
+        # signal, not a sanitizer report. Before sigcrash existed these were
+        # filed as ABNORMAL ("not a crash") -- i.e. every Guard Malloc hit lost.
+        if proc.returncode < 0 or sigcrash.is_signal_report(report):
+            diag = sigcrash.parse(report, module=self.framework,
+                                  returncode=proc.returncode)
+            crash_line = next((ln.strip() for ln in report.splitlines()
+                               if ln.startswith("IOSR-CRASH")), "")
+            return ExecResult(outcome=Outcome.CRASH,
+                              detail=(crash_line or f"harness killed by {diag.signal}")[:500],
                               duration_ms=max(dur, 1), diagnostics=diag)
 
         # Non-zero exit without a recognizable report: abnormal, not a crash.
@@ -375,26 +399,27 @@ class MacFuzzTarget(Target):
             report = (proc.stderr or b"").decode("utf-8", "replace")
             stdout = (proc.stdout or b"").decode("utf-8", "replace")
 
-            # A crash aborts the batch process; re-run individually so the
-            # crashing input (and any after it) get precise, attributable results.
-            if proc.returncode != 0 and asan.is_crash_report(report):
+            # Any abnormal exit (sanitizer report, Guard Malloc fault, abort)
+            # ends the batch early; re-run individually so the crashing input
+            # (and any after it) get precise, attributable results.
+            if proc.returncode != 0:
                 return [self.execute(d) for d in inputs]
 
-            statuses = _decode_statuses(stdout)
-            if len(statuses) != len(inputs):
+            lines = _decode_lines(stdout)
+            if len(lines) != len(inputs):
                 # No/partial per-input markers (e.g. libFuzzer build): be safe.
                 return [self.execute(d) for d in inputs]
 
             per_ms = max(int((time.monotonic() - start) * 1000) // len(inputs), 1)
             results: list[ExecResult] = []
-            for status in statuses:
+            for status, metric in lines:
                 if status == "rejected":
                     results.append(ExecResult(outcome=Outcome.REJECTED,
                                               detail="entry point rejected the input",
                                               duration_ms=per_ms))
                 else:
                     results.append(ExecResult(outcome=Outcome.ACCEPTED,
-                                              detail="input decoded without a finding",
+                                              detail=_accepted_detail(metric),
                                               duration_ms=per_ms))
             return results
         finally:
