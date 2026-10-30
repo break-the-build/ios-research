@@ -66,6 +66,34 @@ def signal_name(returncode: int) -> str:
     return _DARWIN_SIGNALS.get(num, "")
 
 
+# Guard Malloc diagnoses some corruption only when the block is freed, then
+# aborts (SIGABRT) -- e.g. "free: header for block ... has been trashed by a
+# buffer underrun". That is a heap-corruption detection, not an assertion.
+# The startup banner ("Some buffer overruns may not be noticed", ...) must not
+# match, so only diagnostics outside these banner phrases count.
+_GMALLOC_RE = re.compile(r"GuardMalloc\[[^\]]*\]:\s*(?P<msg>.+)")
+_GMALLOC_BANNER = ("allocations will be placed", "some buffer overruns may not",
+                   "vector instructions", "version ")
+_GMALLOC_CLASSES = (
+    (("double free", "freed twice", "already been freed", "was not allocated",
+      "not claimed by any"), "DOUBLE_FREE"),
+    (("trashed", "underrun", "overrun", "corrupt"), "OUT_OF_BOUNDS_WRITE"),
+)
+
+
+def gmalloc_diagnosis(text: str) -> tuple[str, str] | None:
+    """(classification, message) for a Guard Malloc corruption report, else None."""
+    for m in _GMALLOC_RE.finditer(text):
+        msg = m.group("msg").strip()
+        low = msg.lower()
+        if any(b in low for b in _GMALLOC_BANNER):
+            continue
+        for needles, cls in _GMALLOC_CLASSES:
+            if any(n in low for n in needles):
+                return cls, msg
+    return None
+
+
 def _classify(sig: str, access: str, addr: int | None) -> str:
     if sig in _SIGNAL_CLASS:
         return _SIGNAL_CLASS[sig]
@@ -97,7 +125,8 @@ def parse(text: str, *, module: str = "", returncode: int = 0) -> Diagnostics:
     if module and module not in modules:
         modules.insert(0, module)
 
-    classification = _classify(sig, access, addr_int)
+    diagnosis = gmalloc_diagnosis(text)
+    classification = diagnosis[0] if diagnosis else _classify(sig, access, addr_int)
     # Dedup on classification + the top frames inside the code under test
     # (module+symbol, never raw addresses, which ASLR moves every run).
     stable = [f for f in frames if not f.startswith(_HARNESS_MODULE_PREFIXES)][:5]

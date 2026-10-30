@@ -68,6 +68,46 @@ def test_classification(sig, addr, access, expected):
     assert sigcrash.parse(text).classification_hint == expected
 
 
+# Verbatim from libgmalloc on macOS 26.5 (1-byte heap underflow, default mode).
+GMALLOC_BANNER = """GuardMalloc[imageio_fuzzer-92005]: Allocations will be placed on 16 byte boundaries.
+GuardMalloc[imageio_fuzzer-92005]:  - Some buffer overruns may not be noticed.
+GuardMalloc[imageio_fuzzer-92005]:  - Applications using vector instructions (e.g., SSE) should work.
+GuardMalloc[imageio_fuzzer-92005]: version 064575.39.1
+"""
+GMALLOC_UNDERRUN = ("GuardMalloc[host_plain-92984]: free: header for block 0x13e063000-0x13e064000 "
+                    "has been trashed by a buffer underrun. Header magic value at 0x13e062ff8 is "
+                    "0x42adbeefdeadbeef, not 0xdeadbeefdeadbeef.  Try running with "
+                    "MALLOC_PROTECT_BEFORE to catch this error immediately as it happens.\n")
+ABORT = "IOSR-CRASH signal=SIGABRT addr=0x0000000000000000 pc=0x1 access=unknown\n"
+
+
+def test_guard_malloc_abort_is_heap_corruption_not_an_assertion():
+    """Guard Malloc reports some corruption only at free(), via SIGABRT."""
+    d = sigcrash.parse(GMALLOC_BANNER + GMALLOC_UNDERRUN + ABORT)
+    assert d.classification_hint == "OUT_OF_BOUNDS_WRITE" and d.signal == "SIGABRT"
+    cls, msg = sigcrash.gmalloc_diagnosis(GMALLOC_UNDERRUN)
+    assert cls == "OUT_OF_BOUNDS_WRITE" and "buffer underrun" in msg
+
+
+def test_guard_malloc_banner_alone_is_not_a_diagnosis():
+    """The banner says 'buffer overruns may not be noticed' -- must not match."""
+    assert sigcrash.gmalloc_diagnosis(GMALLOC_BANNER) is None
+    assert sigcrash.parse(GMALLOC_BANNER + ABORT).classification_hint == "ASSERTION"
+
+
+def test_guard_malloc_double_free_diagnosis():
+    text = "GuardMalloc[x-1]: attempted free of pointer 0x1234 that was not allocated\n"
+    assert sigcrash.gmalloc_diagnosis(text)[0] == "DOUBLE_FREE"
+
+
+def test_guard_malloc_abort_through_the_target_is_a_crash(tmp_path):
+    body = "".join(f"echo '{ln}' >&2\n" for ln in (GMALLOC_UNDERRUN + ABORT).splitlines())
+    res = MacFuzzTarget("imageio", harness=_stub(tmp_path, body + "kill -ABRT $$\n")).execute(b"x")
+    assert res.outcome == Outcome.CRASH
+    assert res.diagnostics.classification_hint == "OUT_OF_BOUNDS_WRITE"
+    assert res.detail.startswith("GuardMalloc: free: header for block")
+
+
 def test_signal_without_a_report_still_yields_diagnostics():
     d = sigcrash.parse("", module="AudioToolbox", returncode=-10)
     assert d.signal == "SIGBUS" and d.modules == ["AudioToolbox"] and d.signature

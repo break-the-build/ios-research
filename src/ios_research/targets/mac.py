@@ -309,8 +309,10 @@ class MacFuzzTarget(Target):
                                   returncode=proc.returncode)
             crash_line = next((ln.strip() for ln in report.splitlines()
                                if ln.startswith("IOSR-CRASH")), "")
-            return ExecResult(outcome=Outcome.CRASH,
-                              detail=(crash_line or f"harness killed by {diag.signal}")[:500],
+            gmalloc = sigcrash.gmalloc_diagnosis(report)
+            detail = (f"GuardMalloc: {gmalloc[1]}" if gmalloc
+                      else crash_line or f"harness killed by {diag.signal}")
+            return ExecResult(outcome=Outcome.CRASH, detail=detail[:500],
                               duration_ms=max(dur, 1), diagnostics=diag)
 
         # Non-zero exit without a recognizable report: abnormal, not a crash.
