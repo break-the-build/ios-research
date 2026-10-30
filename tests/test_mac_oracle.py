@@ -169,6 +169,45 @@ def test_campaign_seed_corpus_appends_real_files_for_mac_targets(tmp_path, monke
     assert campaign._seed_corpus(T(), "mock:parser", 5) == [b"builtin"]
 
 
+def test_campaign_streams_batches_in_order_with_bounded_memory():
+    """Regression: run.py materialized every case up front (11.8 GB for 300k
+    real-file cases). Batches must be generated lazily, at most 2*workers
+    ahead of consumption, and consumed in submission order (determinism)."""
+    import threading
+    import time as _time
+
+    sys.path.insert(0, str(REPO / "tools" / "mac_campaign"))
+    import run as campaign
+
+    generated, consumed, lock = [], [], threading.Lock()
+    max_ahead = 0
+
+    def batches():
+        nonlocal max_ahead
+        for i in range(40):
+            with lock:
+                generated.append(i)
+                max_ahead = max(max_ahead, len(generated) - len(consumed))
+            yield [bytes([i])]
+
+    class SlowEarly:
+        def execute_batch(self, chunk):
+            _time.sleep(0.02 if chunk[0][0] % 3 == 0 else 0.0)   # complete out of order
+            return [chunk[0][0]]
+
+    def consume(chunk, results):
+        with lock:
+            consumed.append(results[0])
+
+    campaign._stream_batches(SlowEarly(), batches(), 4, consume)
+    assert consumed == list(range(40))
+    assert max_ahead <= 2 * 4 + 1
+    serial = []
+    campaign._stream_batches(SlowEarly(), iter([[b"\x05"], [b"\x06"]]), 1,
+                             lambda c, r: serial.append(r[0]))
+    assert serial == [5, 6]
+
+
 # ---------------- gmalloc profile ----------------
 
 def test_gmalloc_profile_registered_and_exclusive_with_allocator_sanitizers():
