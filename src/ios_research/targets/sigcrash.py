@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import signal
 
 from .base import Diagnostics
 
@@ -49,13 +48,22 @@ def is_signal_report(text: str) -> bool:
     return "IOSR-CRASH signal=" in text
 
 
+# Darwin signal numbers. The harness only runs on macOS, so its exit status must
+# be decoded with Darwin's numbering wherever this parser runs: the host's
+# `signal` module would name 10 SIGUSR1 on Linux (it is SIGBUS on Darwin).
+_DARWIN_SIGNALS = {
+    1: "SIGHUP", 2: "SIGINT", 3: "SIGQUIT", 4: "SIGILL", 5: "SIGTRAP",
+    6: "SIGABRT", 7: "SIGEMT", 8: "SIGFPE", 9: "SIGKILL", 10: "SIGBUS",
+    11: "SIGSEGV", 12: "SIGSYS", 13: "SIGPIPE", 14: "SIGALRM", 15: "SIGTERM",
+    24: "SIGXCPU", 25: "SIGXFSZ", 26: "SIGVTALRM", 27: "SIGPROF",
+    30: "SIGUSR1", 31: "SIGUSR2",
+}
+
+
 def signal_name(returncode: int) -> str:
     """``-11`` (subprocess) or ``139`` (shell) -> ``SIGSEGV``; '' if not a signal."""
     num = -returncode if returncode < 0 else returncode - 128 if returncode > 128 else 0
-    try:
-        return signal.Signals(num).name if num else ""
-    except ValueError:
-        return ""
+    return _DARWIN_SIGNALS.get(num, "")
 
 
 def _classify(sig: str, access: str, addr: int | None) -> str:

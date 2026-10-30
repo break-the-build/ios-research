@@ -73,7 +73,10 @@ def test_signal_without_a_report_still_yields_diagnostics():
     assert d.signal == "SIGBUS" and d.modules == ["AudioToolbox"] and d.signature
 
 
+# Darwin numbering on every host: 10 is SIGBUS on macOS but SIGUSR1 on Linux
+# (CI caught the host-numbering version on Ubuntu).
 @pytest.mark.parametrize("code,name", [(-11, "SIGSEGV"), (139, "SIGSEGV"), (-6, "SIGABRT"),
+                                       (-10, "SIGBUS"), (138, "SIGBUS"), (-30, "SIGUSR1"),
                                        (0, ""), (1, ""), (-999, "")])
 def test_signal_name(code, name):
     assert sigcrash.signal_name(code) == name
@@ -97,8 +100,10 @@ def test_signal_death_with_report_is_a_crash(tmp_path):
 
 
 def test_bare_signal_death_is_a_crash_not_abnormal(tmp_path):
-    res = MacFuzzTarget("imageio", harness=_stub(tmp_path, "kill -BUS $$\n")).execute(b"x")
-    assert res.outcome == Outcome.CRASH and res.diagnostics.signal == "SIGBUS"
+    # The stub dies on the CI host, so use a signal numbered alike on Linux and
+    # Darwin (SIGSEGV = 11); SIGBUS is 10 on Darwin but 7 on Linux.
+    res = MacFuzzTarget("imageio", harness=_stub(tmp_path, "kill -SEGV $$\n")).execute(b"x")
+    assert res.outcome == Outcome.CRASH and res.diagnostics.signal == "SIGSEGV"
 
 
 def test_ordinary_error_exit_stays_abnormal(tmp_path):
