@@ -1,4 +1,4 @@
-cases/
+cases*/
 __pycache__/
 # raw captures: contain the recording host's NTLM workstation name
 seeds/

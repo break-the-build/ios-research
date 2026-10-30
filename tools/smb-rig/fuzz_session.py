@@ -39,7 +39,7 @@ FILE_ID_BASE = 0x5A00_0000_0000
 class Knobs:
     """Mutation budget and per-opportunity probabilities."""
     mutate_handshake: bool = False
-    budget: int = 2              # mutation events per mount (0 = clean replay)
+    budget: int = 6              # mutation events per refill window (0 = clean replay)
     p_mutate: float = 0.25       # flat body-mutation chance (only when spread=False)
     p_status: float = 0.15       # a body mutation becomes an error/warning reply carrying data
     p_pending: float = 0.05      # STATUS_PENDING interim + async final
@@ -53,14 +53,15 @@ class Knobs:
     horizon: float = 30.0        # initial guess of requests per mount
     warmup: int = 2              # requests after TREE_CONNECT that are protected...
     p_warmup: float = 0.1        # ...except with this probability
+    refill_every: int = 20       # also refill every N requests in a mount (0 = per mount only)
 
     def __post_init__(self) -> None:
         bad = [name for name, value in vars(self).items()
                if name.startswith("p_") and not 0.0 <= value <= 1.0]
         if bad:
             raise ValueError(f"probabilities must be in [0, 1]: {', '.join(bad)}")
-        if self.budget < 0 or self.warmup < 0 or self.horizon <= 0:
-            raise ValueError("budget and warmup must be >= 0 and horizon > 0")
+        if self.budget < 0 or self.warmup < 0 or self.refill_every < 0 or self.horizon <= 0:
+            raise ValueError("budget, warmup and refill_every must be >= 0 and horizon > 0")
 
     @classmethod
     def clean(cls) -> Knobs:
@@ -68,7 +69,7 @@ class Knobs:
 
     def budget_config(self) -> BudgetConfig:
         return BudgetConfig(self.budget, self.p_mutate, self.spread, self.horizon,
-                            self.warmup, self.p_warmup)
+                            self.warmup, self.p_warmup, self.refill_every)
 
 
 @dataclass(frozen=True)

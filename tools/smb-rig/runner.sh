@@ -19,6 +19,17 @@ LOG=${SMB_RIG_LOG:-/tmp/smb-rig-driver.log}
 URL=${SMB_RIG_URL:-"//GUEST:@127.0.0.1:4450/fuzzshare"}
 MOUNT_WAIT=25      # s for the mount to appear
 OP_WAIT=5          # s per workload command
+PASSES=${SMB_RIG_PASSES:-3}   # workload passes per mount (A/B: 3.3x mutations/min vs 1)
+# the rig's --cases directory: newest run there is what last_case reports
+CASES=${SMB_RIG_CASES:-$PWD/cases}
+# every name the client lists, for the leak oracle (`smb_rig.py stats`): a
+# name whose bytes we never sent likely came from an out-of-bounds read
+LISTINGS=${SMB_RIG_LISTINGS:-$CASES/listings.tsv}
+
+# Keep the Mac awake for exactly as long as this driver runs. With a 1-minute
+# system sleep timer the host slept mid-campaign (a 16-minute hole in a
+# 10-round run); -w ties caffeinate's lifetime to ours.
+caffeinate -ims -w $$ &!
 UNMOUNT_WAIT=10    # s for the forced unmount
 MAX_WEDGED=3       # stuck mount_smbfs processes before we stop: kernel is wedged
 
@@ -30,7 +41,7 @@ log() { echo "[$(ts)] $*" | tee -a "$LOG" }
 
 # newest rig case: "case<TAB>utc<TAB>conn" from the newest run's INDEX.tsv
 last_case() {
-  local runs=(cases/run-*(N/om)) run
+  local runs=($CASES/run-*(N/om)) run
   run=${runs[1]:-}
   if [[ -n $run && -f $run/INDEX.tsv ]] && (( $(wc -l < "$run/INDEX.tsv") > 1 )); then
     echo "${run:t}/$(tail -1 "$run/INDEX.tsv" | cut -f1-3 | tr '\t' ' ')"
@@ -74,10 +85,24 @@ wait_mounted() {
   return 1
 }
 
+# capture_names DIR: append every listed name under DIR to $LISTINGS (utc \t name)
+capture_names() {
+  local root=$1 tmp=$LISTINGS.part stamp p
+  mkdir -p "${LISTINGS:h}"
+  bounded $OP_WAIT sh -c 'find "$1" -maxdepth 3 > "$2" 2>/dev/null' _ "$root" "$tmp" || return 0
+  stamp=$(ts)
+  while IFS= read -r p; do
+    [[ $p == "$root" ]] && continue                    # the mount point is ours, not the server's
+    printf '%s\t%s\n' "$stamp" "${p:t}"
+  done < "$tmp" >> "$LISTINGS"
+  rm -f "$tmp"
+}
+
 # Client workload: each op drives a different smbfs response parser.
 exercise() {
   local m=$MNT i=$1
   bounded $OP_WAIT ls -lae@O "$m"                     # QUERY_DIR + ACL/xattr/flags lookups
+  capture_names "$m"                                  # leak oracle input
   bounded $OP_WAIT stat -x "$m/hello.txt"             # QUERY_INFO file classes
   bounded $OP_WAIT cat "$m/hello.txt"                 # CREATE + READ
   bounded $OP_WAIT dd if="$m/data.bin" of=/dev/null bs=65536   # multi-READ, large DataLength
@@ -116,7 +141,12 @@ for (( i = 1; i <= ROUNDS; i++ )); do
 
   if wait_mounted $!; then
     log "round $i: mounted — exercising"
-    exercise $i
+    # several passes per mount: mount/share-check/unmount is pure overhead,
+    # and mutated replies do not end the session (see budget.py)
+    for (( p = 1; p <= PASSES; p++ )); do
+      exercise "$i-$p"
+      is_mounted || { log "round $i: mount gone after pass $p (last-case=$(last_case))"; break; }
+    done
   else
     log "round $i: MOUNT FAILED/TIMEOUT (last-case=$(last_case))"
   fi

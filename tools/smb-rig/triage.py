@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import struct
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 
@@ -99,6 +100,71 @@ def format_klog(run_dir: str) -> list[str]:
     if len(new) > KLOG_SHOWN:
         lines.append(f"  ... {len(new) - KLOG_SHOWN} more in {path}")
     return lines
+
+
+LISTINGS_FILE = "listings.tsv"         # written by runner.sh: utc \t listed name
+LEAKS_SHOWN = 20
+UNICODE_FORMS = ("NFC", "NFD")         # macOS may hand back either normalisation
+
+
+@dataclass(frozen=True)
+class LeakCandidate:
+    utc: str
+    name: str
+
+
+UTC_SECONDS = len("2026-01-01T00:00:00")  # compare runner (s) and INDEX (ms) stamps at 1 s
+
+
+def read_listings(path: str, start_utc: str = "", end_utc: str = "~") -> dict[str, str]:
+    """name -> first UTC it was listed, within [start_utc, end_utc] (to the second)."""
+    lo, hi = start_utc[:UTC_SECONDS], end_utc[:UTC_SECONDS]
+    names: dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8", errors="surrogateescape") as f:
+            for line in f:
+                utc, _, name = line.rstrip("\n").partition("\t")
+                if name and lo <= utc[:UTC_SECONDS] <= hi:
+                    names.setdefault(name, utc)
+    except OSError:
+        return {}
+    return names
+
+
+def find_leaks(rows: list[CaseRow], listings: dict[str, str]) -> list[LeakCandidate]:
+    """Names the client listed whose bytes appear in no reply we sent.
+
+    smbfs builds names from server replies; a name we never sent most likely
+    came from an out-of-bounds read past a directory reply -- kernel memory
+    disclosure that a release kernel does not panic on. Expect a few false
+    positives (character mapping); every hit deserves a look.
+    """
+    sent = b"".join(_read_case(r) for r in rows if r.kind != "UNKNOWN_REQ")
+    leaks = []
+    for name, utc in sorted(listings.items(), key=lambda kv: kv[1]):
+        if name in (".", ".."):
+            continue
+        encodings = {unicodedata.normalize(form, name).encode("utf-16-le", "surrogatepass")
+                     for form in UNICODE_FORMS}
+        if not any(e in sent for e in encodings):
+            leaks.append(LeakCandidate(utc, name))
+    return leaks
+
+
+def format_leaks(leaks: list[LeakCandidate], listings_seen: int) -> list[str]:
+    if not listings_seen:
+        return ["leak oracle: no listings captured (runner.sh writes cases/listings.tsv)"]
+    lines = [f"leak oracle: {listings_seen} listed names checked, {len(leaks)} not found in any reply"]
+    lines += [f"  LEAK? {c.utc} {c.name!r}" for c in leaks[:LEAKS_SHOWN]]
+    return lines
+
+
+def _read_case(row: CaseRow) -> bytes:
+    try:
+        with open(row.path, "rb") as f:
+            return f.read()
+    except OSError:
+        return b""                                      # torn by a panic
 
 
 def patch_message_ids(pdu: bytes, ids: list[int]) -> bytes:

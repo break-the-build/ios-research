@@ -44,7 +44,16 @@ from cases import CaseWriter, latest_run, read_index
 from favored import FavoredStore, RecentMutations
 from fuzz_session import FuzzSession, Knobs, Outgoing, Responder
 from klog import KernelLogTap
-from triage import ReplaySession, format_klog, format_stats, run_stats
+from triage import (
+    LISTINGS_FILE,
+    ReplaySession,
+    find_leaks,
+    format_klog,
+    format_leaks,
+    format_stats,
+    read_listings,
+    run_stats,
+)
 
 KLOG_SEEN_FILE = "klog-seen.txt"       # templates seen by any campaign under --cases
 CLIENT_TIMEOUT_S = 15
@@ -249,7 +258,7 @@ def do_fuzz(args: argparse.Namespace) -> None:
     corp = _load_corpus_or_exit(args.seeds)
     seed = args.seed if args.seed is not None else int(time.time())
     knobs = Knobs.clean() if args.clean else Knobs(mutate_handshake=args.mutate_handshake,
-                                                    budget=args.budget)
+                                                    budget=args.budget, refill_every=args.refill_every)
     writer = CaseWriter(args.cases, seed, {"first_conn": args.first_conn,
                                            "knobs": dataclasses.asdict(knobs),
                                            "seeds": os.path.abspath(args.seeds)},
@@ -295,8 +304,12 @@ def do_stats(args: argparse.Namespace) -> None:
     run = args.run or latest_run(args.cases)
     if run is None:
         sys.exit(f"no runs under {args.cases}")
+    rows = read_index(run)
+    listings = (read_listings(os.path.join(args.cases, LISTINGS_FILE), rows[0].utc, rows[-1].utc)
+                if rows else {})
     print(f"[stats] {run}")
-    for line in format_stats(run_stats(read_index(run))) + format_klog(run):
+    for line in (format_stats(run_stats(rows)) + format_klog(run)
+                 + format_leaks(find_leaks(rows, listings), len(listings))):
         print(f"[stats] {line}")
 
 
@@ -370,6 +383,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="also mutate NEGOTIATE/SESSION_SETUP/TREE_CONNECT (can wedge mount() unkillably)")
     ap.add_argument("--budget", type=_non_negative, default=Knobs.budget,
                     help="fuzz mode: mutation events per mount (refilled at each TREE_CONNECT)")
+    ap.add_argument("--refill-every", type=_non_negative, default=Knobs.refill_every,
+                    help="fuzz mode: also refill the budget every N requests within a mount")
     ap.add_argument("--clean", action="store_true",
                     help="fuzz mode: no mutation (conformance check that the client mounts deep)")
     ap.add_argument("--no-klog", action="store_true",

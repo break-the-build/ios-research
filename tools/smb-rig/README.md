@@ -48,17 +48,18 @@ macOS kernel (smbfs) ──mount_smbfs──> smb_rig.py :4450
   carrying the client's live LeaseKey** (and oplock breaks against live
   FileIds), and absurd credit grants. ECHO ends a cycle (and exercises
   reconnect).
-  Mutation is **budgeted**: `--budget N` events (default 2) per mount,
-  refilled at each TREE_CONNECT because smbfs reuses one TCP session across
-  mounts. A client drops a session after its first malformed reply, so
-  mutating every reply would mostly fuzz the abort path; a small budget keeps
-  sessions deep and pins any crash on one reply. The budget is **spread** over
-  the mount (chance = budget left / requests expected to remain, learned per
-  session) and the first 2 requests after TREE_CONNECT (mount_smbfs's share
-  check) are protected 90% of the time. A flat 25% chance put 62% of
-  mutations on those two requests and failed ~half of those mounts; spreading
-  raised mount success from 63% to 93% and moved mutations 6+ requests deep
-  from 7 to 78 per 40 rounds. NEGOTIATE, SESSION_SETUP and TREE_CONNECT replies
+  Mutation is **rate-budgeted**: `--budget N` events (default 6) per window
+  of `--refill-every` requests (default 20), also refilled at each
+  TREE_CONNECT because smbfs reuses one TCP session across mounts. (An early
+  assumption -- that a client drops the session after its first malformed
+  reply -- was measured false: after the warm-up a mutated reply was never the
+  last request of its mount, median 21 more followed. Raising the rate gave
+  3.5x mutated replies per minute and +24% distinct kernel templates for the
+  same workload.) Within a window the budget is **spread** (chance = budget
+  left / requests remaining) and the first 2 requests after TREE_CONNECT
+  (mount_smbfs's share check) are protected 90% of the time: a flat 25% chance
+  put 62% of mutations on those two requests and failed ~half of those mounts.
+  NEGOTIATE, SESSION_SETUP and TREE_CONNECT replies
   stay clean unless `--mutate-handshake`; 4-byte replies (LOGOFF,
   TREE_DISCONNECT, FLUSH, ECHO) never get body mutations.
   Replies are made realistic before mutation: every successful CREATE gets a
@@ -140,8 +141,19 @@ stalled `mount_smbfs` in about half the rounds.
 `runner.sh` never waits on a process that touches the mount (a thread wedged
 in smbfs is unkillable); every mount/op/unmount is detached and polled with a
 deadline. It stops with `KERNEL WEDGED` once 3 `mount_smbfs` processes are
-stuck — that state is itself worth recording (reboot to clear). Overrides:
-`SMB_RIG_MNT`, `SMB_RIG_LOG`, `SMB_RIG_URL`.
+stuck — that state is itself worth recording (reboot to clear). Each mount
+runs `SMB_RIG_PASSES` workload passes (default 3: mount/unmount is overhead),
+and the driver holds `caffeinate -ims` for its lifetime (a 1-minute system
+sleep timer once put a 16-minute hole in a run). Overrides: `SMB_RIG_MNT`,
+`SMB_RIG_LOG`, `SMB_RIG_URL`, `SMB_RIG_PASSES`, `SMB_RIG_CASES` (the rig's
+`--cases`), `SMB_RIG_LISTINGS`.
+
+**Leak oracle.** Every pass records each name the client lists
+(`cases/listings.tsv`). `stats` flags any name whose UTF-16 bytes appear in
+no reply sent during the run: smbfs builds names only from server replies,
+so such a name most likely came from an out-of-bounds read -- kernel memory
+disclosure that a release kernel does not panic on. Expect occasional false
+positives from character mapping; every `LEAK?` deserves a look.
 
 ## After a panic
 

@@ -41,7 +41,8 @@ TREE = 0x5
 
 
 def K(**kw):
-    """Knobs with flat probabilities and no warm-up, for tests that pin exact behaviour."""
+    """Knobs with flat probabilities, no warm-up and a per-mount budget, for exact-behaviour tests."""
+    kw.setdefault("refill_every", 0)
     return Knobs(spread=False, warmup=0, **kw)
 
 
