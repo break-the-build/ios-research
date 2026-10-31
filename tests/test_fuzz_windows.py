@@ -12,6 +12,7 @@ Locks in the #199 contract on top of the #207 executor abstraction:
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -173,12 +174,24 @@ class _SlowStub(Target):
     kind = "parser"
     description = "sleeps per execution to expose thread overlap"
     formats = ("bin",)
+    # Executions in flight right now, and the most seen at once.
+    _lock = threading.Lock()
+    in_flight = 0
+    max_in_flight = 0
 
     def seeds(self):
         return [b"S"]
 
     def _run(self, data):
-        time.sleep(0.02)
+        cls = type(self)
+        with cls._lock:
+            cls.in_flight += 1
+            cls.max_in_flight = max(cls.max_in_flight, cls.in_flight)
+        try:
+            time.sleep(0.02)
+        finally:
+            with cls._lock:
+                cls.in_flight -= 1
         return ExecResult(outcome=Outcome.ACCEPTED, detail="slow-ok")
 
 
@@ -198,18 +211,19 @@ def test_threaded_execution_overlaps_slow_target(workspace):
     corpus = cs.create("f")
     cs.add_bytes(corpus, b"SLOWSEED\x00\x01", origin="seed")
 
-    def _timed(workers):
+    def _max_overlap(workers, window):
+        _SlowStub.max_in_flight = 0
         eng = FuzzEngine(workspace)
         s = eng.create(experiment_id=exp.id, target=_SlowStub.target_id,
                        corpus_id=corpus.id, seed=3, workers=workers,
-                       window=8, max_cases=24, duration_s=None,
+                       window=window, max_cases=24, duration_s=None,
                        strategy_weights=W)
-        start = time.monotonic()
         eng.advance(s)
-        return time.monotonic() - start
+        return _SlowStub.max_in_flight
 
-    serial = _timed(1)
-    threaded = _timed(4)
-    # Generous bound: 24 * 20ms = 480ms serial; 4 workers should land well
-    # under 3/4 of that even on loaded CI machines.
-    assert threaded < serial * 0.75
+    # Count overlapping executions instead of comparing wall-clock times: the
+    # old "threaded < 0.75 * serial" bound flaked on a loaded macos-14 runner.
+    # (window > 1 alone already selects the threaded executor, so the serial
+    # baseline needs window=1 too.)
+    assert _max_overlap(1, 1) == 1
+    assert _max_overlap(4, 8) >= 2
