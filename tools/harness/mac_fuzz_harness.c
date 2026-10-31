@@ -42,6 +42,7 @@
  */
 
 #include <dlfcn.h>
+#include <mach-o/dyld.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -213,12 +214,24 @@ static int canary_requested(void) {
     return v && strcmp(v, "1") == 0;
 }
 
+/* Placement alone can't prove Guard Malloc is there: the system allocator also
+ * hands out the odd small block at a page start (a macOS 15 CI runner did, and
+ * the canary read it as mode=before). */
+static int gmalloc_loaded(void) {
+    for (uint32_t i = 0, n = _dyld_image_count(); i < n; i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (name && strstr(name, "/libgmalloc")) return 1;
+    }
+    return 0;
+}
+
 /* Guard Malloc's placement tells which side the guard page is on: a block that
  * ends on a page boundary (default, MALLOC_STRICT_SIZE) has it after, one that
  * starts on a boundary (MALLOC_PROTECT_BEFORE) has it before. Returns the mode,
- * or NULL when no guard page borders the block. */
+ * or NULL when Guard Malloc isn't loaded or no guard page borders the block. */
 __attribute__((unused))
 static const char *canary_open(IOSR_Canary *c, const uint8_t *data, size_t size) {
+    if (!gmalloc_loaded()) return NULL;
     uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
     c->block = calloc(1, IOSR_CANARY_KEEP);
     if (!c->block) return NULL;
