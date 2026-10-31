@@ -297,6 +297,7 @@ JACKALOPE_SH = REPO / "tools" / "harness" / "jackalope.sh"
 
 @pytest.mark.parametrize("args,env,code,msg", [
     (["bogus", "10"], {}, 2, b"unknown framework"),
+    (["bogus", "10"], {"JACKALOPE_MODULES": "ImageIO"}, 2, b"unknown framework"),
     (["imageio", "ten"], {}, 2, b"positive integer"),
     (["imageio", "10"], {"JACKALOPE": "/nonexistent/fuzzer"}, 3, b"not found"),
     ([], {}, 2, b"Usage"),
@@ -346,7 +347,7 @@ def test_native_guard_malloc_catches_heap_bugs_without_instrumentation(tmp_path)
 
 NATIVE_DEPTH = [
     ("imageio", "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericDocumentIcon.icns", "pixels"),
-    ("coretext", "/System/Library/Fonts/Supplemental/Arial.ttf", "lines"),
+    ("coretext", "/System/Library/Fonts/Supplemental/Arial.ttf", "pixels"),
     ("audiotoolbox", "/System/Library/Sounds/Glass.aiff", "frames"),
 ]
 

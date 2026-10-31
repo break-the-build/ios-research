@@ -12,6 +12,7 @@ never ran, and campaigns reported clean results:
   CoreAudio structs were 4-packed while the SDK uses natural alignment.
 * CMVideoFormatDescriptionCreateFrom*ParameterSets counts were uint32_t, not
   size_t (upper register half unspecified on arm64).
+* bool/Boolean results were read as int: only the low byte of w0 is defined.
 """
 
 from __future__ import annotations
@@ -53,12 +54,26 @@ REQUIRED_ARG_TYPES = [
     ("CMVideoFormatDescriptionCreateFromH264ParameterSets", 1, "size_t"),
     ("CMVideoFormatDescriptionCreateFromHEVCParameterSets", 1, "size_t"),
     ("CTFontCreateWithFontDescriptor", 1, "double"),          # CGFloat size (in d0)
+    ("CGContextSetTextPosition", 1, "double"),                # CGFloat x (by value)
+    ("CGContextSetTextPosition", 2, "double"),                # CGFloat y (by value)
+    ("CTFontDescriptorCreateCopyWithVariation", 2, "double"), # CGFloat variationValue
+    ("CTFontDrawGlyphs", 2, "const IOSR_CGPoint *"),          # const CGPoint positions[]
+    ("CTFontDrawGlyphs", 3, "size_t"),                        # size_t count
+    ("CFNumberGetValue", 1, "CFIndex"),                       # CFNumberType is a CFIndex
 ]
 ARG_COUNTS = {
     "CGContextDrawImage": 3, "CTFramesetterCreateFrame": 4, "CGPathAddRect": 3,
     "AudioFileReadPacketData": 7, "AudioConverterFillComplexBuffer": 6,
-    "AudioConverterSetProperty": 4, "CTFrameGetLines": 1,
+    "AudioConverterSetProperty": 4, "CTFontDrawGlyphs": 5, "CTLineDraw": 2,
+    "CGContextSetTextPosition": 3, "CTFontDescriptorCreateCopyWithVariation": 3,
+    "CFNumberGetValue": 3,
 }
+# SDK parameters that are C ARRAYS of a small struct, where a pointer is right.
+ARRAY_PARAMS = {("CTFontDrawGlyphs", 2)}                      # const CGPoint positions[]
+# Functions the SDK declares as returning bool / Boolean (one byte).
+BOOL_RETURNS = ["CTFontGetGlyphsForCharacters", "CGPDFScannerScan",
+                "CGPDFScannerPopNumber", "CGPDFScannerPopName", "CFNumberGetValue"]
+_RETURN_RE = re.compile(r"static\s+(?P<ret>[^;{}()=]*?)\(\s*\*\s*p_(?P<name>\w+)\s*\)\s*\(")
 
 
 def test_lint_finds_the_prototypes():
@@ -80,11 +95,24 @@ def test_argument_counts_match_the_sdk(name, count):
 
 
 def test_no_by_value_struct_is_ever_declared_as_a_pointer():
-    """Apple passes CGRect/CFRange/CGSize/CGPoint by value in every API used here."""
+    """Apple passes CGRect/CFRange/CGSize/CGPoint by value in every API used here,
+    except where the SDK parameter is an array of them (ARRAY_PARAMS)."""
     for name, decls in PROTOS.items():
         for args in decls:
-            for a in args:
+            for i, a in enumerate(args):
+                if (name, i) in ARRAY_PARAMS:
+                    continue
                 assert not re.search(r"IOSR_(CGRect|CFRange|CGSize|CGPoint)\s*\*", a), (name, a)
+
+
+@pytest.mark.parametrize("name", BOOL_RETURNS)
+def test_bool_results_are_read_as_one_byte(name):
+    """A bool/Boolean result defines only the low byte of w0; reading it as int
+    can turn false into true."""
+    rets = [m.group("ret").strip() for m in _RETURN_RE.finditer(_strip_comments(SRC))
+            if m.group("name") == name]
+    assert rets, f"{name} not declared"
+    assert all(r == "unsigned char" for r in rets), (name, rets)
 
 
 def _fourcc(code: str) -> int:
@@ -124,3 +152,20 @@ def test_imageio_decodes_into_an_inspectable_buffer():
     body = SRC.split("#if defined(HARNESS_TARGET_IMAGEIO)", 1)[1].split("#elif", 1)[0]
     assert "p_CGBitmapContextCreate(\n                    pixels," in body
     assert 'g_depth_name = "pixels"' in body
+
+
+def test_coretext_rasterizes_into_an_inspectable_buffer():
+    """Outlines alone never reach bitmap/color glyphs: glyphs must be DRAWN into
+    our own canvas, and the metric must count the ink."""
+    body = SRC.split("#elif defined(HARNESS_TARGET_CORETEXT)", 1)[1].split("#else", 1)[0]
+    assert "p_CGBitmapContextCreate(c->px," in body
+    assert "p_CTFontDrawGlyphs(font, glyphs, pos, n, ctx)" in body
+    assert "p_CTLineDraw(line, canvas)" in body
+    assert 'g_depth_name = "pixels"' in body
+    assert "p_CFRelease(descs)" in body          # the +1 descriptor array is released
+
+
+def test_imageio_repairs_png_crcs_before_decoding():
+    body = SRC.split("#if defined(HARNESS_TARGET_IMAGEIO)", 1)[1].split("#elif", 1)[0]
+    assert "png_repaired_copy(data, size)" in body
+    assert 'getenv("IOSR_PNG_CRC_FIXUP")' in body and 'getenv("IOSR_SAVE_INPUT")' in body
