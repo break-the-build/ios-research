@@ -53,6 +53,33 @@ Notes:
   `added_token_count`, and a flat `directed_targets` list (families with
   additions, sorted) for campaign aiming.
 
+## iOS betas: diff the lane binaries out of the IPSW
+
+An iOS beta can't be installed on the research Mac, so its code comes out of
+the firmware image instead. `tools/beta/lane_baseline.sh` extracts the dyld
+shared cache (needs 15 GB free, deleted afterwards), and keeps, for every
+lane image (RawCamera, ImageIO, CMPhoto, AppleJPEG/JPEGXL, CoreSVG, the
+AudioToolbox family, CoreMedia, CoreGraphics, libFontParser, CoreText,
+FontServices, libType1Scaler, OTSVG): the extracted dylib, its exports, its
+function starts and a `staticscan` format-token fingerprint (~130 MB per
+build). `tools/beta/lane_diff.py` ranks the lanes by changed functions
+(sizes matched as a multiset, so moved code doesn't count), new exports and
+new format tokens.
+
+```bash
+# once per release (done for 27.2: baselines/24B119__iPhone14,2)
+tools/beta/lane_baseline.sh ~/dev/betas/ios27.2/iPhone14,2_27.2_24B119_Restore.ipsw ~/dev/betas/baselines
+# beta day
+tools/beta/lane_baseline.sh <beta IPSW or OTA> ~/dev/betas/baselines
+python tools/beta/lane_diff.py ~/dev/betas/baselines/<old> ~/dev/betas/baselines/<new> \
+    --json diff.json > diff.md
+```
+
+Use the **IPSW** for the beta (developer.apple.com, research device's model):
+`ipsw` 3.1.711 crashed in its native payload code extracting the cache from a
+27.0 beta OTA. Baselines hold Apple binaries: keep them outside the
+repository.
+
 ## Aiming campaigns at the result
 
 1. **New-token families → dictionary**: regenerate the evidence dictionary
