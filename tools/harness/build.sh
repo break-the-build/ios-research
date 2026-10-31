@@ -33,8 +33,8 @@
 # Malloc), which faults on those bugs inside uninstrumented code. Use
 # --sanitizer asan-ubsan to debug the harness itself.
 #
-# Output: tools/harness/build/<framework>_fuzzer
-# The mac:<framework> target auto-discovers that path, or set:
+# Output: tools/harness/build/<framework>_fuzzer (IOSR_BUILD_DIR overrides the
+# directory). The mac:<framework> target auto-discovers that path, or set:
 #   export IOS_RESEARCH_MAC_HARNESS=/path/to/imageio_fuzzer
 #
 # NOTE: intentionally avoids bash-4 features (associative arrays) so it runs on
@@ -43,7 +43,7 @@ set -eu
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$HERE/mac_fuzz_harness.c"
-OUT_DIR="$HERE/build"
+OUT_DIR="${IOSR_BUILD_DIR:-$HERE/build}"
 MODE="driver"
 TRACE_CMP=0
 SANITIZER_PROFILE="gmalloc"

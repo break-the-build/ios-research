@@ -23,7 +23,8 @@
 #
 # Environment:
 #   JACKALOPE        path to Jackalope's `fuzzer` (default ~/dev/Jackalope/build/fuzzer)
-#   JACKALOPE_OUT    output directory (default tools/harness/jackalope-out/<fw>)
+#   JACKALOPE_OUT    output directory (default tools/harness/jackalope-out/<fw>);
+#                    the run builds its own harness copy in <out>/bin
 #   JACKALOPE_MODULES  override the instrumented modules (space-separated)
 #
 # Requires: Jackalope built from https://github.com/googleprojectzero/Jackalope
@@ -97,8 +98,11 @@ main() {
   [ -x "$JACKALOPE" ] || { echo "Jackalope fuzzer not found at $JACKALOPE (set JACKALOPE)" >&2; exit 3; }
 
   local out="${JACKALOPE_OUT:-$HERE/jackalope-out/$fw}"
-  local harness="$HERE/build/${fw}_fuzzer"
-  bash "$HERE/build.sh" "$fw" >/dev/null
+  # A private copy of the harness, so this run never rebuilds or re-signs the
+  # binary a run.py campaign is exec'ing (a half-written or re-signed harness
+  # dies mid-campaign), and stop_jackalope can only match its own targets.
+  local harness="$out/bin/${fw}_fuzzer"
+  IOSR_BUILD_DIR="$out/bin" bash "$HERE/build.sh" "$fw" >/dev/null
   codesign -s - -f --entitlements "$HERE/debuggable.entitlements" "$harness" 2>/dev/null
 
   mkdir -p "$out/in"

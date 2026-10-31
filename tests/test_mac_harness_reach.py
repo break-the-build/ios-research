@@ -7,7 +7,8 @@
 * jackalope.sh stops only the targets Jackalope spawned, before they can run
   without it. Orphaned TinyInst targets died with SIGBUS at their own PC and
   wrote fake framework crash reports; the old `pkill -f <harness>` also killed
-  unrelated campaigns using the same harness binary.
+  unrelated campaigns using the same harness binary, and every run rebuilt and
+  re-signed that binary under them. Each run now uses a private copy.
 
 Static checks run everywhere; native ones (opt-in, -m native) build the real
 harnesses on macOS.
@@ -158,7 +159,9 @@ def test_native_jackalope_stops_only_its_own_targets(tmp_path):
     os.mkfifo(tmp_path / "target.fifo")
     os.mkfifo(tmp_path / "bystander.fifo")
     env = {**os.environ, "IOSR_GMALLOC_REEXEC": "0"}
-    # A campaign worker that merely uses the same harness binary.
+    # A campaign worker using the shared harness binary, which a campaign keeps
+    # exec'ing: Jackalope must neither kill it nor rewrite the binary.
+    campaign_binary = harness.read_bytes()
     bystander = subprocess.Popen([str(harness), str(tmp_path / "bystander.fifo")], env=env,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -168,6 +171,8 @@ def test_native_jackalope_stops_only_its_own_targets(tmp_path):
                               "FAKE_FIFO": str(tmp_path / "target.fifo"),
                               "FAKE_PIDFILE": str(tmp_path / "target.pid")})
         assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+        assert harness.read_bytes() == campaign_binary, "jackalope.sh rewrote the campaign's harness"
+        assert (tmp_path / "out" / "bin" / "imageio_fuzzer").is_file()
         target = int((tmp_path / "target.pid").read_text())
         deadline = time.monotonic() + 5
         while _alive(target) and time.monotonic() < deadline:

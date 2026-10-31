@@ -246,9 +246,13 @@ python tools/mac_campaign/run.py --target mac:imageio \
 Two stages because the tools interfere: TinyInst + Guard Malloc in one process
 dropped from ~21,000 to 72 executions per minute. Instrumented modules default
 to where parsing really happens (`ImageIO AppleJPEG`, `libFontParser.dylib
-CoreText`, `AudioToolboxCore AudioCodecs`, `CoreGraphics`). The wrapper signs
-the harness with `debuggable.entitlements` (get-task-allow) so the same-user
-fuzzer can attach without root, and passes `-generate_unwind`: without it,
+CoreText`, `AudioToolboxCore AudioCodecs`, `CoreGraphics`). The wrapper builds
+its own copy of the harness in `<out>/bin` and signs it with
+`debuggable.entitlements` (get-task-allow) so the same-user fuzzer can attach
+without root. Rebuilding and re-signing the shared `build/<fw>_fuzzer` would
+rewrite the binary a running run.py campaign keeps exec'ing; with the private
+copy, the two stages can run at the same time. It also passes
+`-generate_unwind`: without it,
 ImageIO's internal C++ exceptions could not unwind through instrumented code
 and every malformed input aborted as a fake crash
 (`terminating due to uncaught exception of type int`). Measured: 33k code
@@ -265,7 +269,8 @@ the PC, and `?` frames.
 The wrapper therefore freezes Jackalope, SIGKILLs only the targets it spawned
 (SIGKILL writes no crash report), then kills Jackalope. It never kills by
 harness path: the old `pkill -f <harness>` also killed run.py campaigns using
-the same binary.
+the same binary. (With the private copy, a path match could no longer reach a
+campaign anyway.)
 
 Measured with a 20 s ImageIO run: the old teardown killed a bystander using the
 same harness and wrote 3–4 fake reports per run. The new one wrote none and left
