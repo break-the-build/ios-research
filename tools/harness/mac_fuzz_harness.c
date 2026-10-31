@@ -1248,6 +1248,9 @@ static void (*p_CTFontDrawGlyphs)(CTFontRef, const uint16_t *, const IOSR_CGPoin
                                   size_t, CGContextRef) = NULL;
 static void (*p_CTLineDraw)(CTLineRef, CGContextRef) = NULL;
 static void (*p_CGContextSetTextPosition)(CGContextRef, double, double) = NULL;
+/* bool parameters: one byte, like the bool results above. */
+static void (*p_CGContextSetShouldAntialias)(CGContextRef, unsigned char) = NULL;
+static void (*p_CGContextSetShouldSmoothFonts)(CGContextRef, unsigned char) = NULL;
 static CGContextRef (*p_CGBitmapContextCreate)(void *, size_t, size_t, size_t, size_t,
                                                CGColorSpaceRef, uint32_t) = NULL;
 static CGColorSpaceRef (*p_CGColorSpaceCreateDeviceRGB)(void) = NULL;
@@ -1468,8 +1471,24 @@ static long draw_variation_extremes(CTFontDescriptorRef desc, CTFontRef font) {
     return ink;
 }
 
+/* The glyph grid again with antialiasing and font smoothing off. Only aliased
+ * rendering runs the TrueType bytecode interpreter (fpgm, prep, glyph
+ * programs): measured on Arial, 30 of 90 hinting edits changed the aliased
+ * output and none changed the antialiased one. CVE-2023-41990 was in that
+ * interpreter. */
+static long draw_aliased(CTFontRef font) {
+    if (!p_CGContextSetShouldAntialias || !p_CGContextSetShouldSmoothFonts) return 0;
+    IOSR_Canvas c;
+    if (!canvas_open(&c)) return 0;
+    p_CGContextSetShouldAntialias(c.ctx, 0);
+    p_CGContextSetShouldSmoothFonts(c.ctx, 0);
+    draw_glyph_grid(font, c.ctx);
+    return canvas_close(&c);
+}
+
 /* Rasterize the font: glyph grid plus a shaped line of its own characters at the
- * default instance, then the variation extremes. Returns inked bytes. */
+ * default instance, the grid again aliased (hinting), then the variation
+ * extremes. Returns inked bytes. */
 static long rasterize(CTFontDescriptorRef desc) {
     if (!p_CTFontGetGlyphCount || !p_CTFontDrawGlyphs || !p_CTLineDraw
         || !p_CGContextSetTextPosition || !p_CGBitmapContextCreate
@@ -1489,6 +1508,7 @@ static long rasterize(CTFontDescriptorRef desc) {
         }
         ink += canvas_close(&c);
     }
+    ink += draw_aliased(font);
     ink += draw_variation_extremes(desc, font);
     p_CFRelease(font);
     return ink;
@@ -1525,6 +1545,8 @@ static int resolve_target(void) {
     p_CTFontDrawGlyphs = dlsym(fw_handle, "CTFontDrawGlyphs");
     p_CTLineDraw = dlsym(fw_handle, "CTLineDraw");
     p_CGContextSetTextPosition = dlsym(cg, "CGContextSetTextPosition");
+    p_CGContextSetShouldAntialias = dlsym(cg, "CGContextSetShouldAntialias");
+    p_CGContextSetShouldSmoothFonts = dlsym(cg, "CGContextSetShouldSmoothFonts");
     p_CGBitmapContextCreate = dlsym(cg, "CGBitmapContextCreate");
     p_CGColorSpaceCreateDeviceRGB = dlsym(cg, "CGColorSpaceCreateDeviceRGB");
     p_CGColorSpaceRelease = dlsym(cg, "CGColorSpaceRelease");

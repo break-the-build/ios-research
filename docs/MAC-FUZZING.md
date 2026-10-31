@@ -190,9 +190,9 @@ from a frame-pointer walk with module+offset (stable across ASLR), so
 - Allocations are 16-byte aligned by default: overflows of 1–15 bytes into the
   alignment slack are missed. `MALLOC_STRICT_SIZE=1` is byte-exact but breaks
   code that relies on aligned pointers (its own banner says so): on macOS 26.x it
-  crashes the imageio, audiotoolbox and coregraphics harnesses on *valid* input
-  (`_Block_release` on an XPC reply thread, `findCFBurstTrieList`), so only
-  coretext can use it. `MALLOC_PROTECT_BEFORE=1` guards the start of each
+  crashes all four harnesses on *valid* input (`_Block_release` on an XPC reply
+  thread, `findCFBurstTrieList`; CoreText on real fonts), so it is not used.
+  `MALLOC_PROTECT_BEFORE=1` guards the start of each
   allocation (underflows) instead — alternate campaigns. The detection canary
   below checks each combination.
 - Overflow onto the guard page and use-after-free both fault as SIGSEGV/SIGBUS;
@@ -232,7 +232,8 @@ ORACLES="default before" tools/mac_campaign/canary_all.sh                # every
 
 Measured on macOS 26.x: all four frameworks pass under the default and
 `MALLOC_PROTECT_BEFORE` oracles; under `MALLOC_STRICT_SIZE` only coretext
-passes. Its first run also caught a classification bug: the strict-mode banner
+passes, and only because its negative control is one small font: real fonts
+crash under strict mode too. Its first run also caught a classification bug: the strict-mode banner
 ("Overrunning a buffer will cause an immediate crash") was read as a corruption
 diagnosis, labeling every strict-mode crash `OUT_OF_BOUNDS_WRITE`.
 
@@ -290,6 +291,48 @@ result and property ID against the SDK in CI.
   variable-font instancing (gvar, CFF2 blend, HVAR/MVAR, avar), none of which
   outlines alone touch. Cost: about 16 ms per valid font under Guard Malloc
   (3 ms before). Rejected inputs pay much less.
+- **CoreText also draws aliased.** Only rendering with antialiasing and font
+  smoothing off runs the TrueType bytecode interpreter (`fpgm`, `prep`, glyph
+  programs). Measured on Arial: 0 of 90 hinting edits changed the antialiased
+  output, 30 of 90 changed the aliased one. So the glyph grid is drawn a
+  second time, aliased. CVE-2023-41990 (exploited in the wild) was in that
+  interpreter.
+
+### Lane generators (`tools/gen/`)
+
+Structured generators for the research lanes, with a shared decode gate:
+
+```bash
+python tools/gen/fonts.py /System/Library/Fonts/Supplemental/Arial.ttf --out v/   # lane 5
+python tools/gen/dng.py mismatch my-proraw.dng --out v/                          # lane 1
+python tools/gen/gate.py --target mac:coretext v/ --ok ok/ --crashes crashes/
+python tools/gen/rawsweep.py raw/*.dng raw/*.nef --work w/ --crashes leads/ \
+    --workers 12 --all-tags --makernote 40                                     # lane 1, streaming
+```
+
+- `fonts.py`: **table** variants change bytes inside one table (boundary
+  values, bit flips, truncation) and fix its directory entry; **hint** variants
+  edit TrueType bytecode at instruction level (insert, delete, duplicate,
+  replace, boundary pushes including the font's `maxp` limits) and rebuild
+  `glyf`/`loca`. Measured: 1,240 of 1,260 variants of Arial, Georgia and
+  Verdana decode; 47 of 120 hinting variants change the aliased rendering.
+- `dng.py`: `mismatch` patches one TIFF tag or lossless-JPEG header field per
+  variant, plus the inconsistent pairs (SamplesPerPixel/Nf,
+  BitsPerSample/P, ...) behind CVE-2025-43300. `--all-tags` adds every other
+  SHORT/LONG value in every IFD (IFD chain, SubIFDs, EXIF IFD) and
+  `--makernote N` adds byte edits inside the MakerNote, so any TIFF-based
+  camera RAW works (DNG, CR2, NEF, ARW, PEF, SRW, ORF, RW2; either byte order).
+  `base` writes DNGs from scratch, but on macOS 26.x ImageIO treats them as
+  plain TIFF and never loads RawCamera. Real RAW files do reach it: a public
+  CC0 iPhone 12 Pro ProRAW from raw.pixls.us loads RawCamera, and corrupting
+  its raw tiles changes the decoded output.
+- `rawsweep.py`: the same variants, streamed: a few at a time are written,
+  run on several workers and deleted unless they crash or hang (variants of a
+  30 MB RAW would otherwise fill the disk). Measured on that ProRAW: 596
+  variants in 94 s and, with `--all-tags --makernote 40`, 1,246 in 184 s on
+  12 workers, about 95% decoded.
+- `gate.py`: decode rate per variant kind; files that crash at the gate are
+  copied out as candidates.
 
 ## Framework coverage: Jackalope (two-stage)
 
