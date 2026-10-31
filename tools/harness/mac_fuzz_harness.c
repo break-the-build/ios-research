@@ -116,6 +116,43 @@ static long count_nonzero(const uint8_t *p, size_t n) {
     return c;
 }
 
+/* Uninitialized-memory oracle (tools/mac_campaign/uninit.py). With
+ * IOSR_DIGEST=1 the driver prints "DIGEST <i> <hex>", an FNV-1a hash of every
+ * output pixel buffer. A framework that copies uninitialized heap into its
+ * output gives different digests with and without MALLOC_FILL_SPACE (which
+ * fills each new allocation with 0x55), and the same digest run to run.
+ * IOSR_UNINIT_CANARY=1 is the positive control: output buffers are malloc'd,
+ * not calloc'd, with one extra row the framework never writes, so every input
+ * must show up as a hit. */
+static uint64_t g_digest = 0;
+static int g_digested = 0;
+
+__attribute__((unused))
+static void digest_fold(const uint8_t *p, size_t n) {
+    uint64_t h = g_digested ? g_digest : 0xcbf29ce484222325ULL;
+    for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 0x100000001b3ULL;
+    g_digest = h;
+    g_digested = 1;
+}
+
+__attribute__((unused))
+static int uninit_canary(void) {
+    const char *v = getenv("IOSR_UNINIT_CANARY");
+    return v && strcmp(v, "1") == 0;
+}
+
+/* An output buffer of `rows` rows of `row_bytes`: zeroed, or (canary) left
+ * uninitialized with one extra row. *alloc_bytes is what to digest. */
+__attribute__((unused))
+static uint8_t *output_buffer(size_t rows, size_t row_bytes, size_t *alloc_bytes) {
+    if (uninit_canary()) {
+        *alloc_bytes = (rows + 1) * row_bytes;
+        return malloc(*alloc_bytes);
+    }
+    *alloc_bytes = rows * row_bytes;
+    return calloc(rows, row_bytes);
+}
+
 static void *cf_handle = NULL;
 static void *fw_handle = NULL;
 
@@ -361,7 +398,8 @@ static int decode_all_frames(CFDataRef input) {
         if (h > IOSR_IMGIO_MAX_DIM) h = IOSR_IMGIO_MAX_DIM;
         if (w && h) {
             CGColorSpaceRef cs = p_CGColorSpaceCreateDeviceRGB();
-            uint8_t *pixels = calloc(w * h, 4);
+            size_t bytes = 0;
+            uint8_t *pixels = output_buffer(h, w * 4, &bytes);
             if (cs && pixels) {
                 CGContextRef ctx = p_CGBitmapContextCreate(
                     pixels, w, h, 8, w * 4, cs, 2 /* premul first */);
@@ -370,6 +408,7 @@ static int decode_all_frames(CFDataRef input) {
                     p_CGContextDrawImage(ctx, rect, img);   /* full pixel decode */
                     p_CGContextRelease(ctx);
                     g_depth_value += count_nonzero(pixels, w * h * 4);
+                    digest_fold(pixels, bytes);
                     decoded = 1;
                 }
             }
@@ -1298,11 +1337,11 @@ static int shape_line(CTFontRef font, CFStringRef text, CGContextRef canvas) {
 #define IOSR_CT_PER_SCRIPT 8
 #define IOSR_CF_NUMBER_DOUBLE 13   /* kCFNumberDoubleType */
 
-typedef struct { uint8_t *px; CGContextRef ctx; } IOSR_Canvas;
+typedef struct { uint8_t *px; CGContextRef ctx; size_t bytes; } IOSR_Canvas;
 
 static int canvas_open(IOSR_Canvas *c) {
     c->ctx = NULL;
-    c->px = calloc((size_t)IOSR_CT_CANVAS * IOSR_CT_CANVAS, 4);
+    c->px = output_buffer(IOSR_CT_CANVAS, (size_t)IOSR_CT_CANVAS * 4, &c->bytes);
     CGColorSpaceRef cs = p_CGColorSpaceCreateDeviceRGB();
     if (c->px && cs)
         c->ctx = p_CGBitmapContextCreate(c->px, IOSR_CT_CANVAS, IOSR_CT_CANVAS, 8,
@@ -1317,6 +1356,7 @@ static long canvas_close(IOSR_Canvas *c) {
     if (!c->ctx) return 0;
     p_CGContextRelease(c->ctx);
     long ink = count_nonzero(c->px, (size_t)IOSR_CT_CANVAS * IOSR_CT_CANVAS * 4);
+    digest_fold(c->px, c->bytes);
     free(c->px);
     c->px = NULL;
     c->ctx = NULL;
@@ -1613,6 +1653,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     g_last_decoded = 0;
     g_depth_name = NULL;
     g_depth_value = 0;
+    g_digest = 0;
+    g_digested = 0;
     if (!g_ready && !resolve_target()) return 0;
     if (canary_requested()) {
         g_last_decoded = run_canary(data, size);
@@ -1686,6 +1728,9 @@ static int run_one_file(const char *path, int index) {
                g_depth_name, g_depth_value);
     else
         printf("DONE %d %s\n", index, g_last_decoded ? "decoded" : "rejected");
+    const char *digest = getenv("IOSR_DIGEST");
+    if (digest && strcmp(digest, "1") == 0 && g_digested)
+        printf("DIGEST %d %016llx\n", index, (unsigned long long)g_digest);
     fflush(stdout);
     return 0;
 }

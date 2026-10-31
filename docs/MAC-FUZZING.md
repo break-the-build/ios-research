@@ -236,6 +236,30 @@ passes. Its first run also caught a classification bug: the strict-mode banner
 ("Overrunning a buffer will cause an immediate crash") was read as a corruption
 diagnosis, labeling every strict-mode crash `OUT_OF_BOUNDS_WRITE`.
 
+### Uninitialized-memory differential
+
+A decoder that copies uninitialized heap into its output never crashes, but it
+discloses process memory, a recurring class in Apple's security notes. Guard
+Malloc hands out zeroed fresh pages, and `MALLOC_FILL_SPACE=1` fills every new
+allocation with 0x55 instead. With `IOSR_DIGEST=1` the ImageIO and CoreText
+harnesses print `DIGEST <i> <hex>`, an FNV-1a hash of every output pixel
+buffer. `tools/mac_campaign/uninit.py` runs each file twice plainly and twice
+with fill-space: both pairs agree and differ from each other → **hit**; a pair
+disagrees → unstable; all four agree → clean.
+
+```bash
+python tools/mac_campaign/uninit.py --target mac:imageio <dir> --out hits/ --report r.json
+python tools/mac_campaign/uninit.py --target mac:coretext --controls-only   # 0 pass, 4 fail
+```
+
+Controls run first, like the detection canary: `IOSR_UNINIT_CANARY=1` leaves
+the output buffers uninitialized with one extra row the framework never
+writes, which must be a hit; the same seed without it must be clean. Without
+Guard Malloc the canary's bytes don't track fill-space, the controls fail, and
+nothing is scanned. Measured: controls pass for both targets, and 60 valid
+system images and 25 system fonts were all clean (4 decodes each, ~2 s per 60
+images).
+
 ### Depth metric
 
 Each decoded input reports how deep it got on its `DONE` line —
