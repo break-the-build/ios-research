@@ -106,6 +106,15 @@ typedef struct { CFIndex loc, len; } IOSR_CFRange;
 static const char *g_depth_name = NULL;
 static long g_depth_value = 0;
 
+/* Count non-zero bytes so a pixel metric proves something was really drawn
+ * (ImageIO and CoreText; unused by the other targets). */
+__attribute__((unused))
+static long count_nonzero(const uint8_t *p, size_t n) {
+    long c = 0;
+    for (size_t i = 0; i < n; i++) c += p[i] != 0;
+    return c;
+}
+
 static void *cf_handle = NULL;
 static void *fw_handle = NULL;
 
@@ -179,17 +188,96 @@ static int resolve_target(void) {
 
 #define IOSR_IMGIO_MAX_DIM 512u  /* bound decode memory */
 
-/* Count non-zero bytes so the depth metric proves pixels were really decoded. */
-static long count_nonzero(const uint8_t *p, size_t n) {
-    long c = 0;
-    for (size_t i = 0; i < n; i++) c += p[i] != 0;
-    return c;
+/* PNG chunk CRCs. ImageIO rejects a PNG whose IHDR CRC does not match
+ * (measured: one flipped IHDR width bit -> rejected; the same file with its CRC
+ * recomputed -> decoded), and blind mutation practically never repairs a CRC,
+ * so every mutated header -- width, height, bit depth, color type, interlace --
+ * was turned away at the door. Every complete chunk's CRC is recomputed before
+ * decoding. IOSR_PNG_CRC_FIXUP=0 turns this off; IOSR_SAVE_INPUT=<path> writes
+ * the bytes ImageIO actually received (the file to attach to a report). */
+static const uint8_t kPNGSignature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+
+static uint32_t iosr_crc32(const uint8_t *p, size_t n) {
+    static uint32_t table[256];
+    if (!table[1]) {
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            table[i] = c;
+        }
+    }
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; i++) c = table[(c ^ p[i]) & 0xFFu] ^ (c >> 8);
+    return c ^ 0xFFFFFFFFu;
 }
 
+static uint32_t png_be32(const uint8_t *p) {
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+/* Rewrite the CRC of every complete chunk; returns how many changed. A chunk
+ * whose length runs past the end is left alone (and ends the walk). */
+static int png_fix_crcs(uint8_t *buf, size_t size) {
+    int changed = 0;
+    size_t pos = sizeof kPNGSignature;
+    while (pos + 12 <= size) {
+        uint32_t len = png_be32(buf + pos);
+        if (len > size - pos - 12) break;
+        uint32_t crc = iosr_crc32(buf + pos + 4, (size_t)len + 4);   /* type + data */
+        uint8_t *at = buf + pos + 8 + len;
+        if (png_be32(at) != crc) {
+            at[0] = (uint8_t)(crc >> 24); at[1] = (uint8_t)(crc >> 16);
+            at[2] = (uint8_t)(crc >> 8);  at[3] = (uint8_t)crc;
+            changed++;
+        }
+        pos += 12 + (size_t)len;
+    }
+    return changed;
+}
+
+/* A CRC-repaired copy of a PNG input, or NULL if it isn't a PNG, the fix-up is
+ * off, or every CRC already matched. */
+static uint8_t *png_repaired_copy(const uint8_t *data, size_t size) {
+    const char *opt = getenv("IOSR_PNG_CRC_FIXUP");
+    if ((opt && strcmp(opt, "0") == 0) || size < sizeof kPNGSignature
+        || memcmp(data, kPNGSignature, sizeof kPNGSignature) != 0)
+        return NULL;
+    uint8_t *copy = malloc(size);
+    if (!copy) return NULL;
+    memcpy(copy, data, size);
+    if (png_fix_crcs(copy, size)) return copy;
+    free(copy);
+    return NULL;
+}
+
+static void save_input(const uint8_t *p, size_t n) {
+    const char *path = getenv("IOSR_SAVE_INPUT");
+    if (!path || !*path) return;
+    FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "harness: cannot write IOSR_SAVE_INPUT=%s\n", path); return; }
+    fwrite(p, 1, n, f);
+    fclose(f);
+}
+
+static int decode_all_frames(CFDataRef input);
+
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
-    (void)data; (void)size;
     g_depth_name = "pixels";
-    CGImageSourceRef src = p_CGImageSourceCreateWithData(cfdata, NULL);
+    CFDataRef input = cfdata;
+    uint8_t *repaired = png_repaired_copy(data, size);
+    if (repaired) {
+        input = p_CFDataCreate(NULL, repaired, (CFIndex)size);
+        if (!input) { free(repaired); repaired = NULL; input = cfdata; }
+    }
+    save_input(repaired ? repaired : data, size);
+    int decoded = decode_all_frames(input);
+    if (input != cfdata) p_CFRelease(input);
+    free(repaired);
+    return decoded;
+}
+
+static int decode_all_frames(CFDataRef input) {
+    CGImageSourceRef src = p_CGImageSourceCreateWithData(input, NULL);
     if (!src) return 0;
     int decoded = 0;
     size_t frames = p_CGImageSourceGetCount(src);
@@ -275,11 +363,11 @@ static void (*p_CGPDFContentStreamRelease)(CGPDFContentStreamRef) = NULL;
 static CGPDFScannerRef (*p_CGPDFScannerCreate)(CGPDFContentStreamRef,
                                                CGPDFOperatorTableRef,
                                                void *) = NULL;
-static int (*p_CGPDFScannerScan)(CGPDFScannerRef) = NULL;
+static unsigned char (*p_CGPDFScannerScan)(CGPDFScannerRef) = NULL;   /* bool */
 static void (*p_CGPDFScannerRelease)(CGPDFScannerRef) = NULL;
 /* Operand pops are optional: numbers/names carry no ownership burden. */
-static int (*p_CGPDFScannerPopNumber)(CGPDFScannerRef, double *) = NULL;
-static int (*p_CGPDFScannerPopName)(CGPDFScannerRef, const char **) = NULL;
+static unsigned char (*p_CGPDFScannerPopNumber)(CGPDFScannerRef, double *) = NULL;
+static unsigned char (*p_CGPDFScannerPopName)(CGPDFScannerRef, const char **) = NULL;
 
 static int resolve_target(void) {
     if (!resolve_common()) return 0;
@@ -928,8 +1016,12 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
 
 /* CoreText path: parse untrusted font data. CTFontManagerCreateFontDescriptorsFromData
  * forces full sfnt table parsing (head/maxp/cmap/...); we then map characters to
- * glyphs and extract an outline path, exercising glyf/CFF shape decoding under
- * ASan/UBSan. Fonts are a classic untrusted-input surface shared by iOS/macOS. */
+ * glyphs and extract an outline path, shape text through the layout engine, and
+ * RASTERIZE: a sample of glyphs plus a line of the font's own characters are
+ * drawn into a bitmap, at the default instance and at each variation extreme.
+ * Outlines alone never reach bitmap strikes (sbix/bdat), color glyphs
+ * (COLR/CPAL, SVG) or variable-font instancing. The depth metric is the number
+ * of inked bytes. Fonts are a classic untrusted-input surface shared by iOS/macOS. */
 typedef CFTypeRef CTFontDescriptorRef;
 typedef CFTypeRef CTFontRef;
 typedef CFTypeRef CFArrayRef;
@@ -944,8 +1036,8 @@ typedef struct { double a, b, c, d, tx, ty; } IOSR_CGAffineTransform;
 static CFArrayRef (*p_CTFontManagerCreateFontDescriptorsFromData)(CFDataRef) = NULL;
 static CTFontRef (*p_CTFontCreateWithFontDescriptor)(CTFontDescriptorRef,
                                                      double, void *) = NULL;
-static int (*p_CTFontGetGlyphsForCharacters)(CTFontRef, const uint16_t *,
-                                             uint16_t *, CFIndex) = NULL;
+static unsigned char (*p_CTFontGetGlyphsForCharacters)(CTFontRef, const uint16_t *,
+                                                       uint16_t *, CFIndex) = NULL;  /* bool */
 static CGPathRef (*p_CTFontCreatePathForGlyph)(CTFontRef, uint16_t,
                                                const IOSR_CGAffineTransform *) = NULL;
 static CFIndex (*p_CFArrayGetCount)(CFArrayRef) = NULL;
@@ -965,7 +1057,6 @@ static CTFramesetterRef (*p_CTFramesetterCreateWithAttributedString)(
 static CTFrameRef (*p_CTFramesetterCreateFrame)(CTFramesetterRef,
                                                 IOSR_CFRange,
                                                 CGPathRef, void *) = NULL;
-static CFArrayRef (*p_CTFrameGetLines)(CTFrameRef) = NULL;
 static CGMutablePathRef (*p_CGPathCreateMutable)(void) = NULL;
 static void (*p_CGPathAddRect)(CGMutablePathRef, const IOSR_CGAffineTransform *,
                                IOSR_CGRect) = NULL;
@@ -980,21 +1071,48 @@ static CFStringRef p_kCTFontAttributeName = NULL;
 static const void *p_kCFTypeDictionaryKeyCallBacks = NULL;
 static const void *p_kCFTypeDictionaryValueCallBacks = NULL;
 
+/* Rasterization. CGPoint is two CGFloats (doubles); CTFontDrawGlyphs takes an
+ * ARRAY of them (a pointer is right there), CGContextSetTextPosition takes x
+ * and y by value in d0/d1. Boolean-returning calls are declared unsigned char:
+ * only the low byte of w0 is defined. */
+typedef CFTypeRef CGContextRef;
+typedef CFTypeRef CGColorSpaceRef;
+typedef CFTypeRef CFNumberRef;
+typedef struct { double x, y; } IOSR_CGPoint;
+static CFIndex (*p_CTFontGetGlyphCount)(CTFontRef) = NULL;
+static void (*p_CTFontDrawGlyphs)(CTFontRef, const uint16_t *, const IOSR_CGPoint *,
+                                  size_t, CGContextRef) = NULL;
+static void (*p_CTLineDraw)(CTLineRef, CGContextRef) = NULL;
+static void (*p_CGContextSetTextPosition)(CGContextRef, double, double) = NULL;
+static CGContextRef (*p_CGBitmapContextCreate)(void *, size_t, size_t, size_t, size_t,
+                                               CGColorSpaceRef, uint32_t) = NULL;
+static CGColorSpaceRef (*p_CGColorSpaceCreateDeviceRGB)(void) = NULL;
+static void (*p_CGColorSpaceRelease)(CGColorSpaceRef) = NULL;
+static void (*p_CGContextRelease)(CGContextRef) = NULL;
+static CFStringRef (*p_CFStringCreateWithCharacters)(void *, const uint16_t *, CFIndex) = NULL;
+/* Variable-font instancing. */
+static CFArrayRef (*p_CTFontCopyVariationAxes)(CTFontRef) = NULL;
+static const void *(*p_CFDictionaryGetValue)(CFDictionaryRef, const void *) = NULL;
+static unsigned char (*p_CFNumberGetValue)(CFNumberRef, CFIndex, void *) = NULL;
+static CTFontDescriptorRef (*p_CTFontDescriptorCreateCopyWithVariation)(
+    CTFontDescriptorRef, CFNumberRef, double) = NULL;
+static CFStringRef p_kCTFontVariationAxisIdentifierKey = NULL;
+static CFStringRef p_kCTFontVariationAxisMinimumValueKey = NULL;
+static CFStringRef p_kCTFontVariationAxisMaximumValueKey = NULL;
+
 /* Shape an attributed line through the layout engine - drives feature-driven
  * glyph substitution (morx/GSUB) and cluster mapping, not merely outline
- * extraction (#228 deep decode). Runs while `font` is alive: the NULL-callback
- * dictionary does not retain its value, and CFAttributedStringCreate copies
- * (retains) attributes into its own storage, released below. */
-static int shape_line(CTFontRef font) {
+ * extraction (#228 deep decode) - and, given a canvas, draw it. Runs while
+ * `font` is alive: the NULL-callback dictionary does not retain its value, and
+ * CFAttributedStringCreate copies (retains) attributes into its own storage,
+ * released below. */
+static int shape_line(CTFontRef font, CFStringRef text, CGContextRef canvas) {
     if (!p_CFAttributedStringCreate || !p_CTLineCreateWithAttributedString
         || !p_CFDictionaryCreateMutable || !p_CFDictionarySetValue
-        || !p_CFStringCreateWithCString || !p_kCTFontAttributeName
+        || !p_kCTFontAttributeName
         || !p_kCFTypeDictionaryKeyCallBacks
-        || !p_kCFTypeDictionaryValueCallBacks)
+        || !p_kCFTypeDictionaryValueCallBacks || !text)
         return 0;
-    CFStringRef text = p_CFStringCreateWithCString(
-        NULL, "AgQyffiW10", 0x00000600 /* kCFStringEncodingUTF8 */);
-    if (!text) return 0;
     int shaped = 0;
     CFMutableDictionaryRef dict = p_CFDictionaryCreateMutable(
         NULL, 1, p_kCFTypeDictionaryKeyCallBacks,
@@ -1005,7 +1123,14 @@ static int shape_line(CTFontRef font) {
         CFAttributedStringRef as = p_CFAttributedStringCreate(NULL, text, dict);
         if (as) {
             CTLineRef line = p_CTLineCreateWithAttributedString(as);
-            if (line) { p_CFRelease(line); shaped = 1; }
+            if (line) {
+                if (canvas) {
+                    p_CGContextSetTextPosition(canvas, 4.0, 4.0);
+                    p_CTLineDraw(line, canvas);
+                }
+                p_CFRelease(line);
+                shaped = 1;
+            }
             /* Full typesetting (#228 §2): framesetter lays the string into a
              * frame path — line-breaking, alignment, per-line glyph runs over
              * the parsed font, not merely descriptor parse. */
@@ -1023,8 +1148,6 @@ static int shape_line(CTFontRef font) {
                         CTFrameRef frame =
                             p_CTFramesetterCreateFrame(fs, all, path, NULL);
                         if (frame) {
-                            CFArrayRef lines = p_CTFrameGetLines ? p_CTFrameGetLines(frame) : NULL;
-                            if (lines) g_depth_value += p_CFArrayGetCount(lines);
                             p_CFRelease(frame);
                             shaped = 1;
                         }
@@ -1037,8 +1160,173 @@ static int shape_line(CTFontRef font) {
         }
         p_CFRelease(dict);
     }
-    p_CFRelease(text);
     return shaped;
+}
+
+#define IOSR_CT_CANVAS 256u        /* px square; glyphs sit in 32 px cells */
+#define IOSR_CT_CELL 32u
+#define IOSR_CT_GRID (IOSR_CT_CANVAS / IOSR_CT_CELL)
+#define IOSR_CT_MAX_GLYPHS 64u     /* bound per-instance raster work */
+#define IOSR_CT_DRAW_SIZE 24.0     /* pt: large enough to pick real bitmap strikes */
+#define IOSR_CT_MAX_AXES 16
+#define IOSR_CT_MAX_TEXT 48
+#define IOSR_CT_PER_SCRIPT 8
+#define IOSR_CF_NUMBER_DOUBLE 13   /* kCFNumberDoubleType */
+
+typedef struct { uint8_t *px; CGContextRef ctx; } IOSR_Canvas;
+
+static int canvas_open(IOSR_Canvas *c) {
+    c->ctx = NULL;
+    c->px = calloc((size_t)IOSR_CT_CANVAS * IOSR_CT_CANVAS, 4);
+    CGColorSpaceRef cs = p_CGColorSpaceCreateDeviceRGB();
+    if (c->px && cs)
+        c->ctx = p_CGBitmapContextCreate(c->px, IOSR_CT_CANVAS, IOSR_CT_CANVAS, 8,
+                                         IOSR_CT_CANVAS * 4, cs, 2 /* premul first */);
+    if (cs) p_CGColorSpaceRelease(cs);
+    if (!c->ctx) { free(c->px); c->px = NULL; }
+    return c->ctx != NULL;
+}
+
+/* Release the canvas; returns how many bytes were inked. */
+static long canvas_close(IOSR_Canvas *c) {
+    if (!c->ctx) return 0;
+    p_CGContextRelease(c->ctx);
+    long ink = count_nonzero(c->px, (size_t)IOSR_CT_CANVAS * IOSR_CT_CANVAS * 4);
+    free(c->px);
+    c->px = NULL;
+    c->ctx = NULL;
+    return ink;
+}
+
+/* Draw a deterministic sample of glyph IDs -- the first 32 and 32 more spread
+ * across the rest -- whether or not cmap maps them, so every glyph format the
+ * font carries is rasterized: glyf/CFF/CFF2 outlines, sbix and bdat bitmap
+ * strikes, COLR/CPAL and SVG color glyphs. */
+static void draw_glyph_grid(CTFontRef font, CGContextRef ctx) {
+    CFIndex count = p_CTFontGetGlyphCount(font);
+    if (count <= 0) return;
+    if (count > 0xFFFF) count = 0xFFFF;               /* glyph IDs are 16-bit */
+    uint16_t glyphs[IOSR_CT_MAX_GLYPHS];
+    IOSR_CGPoint pos[IOSR_CT_MAX_GLYPHS];
+    size_t n = 0, half = IOSR_CT_MAX_GLYPHS / 2;
+    for (; n < half && (CFIndex)n < count; n++) glyphs[n] = (uint16_t)n;
+    if (count > (CFIndex)IOSR_CT_MAX_GLYPHS) {
+        for (size_t k = 0; k < half; k++)
+            glyphs[n++] = (uint16_t)(half + k * (size_t)(count - (CFIndex)half) / half);
+    } else {
+        for (; (CFIndex)n < count; n++) glyphs[n] = (uint16_t)n;
+    }
+    for (size_t i = 0; i < n; i++) {
+        pos[i].x = (double)((i % IOSR_CT_GRID) * IOSR_CT_CELL + 4);
+        pos[i].y = (double)((i / IOSR_CT_GRID) * IOSR_CT_CELL + 6);
+    }
+    p_CTFontDrawGlyphs(font, glyphs, pos, n, ctx);
+}
+
+/* Up to 8 characters the font itself maps from each of several scripts whose
+ * shaping is stateful (Arabic joining, Indic reordering, Hebrew bidi, Hangul,
+ * Thai), plus Latin, symbols and presentation forms -- so layout runs the
+ * font's OWN morx/GSUB/GPOS rules instead of falling back to another font. */
+static const uint16_t kScriptRanges[][2] = {
+    {0x0041, 0x007A}, {0x00C0, 0x017F}, {0x0391, 0x03C9}, {0x0410, 0x044F},
+    {0x05D0, 0x05EA}, {0x0621, 0x064A}, {0x064B, 0x0652}, {0x0915, 0x0939},
+    {0x093E, 0x094D}, {0x0E01, 0x0E3A}, {0x1100, 0x11FF}, {0x2190, 0x21FF},
+    {0x2600, 0x27BF}, {0x3041, 0x30FF}, {0xAC00, 0xACFF}, {0xFB00, 0xFB4F},
+};
+
+static CFStringRef font_own_text(CTFontRef font) {
+    uint16_t text[IOSR_CT_MAX_TEXT];
+    CFIndex n = 0;
+    size_t nranges = sizeof kScriptRanges / sizeof kScriptRanges[0];
+    for (size_t r = 0; r < nranges && n < IOSR_CT_MAX_TEXT; r++) {
+        uint16_t chars[256], glyphs[256];
+        CFIndex cnt = 0, taken = 0;
+        for (uint32_t ch = kScriptRanges[r][0]; ch <= kScriptRanges[r][1] && cnt < 256; ch++)
+            chars[cnt++] = (uint16_t)ch;
+        memset(glyphs, 0, sizeof glyphs);
+        p_CTFontGetGlyphsForCharacters(font, chars, glyphs, cnt);   /* 0 = unmapped */
+        for (CFIndex i = 0; i < cnt && taken < IOSR_CT_PER_SCRIPT && n < IOSR_CT_MAX_TEXT; i++)
+            if (glyphs[i]) { text[n++] = chars[i]; taken++; }
+    }
+    return n ? p_CFStringCreateWithCharacters(NULL, text, n) : NULL;
+}
+
+/* A copy of `desc` with every variation axis (up to 16) set to the value under
+ * `key` (the axis minimum or maximum), or NULL for a font without axes. */
+static CTFontDescriptorRef instance_at(CTFontDescriptorRef desc, CFArrayRef axes,
+                                       CFStringRef key) {
+    CTFontDescriptorRef cur = NULL;
+    CFIndex n = p_CFArrayGetCount(axes);
+    if (n > IOSR_CT_MAX_AXES) n = IOSR_CT_MAX_AXES;
+    for (CFIndex i = 0; i < n; i++) {
+        CFDictionaryRef axis = (CFDictionaryRef)p_CFArrayGetValueAtIndex(axes, i);
+        CFNumberRef id = axis ? p_CFDictionaryGetValue(axis, p_kCTFontVariationAxisIdentifierKey) : NULL;
+        CFNumberRef v = axis ? p_CFDictionaryGetValue(axis, key) : NULL;
+        double value = 0;
+        if (!id || !v || !p_CFNumberGetValue(v, IOSR_CF_NUMBER_DOUBLE, &value)) continue;
+        CTFontDescriptorRef next =
+            p_CTFontDescriptorCreateCopyWithVariation(cur ? cur : desc, id, value);
+        if (!next) continue;
+        if (cur) p_CFRelease(cur);
+        cur = next;
+    }
+    return cur;
+}
+
+/* Draw the glyph grid at the minimum and at the maximum of every axis:
+ * instancing runs the gvar / CFF2 blend / HVAR / MVAR / avar delta math that
+ * the default instance skips. Returns inked bytes. */
+static long draw_variation_extremes(CTFontDescriptorRef desc, CTFontRef font) {
+    if (!p_CTFontCopyVariationAxes || !p_CTFontDescriptorCreateCopyWithVariation
+        || !p_CFDictionaryGetValue || !p_CFNumberGetValue
+        || !p_kCTFontVariationAxisIdentifierKey || !p_kCTFontVariationAxisMinimumValueKey
+        || !p_kCTFontVariationAxisMaximumValueKey)
+        return 0;
+    CFArrayRef axes = p_CTFontCopyVariationAxes(font);
+    if (!axes) return 0;
+    long ink = 0;
+    CFStringRef keys[2] = {p_kCTFontVariationAxisMinimumValueKey,
+                           p_kCTFontVariationAxisMaximumValueKey};
+    for (int k = 0; k < 2; k++) {
+        CTFontDescriptorRef inst = instance_at(desc, axes, keys[k]);
+        if (!inst) continue;
+        CTFontRef f = p_CTFontCreateWithFontDescriptor(inst, IOSR_CT_DRAW_SIZE, NULL);
+        IOSR_Canvas c;
+        if (f && canvas_open(&c)) {
+            draw_glyph_grid(f, c.ctx);
+            ink += canvas_close(&c);
+        }
+        if (f) p_CFRelease(f);
+        p_CFRelease(inst);
+    }
+    p_CFRelease(axes);
+    return ink;
+}
+
+/* Rasterize the font: glyph grid plus a shaped line of its own characters at the
+ * default instance, then the variation extremes. Returns inked bytes. */
+static long rasterize(CTFontDescriptorRef desc) {
+    if (!p_CTFontGetGlyphCount || !p_CTFontDrawGlyphs || !p_CTLineDraw
+        || !p_CGContextSetTextPosition || !p_CGBitmapContextCreate
+        || !p_CGColorSpaceCreateDeviceRGB || !p_CGColorSpaceRelease
+        || !p_CGContextRelease || !p_CFStringCreateWithCharacters)
+        return 0;
+    CTFontRef font = p_CTFontCreateWithFontDescriptor(desc, IOSR_CT_DRAW_SIZE, NULL);
+    if (!font) return 0;
+    long ink = 0;
+    IOSR_Canvas c;
+    if (canvas_open(&c)) {
+        draw_glyph_grid(font, c.ctx);
+        CFStringRef text = font_own_text(font);
+        if (text) {
+            shape_line(font, text, c.ctx);
+            p_CFRelease(text);
+        }
+        ink += canvas_close(&c);
+    }
+    ink += draw_variation_extremes(desc, font);
+    p_CFRelease(font);
+    return ink;
 }
 
 static int resolve_target(void) {
@@ -1068,7 +1356,27 @@ static int resolve_target(void) {
     p_CTFramesetterCreateWithAttributedString = dlsym(
         fw_handle, "CTFramesetterCreateWithAttributedString");
     p_CTFramesetterCreateFrame = dlsym(fw_handle, "CTFramesetterCreateFrame");
-    p_CTFrameGetLines = dlsym(fw_handle, "CTFrameGetLines");
+    p_CTFontGetGlyphCount = dlsym(fw_handle, "CTFontGetGlyphCount");
+    p_CTFontDrawGlyphs = dlsym(fw_handle, "CTFontDrawGlyphs");
+    p_CTLineDraw = dlsym(fw_handle, "CTLineDraw");
+    p_CGContextSetTextPosition = dlsym(cg, "CGContextSetTextPosition");
+    p_CGBitmapContextCreate = dlsym(cg, "CGBitmapContextCreate");
+    p_CGColorSpaceCreateDeviceRGB = dlsym(cg, "CGColorSpaceCreateDeviceRGB");
+    p_CGColorSpaceRelease = dlsym(cg, "CGColorSpaceRelease");
+    p_CGContextRelease = dlsym(cg, "CGContextRelease");
+    p_CFStringCreateWithCharacters = dlsym(cf_handle, "CFStringCreateWithCharacters");
+    p_CTFontCopyVariationAxes = dlsym(fw_handle, "CTFontCopyVariationAxes");
+    p_CFDictionaryGetValue = dlsym(cf_handle, "CFDictionaryGetValue");
+    p_CFNumberGetValue = dlsym(cf_handle, "CFNumberGetValue");
+    p_CTFontDescriptorCreateCopyWithVariation =
+        dlsym(fw_handle, "CTFontDescriptorCreateCopyWithVariation");
+    /* Like kCTFontAttributeName below: exported globals holding CFStringRefs. */
+    CFStringRef *axis_id = dlsym(fw_handle, "kCTFontVariationAxisIdentifierKey");
+    CFStringRef *axis_min = dlsym(fw_handle, "kCTFontVariationAxisMinimumValueKey");
+    CFStringRef *axis_max = dlsym(fw_handle, "kCTFontVariationAxisMaximumValueKey");
+    p_kCTFontVariationAxisIdentifierKey = axis_id ? *axis_id : NULL;
+    p_kCTFontVariationAxisMinimumValueKey = axis_min ? *axis_min : NULL;
+    p_kCTFontVariationAxisMaximumValueKey = axis_max ? *axis_max : NULL;
     p_CFDictionaryCreateMutable = dlsym(cf_handle, "CFDictionaryCreateMutable");
     p_CFDictionarySetValue = dlsym(cf_handle, "CFDictionarySetValue");
     p_CFStringCreateWithCString = dlsym(cf_handle, "CFStringCreateWithCString");
@@ -1091,8 +1399,8 @@ static int resolve_target(void) {
 
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     (void)data; (void)size;
-    g_depth_name = "lines";
-    CFArrayRef descs = p_CTFontManagerCreateFontDescriptorsFromData(cfdata);
+    g_depth_name = "pixels";
+    CFArrayRef descs = p_CTFontManagerCreateFontDescriptorsFromData(cfdata);   /* +1 */
     if (!descs) return 0;
     int decoded = 0;
     if (p_CFArrayGetCount(descs) > 0) {
@@ -1114,11 +1422,18 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
                 }
                 /* Deep decode (#228): shape an attributed line through the
                  * layout engine (see shape_line above). */
-                if (shape_line(font)) decoded = 1;
+                CFStringRef text = p_CFStringCreateWithCString
+                    ? p_CFStringCreateWithCString(NULL, "AgQyffiW10",
+                                                  0x00000600 /* kCFStringEncodingUTF8 */)
+                    : NULL;
+                if (shape_line(font, text, NULL)) decoded = 1;
+                if (text) p_CFRelease(text);
                 p_CFRelease(font);
             }
+            g_depth_value += rasterize(desc);
         }
     }
+    p_CFRelease(descs);
     return decoded;
 }
 

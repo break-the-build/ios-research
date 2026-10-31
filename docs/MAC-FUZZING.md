@@ -198,13 +198,33 @@ from a frame-pointer walk with module+offset (stable across ASLR), so
 ### Depth metric
 
 Each decoded input reports how deep it got on its `DONE` line —
-`pixels=N` (ImageIO: non-zero bytes drawn), `lines=N` (CoreText frame layout),
-`frames=N` (AudioToolbox PCM decoded through the codec). It exists because
-several stages silently never ran: a `CGRect`/`CFRange` passed as a pointer
-(ABI bug) made ImageIO draw 0 pixels and CoreText lay out no frame; AudioToolbox
-asked for property `'asbd'` (not a property; `kAudioFilePropertyDataFormat` is
-`'dfmt'`) and so rejected every valid file. `tests/test_mac_harness_abi.py`
-lints every hand-written prototype and property ID against the SDK in CI.
+`pixels=N` (ImageIO: non-zero bytes drawn; CoreText: bytes inked by
+rasterizing the font), `frames=N` (AudioToolbox PCM decoded through the codec).
+It exists because several stages silently never ran: a `CGRect`/`CFRange`
+passed as a pointer (ABI bug) made ImageIO draw 0 pixels and CoreText lay out
+no frame; AudioToolbox asked for property `'asbd'` (not a property;
+`kAudioFilePropertyDataFormat` is `'dfmt'`) and so rejected every valid file.
+`tests/test_mac_harness_abi.py` lints every hand-written prototype, `bool`
+result and property ID against the SDK in CI.
+
+### Reach: what each harness exercises beyond "open"
+
+- **ImageIO repairs PNG chunk CRCs before decoding.** ImageIO rejects a PNG
+  whose IHDR CRC doesn't match, so every blind mutation of the PNG header
+  (width, height, bit depth, color type, interlace) used to be rejected
+  outright. `IOSR_PNG_CRC_FIXUP=0` disables the repair. `IOSR_SAVE_INPUT=<path>`
+  (one input per run) writes the bytes ImageIO actually received: for a PNG
+  crash, *that* file is the standalone reproducer to report, since the saved
+  campaign input still has stale CRCs.
+- **CoreText rasterizes.** Besides outlines and layout, it draws 64 sampled
+  glyph IDs (the first 32 and 32 spread across the font, mapped or not), and a
+  shaped line of up to 48 characters the font itself maps (Latin, Greek,
+  Cyrillic, Hebrew, Arabic, Devanagari, Thai, Hangul, kana, symbols). It then
+  redraws the glyphs at every variation axis's minimum and at its maximum.
+  That reaches bitmap strikes (sbix/bdat), color glyphs (COLR/CPAL, SVG) and
+  variable-font instancing (gvar, CFF2 blend, HVAR/MVAR, avar), none of which
+  outlines alone touch. Cost: about 16 ms per valid font under Guard Malloc
+  (3 ms before). Rejected inputs pay much less.
 
 ## Framework coverage: Jackalope (two-stage)
 
@@ -226,13 +246,35 @@ python tools/mac_campaign/run.py --target mac:imageio \
 Two stages because the tools interfere: TinyInst + Guard Malloc in one process
 dropped from ~21,000 to 72 executions per minute. Instrumented modules default
 to where parsing really happens (`ImageIO AppleJPEG`, `libFontParser.dylib
-CoreText`, `AudioToolboxCore AudioCodecs`, `CoreGraphics`). The wrapper signs
-the harness with `debuggable.entitlements` (get-task-allow) so the same-user
-fuzzer can attach without root, and passes `-generate_unwind`: without it,
+CoreText`, `AudioToolboxCore AudioCodecs`, `CoreGraphics`). The wrapper builds
+its own copy of the harness in `<out>/bin` and signs it with
+`debuggable.entitlements` (get-task-allow) so the same-user fuzzer can attach
+without root. Rebuilding and re-signing the shared `build/<fw>_fuzzer` would
+rewrite the binary a running run.py campaign keeps exec'ing; with the private
+copy, the two stages can run at the same time. It also passes
+`-generate_unwind`: without it,
 ImageIO's internal C++ exceptions could not unwind through instrumented code
 and every malformed input aborted as a fake crash
 (`terminating due to uncaught exception of type int`). Measured: 33k code
 offsets in ImageIO + AppleJPEG in 60 s on 4 threads.
+
+**Teardown.** TinyInst makes the framework's original code non-executable
+inside each target. A target that outlives Jackalope executes that code with
+nothing to handle the fault, and dies with `SIGBUS KERN_PROTECTION_FAILURE` at
+its own PC. That writes an OS crash report that looks like a framework bug.
+23 such reports once sent a scan hunting a bug that didn't exist. The tell is
+`parentProc: "Exited process"`, no `libgmalloc.dylib`, a fault address equal to
+the PC, and `?` frames.
+
+The wrapper therefore freezes Jackalope, SIGKILLs only the targets it spawned
+(SIGKILL writes no crash report), then kills Jackalope. It never kills by
+harness path: the old `pkill -f <harness>` also killed run.py campaigns using
+the same binary. (With the private copy, a path match could no longer reach a
+campaign anyway.)
+
+Measured with a 20 s ImageIO run: the old teardown killed a bystander using the
+same harness and wrote 3–4 fake reports per run. The new one wrote none and left
+the bystander running.
 
 ## Run it
 

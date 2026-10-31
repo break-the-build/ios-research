@@ -104,7 +104,7 @@ def _decode_statuses(stdout: str) -> list[str]:
 
 
 def _accepted_detail(metric: str) -> str:
-    """The depth metric (pixels=/lines=/frames=) proves the deep stage ran."""
+    """The depth metric (pixels=/frames=) proves the deep stage ran."""
     base = "input decoded without a finding"
     return f"{base} ({metric})" if metric else base
 

@@ -23,7 +23,8 @@
 #
 # Environment:
 #   JACKALOPE        path to Jackalope's `fuzzer` (default ~/dev/Jackalope/build/fuzzer)
-#   JACKALOPE_OUT    output directory (default tools/harness/jackalope-out/<fw>)
+#   JACKALOPE_OUT    output directory (default tools/harness/jackalope-out/<fw>);
+#                    the run builds its own harness copy in <out>/bin
 #   JACKALOPE_MODULES  override the instrumented modules (space-separated)
 #
 # Requires: Jackalope built from https://github.com/googleprojectzero/Jackalope
@@ -56,6 +57,31 @@ usage() {
   exit 2
 }
 
+# stop_jackalope <jackalope pid> <harness path> [target pid ...]
+#
+# Stops Jackalope and ONLY the target processes it spawned, targets first.
+# TinyInst leaves the framework's original code non-executable inside each
+# target; a target that outlives Jackalope executes that code with nobody to
+# handle the fault and dies with SIGBUS KERN_PROTECTION_FAILURE at its own PC.
+# Each such death wrote a convincing but fake framework crash report (23 of them
+# sent a whole scan chasing a bug that did not exist). Freezing Jackalope first
+# stops it respawning targets; SIGKILL writes no crash report. Matching by
+# harness path (the old `pkill -f`) also killed any run.py campaign using the
+# same harness binary, so a PID is killed only if it is still running $harness.
+stop_jackalope() {
+  local pid="$1" harness="$2"
+  shift 2
+  kill -STOP "$pid" 2>/dev/null || true
+  local t
+  for t in "$@" $(pgrep -P "$pid" 2>/dev/null || true); do
+    case "$(ps -o command= -p "$t" 2>/dev/null)" in
+      "$harness"*) kill -9 "$t" 2>/dev/null || true ;;
+    esac
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
 main() {
   [ $# -ge 2 ] || usage
   local fw="$1" secs="$2" threads="${3:-4}"
@@ -63,16 +89,20 @@ main() {
   [ $# -gt 0 ] && shift
   [ "${1:-}" = "--" ] && shift
   local modules
-  modules="${JACKALOPE_MODULES:-$(modules_for "$fw")}" || {
+  modules="$(modules_for "$fw")" || {
     echo "unknown framework: $fw (want: imageio coretext audiotoolbox coregraphics)" >&2
     exit 2
   }
+  modules="${JACKALOPE_MODULES:-$modules}"
   case "$secs" in ''|*[!0-9]*) echo "seconds must be a positive integer" >&2; exit 2 ;; esac
   [ -x "$JACKALOPE" ] || { echo "Jackalope fuzzer not found at $JACKALOPE (set JACKALOPE)" >&2; exit 3; }
 
   local out="${JACKALOPE_OUT:-$HERE/jackalope-out/$fw}"
-  local harness="$HERE/build/${fw}_fuzzer"
-  bash "$HERE/build.sh" "$fw" >/dev/null
+  # A private copy of the harness, so this run never rebuilds or re-signs the
+  # binary a run.py campaign is exec'ing (a half-written or re-signed harness
+  # dies mid-campaign), and stop_jackalope can only match its own targets.
+  local harness="$out/bin/${fw}_fuzzer"
+  IOSR_BUILD_DIR="$out/bin" bash "$HERE/build.sh" "$fw" >/dev/null
   codesign -s - -f --entitlements "$HERE/debuggable.entitlements" "$harness" 2>/dev/null
 
   mkdir -p "$out/in"
@@ -104,14 +134,14 @@ PY
     -nargs 1 -iterations 1000 -persist -loop -cmp_coverage -generate_unwind \
     -nthreads "$threads" "$@" \
     -- "$harness" @@ > "$out/fuzzer.log" 2>&1 &
-  local pid=$! n=0
+  local pid=$! n=0 targets=""
   while kill -0 "$pid" 2>/dev/null && [ "$n" -lt "$((secs * 2))" ]; do
     sleep 0.5; n=$((n + 1))
+    # Remember the live targets: if Jackalope dies on its own, its orphans are
+    # reparented to launchd and can no longer be found through it.
+    targets="$(pgrep -P "$pid" 2>/dev/null || true)"
   done
-  kill -INT "$pid" 2>/dev/null || true
-  sleep 1
-  kill -9 "$pid" 2>/dev/null || true
-  pkill -9 -f "$harness" 2>/dev/null || true
+  stop_jackalope "$pid" "$harness" $targets
 
   echo "jackalope.sh: final stats ($out/fuzzer.log):"
   grep -E "Total execs|Unique samples|Crashes|Hangs|Offsets|ABORT" "$out/fuzzer.log" | tail -5
