@@ -188,12 +188,53 @@ from a frame-pointer walk with module+offset (stable across ASLR), so
 `sigcrash.parse` produces deduplicable signatures. Notes:
 
 - Allocations are 16-byte aligned by default: overflows of 1–15 bytes into the
-  alignment slack are missed. `MALLOC_STRICT_SIZE=1` is byte-exact but can
-  false-fault in SIMD code. `MALLOC_PROTECT_BEFORE=1` guards the start of each
-  allocation (underflows) instead — alternate campaigns.
+  alignment slack are missed. `MALLOC_STRICT_SIZE=1` is byte-exact but breaks
+  code that relies on aligned pointers (its own banner says so): on macOS 26.x it
+  crashes the imageio, audiotoolbox and coregraphics harnesses on *valid* input
+  (`_Block_release` on an XPC reply thread, `findCFBurstTrieList`), so only
+  coretext can use it. `MALLOC_PROTECT_BEFORE=1` guards the start of each
+  allocation (underflows) instead — alternate campaigns. The detection canary
+  below checks each combination.
 - Overflow onto the guard page and use-after-free both fault as SIGSEGV/SIGBUS;
   triage (minimize + analyze) separates spatial from temporal.
 - Measured cost on ImageIO: 0.5 ms/input, *faster* than the ASan build (0.7 ms).
+
+### Detection canary
+
+From Aug 23 to Oct 29 2026 the harnesses ran with an oracle that could not see
+heap corruption inside the frameworks, and nothing noticed: a blind detector
+looks exactly like "no bugs". The canary is a positive and a negative control,
+run by `tools/mac_campaign/run.py` before every campaign under the campaign's
+own environment:
+
+- **Positive:** `IOSR_CANARY=1` makes the harness hand the framework a view of
+  4,112 bytes of which only the first 16 (the seed's header) are a live heap
+  block; the rest is Guard Malloc's guard page (after the block by default,
+  before it under `MALLOC_PROTECT_BEFORE`, found from where the block was
+  placed). The harness prints the guarded range
+  (`IOSR-CANARY mode=after lo=0x… hi=0x…`), then lets the framework read. The
+  check (`ios_research.targets.canary`) requires that read to come back through
+  the normal path as an `OUT_OF_BOUNDS_READ` inside that range, with the
+  framework on the stack and the harness not at the top. Without Guard Malloc
+  the harness prints `mode=unguarded` and never runs the framework: fail.
+  ImageIO and CoreGraphics trip their own buffer probes first
+  (`ERROR_ImageIO_SourceBufferRangeIsNotBigEnough`,
+  `ERROR_CGDataProvider_BufferIsNotBigEnough`); CoreText faults in
+  libFontParser's table directory read; AudioToolbox (via the stream parser,
+  since the fuzz path copies through a harness callback) in its format sniffer.
+- **Negative:** the same valid seed, run normally, must not crash; if it does,
+  every result under that oracle is noise.
+
+```bash
+python tools/mac_campaign/run.py --target mac:coretext --canary-only   # 0 pass, 4 fail
+ORACLES="default before" tools/mac_campaign/canary_all.sh                # every framework
+```
+
+Measured on macOS 26.x: all four frameworks pass under the default and
+`MALLOC_PROTECT_BEFORE` oracles; under `MALLOC_STRICT_SIZE` only coretext
+passes. Its first run also caught a classification bug: the strict-mode banner
+("Overrunning a buffer will cause an immediate crash") was read as a corruption
+diagnosis, labeling every strict-mode crash `OUT_OF_BOUNDS_WRITE`.
 
 ### Depth metric
 
@@ -306,6 +347,12 @@ The runner picks an **engine** (`--engine auto|driver|libfuzzer`):
 
 Either way it is a real-signal *campaign*, deliberately **not** an experiment-loop
 environment (see below).
+
+Before mutating anything it runs the **detection canary** (see Detection) and
+exits 4 if the oracle is blind or noisy; the verdict is recorded under
+`canary` in the `--report` JSON. `--no-canary` skips it. A libFuzzer (ASan)
+build has no Guard Malloc, so it fails the canary by design: it cannot see heap
+bugs inside the framework.
 
 ### Through the CLI pipeline
 

@@ -70,10 +70,14 @@ def signal_name(returncode: int) -> str:
 # aborts (SIGABRT) -- e.g. "free: header for block ... has been trashed by a
 # buffer underrun". That is a heap-corruption detection, not an assertion.
 # The startup banner ("Some buffer overruns may not be noticed", ...) must not
-# match, so only diagnostics outside these banner phrases count.
+# match, so only diagnostics outside these banner phrases count. The
+# MALLOC_STRICT_SIZE banner says "Overrunning a buffer will cause an immediate
+# crash": unfiltered, it labeled every strict-mode crash OUT_OF_BOUNDS_WRITE
+# (caught by the detection canary).
 _GMALLOC_RE = re.compile(r"GuardMalloc\[[^\]]*\]:\s*(?P<msg>.+)")
 _GMALLOC_BANNER = ("allocations will be placed", "some buffer overruns may not",
-                   "vector instructions", "version ")
+                   "vector instructions", "version ", "overrunning a buffer will cause",
+                   "word-aligned pointers")
 _GMALLOC_CLASSES = (
     (("double free", "freed twice", "already been freed", "was not allocated",
       "not claimed by any"), "DOUBLE_FREE"),

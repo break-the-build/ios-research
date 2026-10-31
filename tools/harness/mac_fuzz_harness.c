@@ -47,6 +47,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* SanitizerCoverage-compatible feature map for the standalone driver.  Guard
  * callbacks are installed by clang's trace-pc-guard instrumentation.  We only
@@ -120,6 +121,9 @@ static void *fw_handle = NULL;
 
 /* CoreFoundation function pointers, resolved once. */
 static CFDataRef (*p_CFDataCreate)(CFAllocatorRef, const uint8_t *, CFIndex) = NULL;
+static CFDataRef (*p_CFDataCreateWithBytesNoCopy)(CFAllocatorRef, const uint8_t *, CFIndex,
+                                                  CFAllocatorRef) = NULL;
+static CFAllocatorRef p_kCFAllocatorNull = NULL;
 static void (*p_CFRelease)(CFTypeRef) = NULL;
 
 static int resolve_common(void) {
@@ -137,7 +141,74 @@ static int resolve_common(void) {
         fprintf(stderr, "harness: missing CoreFoundation symbols\n");
         return 0;
     }
+    /* Canary only (optional): kCFAllocatorNull is an exported global holding
+     * the allocator, so dlsym yields its address -- deref it. */
+    p_CFDataCreateWithBytesNoCopy = dlsym(cf_handle, "CFDataCreateWithBytesNoCopy");
+    const CFAllocatorRef *null_alloc = dlsym(cf_handle, "kCFAllocatorNull");
+    p_kCFAllocatorNull = null_alloc ? *null_alloc : NULL;
     return 1;
+}
+
+/* ---- detection canary (IOSR_CANARY=1) --------------------------------------
+ * A positive control for the whole detection chain: Guard Malloc, the crash
+ * reporter, and the Python side's parsing and classification. Instead of the
+ * input, the framework is handed a view of IOSR_CANARY_KEEP +
+ * IOSR_CANARY_REACH bytes of which only IOSR_CANARY_KEEP (the input's first
+ * bytes) are a live heap block; the rest is the guard page Guard Malloc keeps
+ * beside it. The framework's OWN read into that page must fault and be
+ * reported exactly like a real out-of-bounds read. Without Guard Malloc no
+ * guard page borders the block, so the harness refuses to run the framework
+ * (mode=unguarded) and the check fails: a dead oracle must never look like "no
+ * bugs". ios_research.targets.canary requires the fault to land in the printed
+ * range, inside the framework. */
+#define IOSR_CANARY_KEEP 16       /* Guard Malloc's alignment: the block ends flush with its page */
+#define IOSR_CANARY_REACH 4096    /* view bytes past the block, all within one guard page */
+
+typedef struct {
+    uint8_t *block;           /* the live allocation */
+    const uint8_t *view;      /* what the framework is told it may read */
+    size_t len;
+    uintptr_t lo, hi;         /* the guarded bytes the view covers */
+} IOSR_Canary;
+
+static int canary_requested(void) {
+    const char *v = getenv("IOSR_CANARY");
+    return v && strcmp(v, "1") == 0;
+}
+
+/* Guard Malloc's placement tells which side the guard page is on: a block that
+ * ends on a page boundary (default, MALLOC_STRICT_SIZE) has it after, one that
+ * starts on a boundary (MALLOC_PROTECT_BEFORE) has it before. Returns the mode,
+ * or NULL when no guard page borders the block. */
+__attribute__((unused))
+static const char *canary_open(IOSR_Canary *c, const uint8_t *data, size_t size) {
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    c->block = calloc(1, IOSR_CANARY_KEEP);
+    if (!c->block) return NULL;
+    memcpy(c->block, data, size < IOSR_CANARY_KEEP ? size : IOSR_CANARY_KEEP);
+    uintptr_t b = (uintptr_t)c->block;
+    c->len = IOSR_CANARY_KEEP + IOSR_CANARY_REACH;
+    if ((b + IOSR_CANARY_KEEP) % page == 0) {
+        c->view = c->block;
+        c->lo = b + IOSR_CANARY_KEEP;
+        c->hi = c->lo + IOSR_CANARY_REACH;
+        return "after";
+    }
+    if (b % page == 0) {
+        c->view = (const uint8_t *)(b - IOSR_CANARY_KEEP);
+        c->lo = b - IOSR_CANARY_KEEP;
+        c->hi = b;
+        return "before";
+    }
+    return NULL;
+}
+
+/* The canary view as CFData WITHOUT a copy: CFDataCreate would read the guard
+ * page itself, in CoreFoundation on the harness's behalf, not in the framework. */
+__attribute__((unused))
+static CFDataRef canary_cfdata(const uint8_t *view, size_t len) {
+    if (!p_CFDataCreateWithBytesNoCopy || !p_kCFAllocatorNull) return NULL;
+    return p_CFDataCreateWithBytesNoCopy(NULL, view, (CFIndex)len, p_kCFAllocatorNull);
 }
 
 #if defined(HARNESS_TARGET_IMAGEIO)
@@ -308,6 +379,17 @@ static int decode_all_frames(CFDataRef input) {
         p_CFRelease(img);
     }
     p_CFRelease(src);
+    return decoded;
+}
+
+/* Canary: straight to ImageIO (the PNG repair and IOSR_SAVE_INPUT would read
+ * the guard page in harness code). */
+#define IOSR_HAVE_CANARY 1
+static int run_canary_view(const uint8_t *view, size_t len) {
+    CFDataRef input = canary_cfdata(view, len);
+    if (!input) return 0;
+    int decoded = decode_all_frames(input);
+    p_CFRelease(input);
     return decoded;
 }
 
@@ -504,6 +586,15 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     return decoded;
 }
 
+#define IOSR_HAVE_CANARY 1
+static int run_canary_view(const uint8_t *view, size_t len) {
+    CFDataRef input = canary_cfdata(view, len);
+    if (!input) return 0;
+    int decoded = run_target(NULL, 0, input);   /* reads only the CFData */
+    p_CFRelease(input);
+    return decoded;
+}
+
 #elif defined(HARNESS_TARGET_AUDIOTOOLBOX)
 
 /* Deep decode (#228): open -> query format -> read packets (drives the
@@ -565,6 +656,18 @@ static OSStatus (*p_AudioConverterSetProperty)(void *, UInt32, UInt32, const voi
 static OSStatus (*p_AudioConverterFillComplexBuffer)(void *, IOSR_ACInputProc, void *,
                                                      UInt32 *, IOSR_ABL *, IOSR_ASPD *) = NULL;
 
+/* Canary only: the fuzz path feeds AudioToolbox through mem_read (harness code
+ * copies the bytes), so the canary uses the stream parser, which reads the
+ * caller's buffer itself. */
+typedef CFTypeRef AudioFileStreamID;
+typedef void (*IOSR_AFSPropertyProc)(void *, AudioFileStreamID, UInt32, UInt32 *);
+typedef void (*IOSR_AFSPacketsProc)(void *, UInt32, UInt32, const void *, IOSR_ASPD *);
+static OSStatus (*p_AudioFileStreamOpen)(void *, IOSR_AFSPropertyProc, IOSR_AFSPacketsProc,
+                                         UInt32, AudioFileStreamID *) = NULL;
+static OSStatus (*p_AudioFileStreamParseBytes)(AudioFileStreamID, UInt32, const void *,
+                                               UInt32) = NULL;
+static OSStatus (*p_AudioFileStreamClose)(AudioFileStreamID) = NULL;
+
 typedef struct { const uint8_t *data; size_t size; } MemFile;
 
 static OSStatus mem_read(void *ctx, SInt64 pos, UInt32 count,
@@ -595,6 +698,9 @@ static int resolve_target(void) {
     p_AudioConverterDispose = dlsym(fw_handle, "AudioConverterDispose");
     p_AudioConverterSetProperty = dlsym(fw_handle, "AudioConverterSetProperty");
     p_AudioConverterFillComplexBuffer = dlsym(fw_handle, "AudioConverterFillComplexBuffer");
+    p_AudioFileStreamOpen = dlsym(fw_handle, "AudioFileStreamOpen");          /* canary */
+    p_AudioFileStreamParseBytes = dlsym(fw_handle, "AudioFileStreamParseBytes");
+    p_AudioFileStreamClose = dlsym(fw_handle, "AudioFileStreamClose");
     return p_AudioFileOpenWithCallbacks && p_AudioFileClose
         && p_AudioFileGetProperty && p_AudioFileReadPacketData
         && p_AudioConverterNew && p_AudioConverterDispose
@@ -703,6 +809,25 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     }
     p_AudioFileClose(af);
     return exercised;
+}
+
+static void afs_property(void *user, AudioFileStreamID s, UInt32 id, UInt32 *flags) {
+    (void)user; (void)s; (void)id; (void)flags;
+}
+static void afs_packets(void *user, UInt32 nbytes, UInt32 npackets, const void *d,
+                        IOSR_ASPD *descs) {
+    (void)user; (void)nbytes; (void)npackets; (void)d; (void)descs;
+}
+
+#define IOSR_HAVE_CANARY 1
+static int run_canary_view(const uint8_t *view, size_t len) {
+    if (!p_AudioFileStreamOpen || !p_AudioFileStreamParseBytes || !p_AudioFileStreamClose)
+        return 0;
+    AudioFileStreamID s = NULL;
+    if (p_AudioFileStreamOpen(NULL, afs_property, afs_packets, 0, &s) != 0 || !s) return 0;
+    OSStatus st = p_AudioFileStreamParseBytes(s, (UInt32)len, view, 0);
+    p_AudioFileStreamClose(s);
+    return st == 0;
 }
 
 #elif defined(HARNESS_TARGET_VIDEOTOOLBOX)
@@ -1437,6 +1562,15 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     return decoded;
 }
 
+#define IOSR_HAVE_CANARY 1
+static int run_canary_view(const uint8_t *view, size_t len) {
+    CFDataRef input = canary_cfdata(view, len);
+    if (!input) return 0;
+    int decoded = run_target(NULL, 0, input);   /* reads only the CFData */
+    p_CFRelease(input);
+    return decoded;
+}
+
 #else
 #error "Define one of HARNESS_TARGET_IMAGEIO / _AUDIOTOOLBOX / _COREGRAPHICS / _CORETEXT / _VIDEOTOOLBOX / _SELFTEST"
 #endif
@@ -1445,6 +1579,24 @@ static int g_ready = 0;
 /* Decode status of the most recent LLVMFuzzerTestOneInput call:
  * 1 = the entry point produced an object, 0 = it rejected the input. */
 int g_last_decoded = 0;
+
+/* Detection canary (see canary_open): print the guarded range, then let the
+ * framework read into it. */
+static int run_canary(const uint8_t *data, size_t size) {
+#ifdef IOSR_HAVE_CANARY
+    IOSR_Canary c = {0};
+    const char *mode = canary_open(&c, data, size);
+    fprintf(stderr, "IOSR-CANARY mode=%s lo=0x%016lx hi=0x%016lx\n",
+            mode ? mode : "unguarded", (unsigned long)c.lo, (unsigned long)c.hi);
+    int decoded = mode ? run_canary_view(c.view, c.len) : 0;
+    free(c.block);
+    return decoded;
+#else
+    (void)data; (void)size;
+    fprintf(stderr, "IOSR-CANARY mode=unsupported lo=0x0 hi=0x0\n");
+    return 0;
+#endif
+}
 
 int LLVMFuzzerInitialize(int *argc, char ***argv) {
     (void)argc; (void)argv;
@@ -1462,6 +1614,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     g_depth_name = NULL;
     g_depth_value = 0;
     if (!g_ready && !resolve_target()) return 0;
+    if (canary_requested()) {
+        g_last_decoded = run_canary(data, size);
+        return 0;
+    }
     /* CoreFoundation is optional (the self-test target needs no framework). */
     CFDataRef cfdata = p_CFDataCreate ? p_CFDataCreate(NULL, data, (CFIndex)size)
                                       : NULL;
