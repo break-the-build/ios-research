@@ -89,10 +89,24 @@ def test_guard_malloc_abort_is_heap_corruption_not_an_assertion():
     assert cls == "OUT_OF_BOUNDS_WRITE" and "buffer underrun" in msg
 
 
-def test_guard_malloc_banner_alone_is_not_a_diagnosis():
-    """The banner says 'buffer overruns may not be noticed' -- must not match."""
-    assert sigcrash.gmalloc_diagnosis(GMALLOC_BANNER) is None
-    assert sigcrash.parse(GMALLOC_BANNER + ABORT).classification_hint == "ASSERTION"
+# Verbatim from libgmalloc on macOS 26.x with MALLOC_STRICT_SIZE=1.
+GMALLOC_STRICT_BANNER = """GuardMalloc[imageio_fuzzer-7001]: Allocations will be placed on byte boundaries.
+GuardMalloc[imageio_fuzzer-7001]:  - Overrunning a buffer will cause an immediate crash. (Good.)
+GuardMalloc[imageio_fuzzer-7001]:  - Applications using vector instructions (e.g., SSE) may fail.
+GuardMalloc[imageio_fuzzer-7001]:  - Applications expecting word-aligned pointers may fail (such as Carbon applications)
+GuardMalloc[imageio_fuzzer-7001]: version 064575.39.1
+"""
+
+
+@pytest.mark.parametrize("banner", [GMALLOC_BANNER, GMALLOC_STRICT_BANNER])
+def test_guard_malloc_banner_alone_is_not_a_diagnosis(banner):
+    """Banners say 'buffer overruns may not be noticed' / 'Overrunning a buffer
+    will cause an immediate crash' -- neither is a diagnosis. The strict one
+    once labeled every strict-mode crash OUT_OF_BOUNDS_WRITE."""
+    assert sigcrash.gmalloc_diagnosis(banner) is None
+    assert sigcrash.parse(banner + ABORT).classification_hint == "ASSERTION"
+    read = "IOSR-CRASH signal=SIGSEGV addr=0x0000000150a8c010 pc=0x1 access=read\n"
+    assert sigcrash.parse(banner + read).classification_hint == "OUT_OF_BOUNDS_READ"
 
 
 def test_guard_malloc_double_free_diagnosis():

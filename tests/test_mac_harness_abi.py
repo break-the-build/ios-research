@@ -66,7 +66,8 @@ ARG_COUNTS = {
     "AudioFileReadPacketData": 7, "AudioConverterFillComplexBuffer": 6,
     "AudioConverterSetProperty": 4, "CTFontDrawGlyphs": 5, "CTLineDraw": 2,
     "CGContextSetTextPosition": 3, "CTFontDescriptorCreateCopyWithVariation": 3,
-    "CFNumberGetValue": 3,
+    "CFNumberGetValue": 3, "CFDataCreateWithBytesNoCopy": 4, "AudioFileStreamOpen": 5,
+    "AudioFileStreamParseBytes": 4, "AudioFileStreamClose": 1,
 }
 # SDK parameters that are C ARRAYS of a small struct, where a pointer is right.
 ARRAY_PARAMS = {("CTFontDrawGlyphs", 2)}                      # const CGPoint positions[]

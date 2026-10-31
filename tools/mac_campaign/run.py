@@ -17,6 +17,13 @@ Usage:
     python tools/mac_campaign/run.py --target mac:imageio --cases 2000
     python tools/mac_campaign/run.py --target mac:imageio --cases 2000 \\
         --report /tmp/campaign.json --save-crashes /tmp/crashes
+
+Every campaign first runs the detection canary (ios_research.targets.canary)
+under the campaign's own environment (MALLOC_PROTECT_BEFORE, MALLOC_STRICT_SIZE,
+...) and refuses to start if the oracle cannot see a framework heap read or
+crashes on valid input. --canary-only runs just that check.
+
+Exit codes: 0 ok, 3 harness not built, 4 canary failed.
 """
 
 from __future__ import annotations
@@ -33,12 +40,24 @@ _REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "src"))
 
 from ios_research import mutation  # noqa: E402
-from ios_research.targets import create  # noqa: E402
+from ios_research.targets import canary, create  # noqa: E402
 from ios_research.targets._mac_real_seeds import DEFAULT_LIMIT, real_file_seeds  # noqa: E402
 from ios_research.targets.base import Outcome  # noqa: E402
 
 
 SEED_DIR_MAX_BYTES = 1024 * 1024
+EXIT_NOT_BUILT = 3
+EXIT_CANARY_FAILED = 4
+
+
+def check_canary(target_id: str):
+    """The canary verdict for ``target_id``, or None when there is nothing to
+    check: not a mac:<framework> target, or its harness isn't built (which
+    run_campaign reports)."""
+    target = create(target_id)
+    if not hasattr(target, "run_canary") or not target.available():
+        return None
+    return canary.check(target)
 
 
 def _dir_seeds(dirs) -> list[bytes]:
@@ -246,7 +265,26 @@ def main(argv=None) -> int:
     ap.add_argument("--seed-dir", action="append", default=[],
                     help=("add every file in DIR to the seed corpus (repeatable); "
                           "e.g. a Jackalope out/samples coverage corpus"))
+    ap.add_argument("--canary-only", action="store_true",
+                    help="run only the detection canary and exit (0 pass, 4 fail)")
+    ap.add_argument("--no-canary", action="store_true",
+                    help="skip the detection canary (results may be silently blind)")
     args = ap.parse_args(argv)
+
+    verdict = None
+    if args.canary_only or not args.no_canary:
+        verdict = check_canary(args.target)
+        if verdict is not None:
+            print(f"canary: {'PASS' if verdict.passed else 'FAIL'}: {verdict.reason}",
+                  file=sys.stderr)
+            if not verdict.passed:
+                return EXIT_CANARY_FAILED
+        if args.canary_only:
+            if verdict is None:
+                print(f"error: no canary for {args.target}: not a mac:<framework> "
+                      f"target, or its harness is not built", file=sys.stderr)
+                return EXIT_NOT_BUILT
+            return 0
 
     workers = args.workers
     if workers <= 0:
@@ -259,8 +297,9 @@ def main(argv=None) -> int:
                        real_seeds=max(0, args.real_seeds),
                        seed_dirs=args.seed_dir)
     if out is None:
-        return 3
+        return EXIT_NOT_BUILT
     summary, crash_inputs = out
+    summary["canary"] = verdict.to_dict() if verdict else None
 
     if args.save_crashes and crash_inputs:
         d = pathlib.Path(args.save_crashes)

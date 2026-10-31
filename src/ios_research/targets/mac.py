@@ -86,6 +86,7 @@ _FRAMEWORKS = {
 _DEFAULT_TIMEOUT_S = 10.0
 _HARNESS_ENV = "IOS_RESEARCH_MAC_HARNESS"
 _SANCOV_ENV = "IOS_RESEARCH_SANCOV_FILE"
+_CANARY_ENV = "IOSR_CANARY"
 
 
 def _decode_lines(stdout: str) -> list[tuple[str, str]]:
@@ -248,8 +249,40 @@ class MacFuzzTarget(Target):
             except OSError:
                 pass
 
+    def run_canary(self, data: bytes) -> tuple[ExecResult, str]:
+        """Run ``data`` in detection-canary mode (``IOSR_CANARY=1``).
+
+        Returns the result, classified exactly as a campaign would classify it,
+        and the harness's stderr, which carries the guarded range
+        (:mod:`ios_research.targets.canary` judges both).
+        """
+        import tempfile
+        import time
+
+        harness = self.resolve_harness()
+        if harness is None:
+            return self._run(data), ""          # the uniform "not built" result
+        start = time.monotonic()
+        tmp = tempfile.NamedTemporaryFile(
+            prefix="ios-research-canary-", suffix=".input", delete=False)
+        try:
+            tmp.write(data)
+            tmp.close()
+            return self._invoke(harness, tmp.name, start, extra_env={_CANARY_ENV: "1"})
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
     def _run_harness(self, harness: Path, input_path: str,
                      start: float, coverage_path: str | None = None) -> ExecResult:
+        return self._invoke(harness, input_path, start, coverage_path)[0]
+
+    def _invoke(self, harness: Path, input_path: str, start: float,
+                coverage_path: str | None = None,
+                extra_env: dict[str, str] | None = None) -> tuple[ExecResult, str]:
+        """Run the harness on one input; return the result and its stderr."""
         import time
 
         # libFuzzer binaries run a single input to completion when given a file
@@ -261,6 +294,7 @@ class MacFuzzTarget(Target):
         env.setdefault("UBSAN_OPTIONS", "print_stacktrace=1:halt_on_error=1")
         if coverage_path is not None:
             env[_SANCOV_ENV] = coverage_path
+        env.update(extra_env or {})
         try:
             proc = subprocess.run(
                 [str(harness), input_path],
@@ -269,17 +303,20 @@ class MacFuzzTarget(Target):
             dur = int((time.monotonic() - start) * 1000)
             return ExecResult(outcome=Outcome.TIMEOUT,
                               detail=f"harness exceeded {self.timeout_s}s budget",
-                              duration_ms=dur)
+                              duration_ms=dur), ""
         except OSError as exc:  # pragma: no cover - defensive
             return ExecResult(outcome=Outcome.ABNORMAL,
                               detail=f"failed to execute harness: {exc}",
-                              duration_ms=0)
+                              duration_ms=0), ""
 
         dur = int((time.monotonic() - start) * 1000)
         report = (proc.stderr or b"").decode("utf-8", "replace")
         stdout = (proc.stdout or b"").decode("utf-8", "replace")
+        return self._classify(proc.returncode, stdout, report, dur), report
 
-        if proc.returncode == 0:
+    def _classify(self, returncode: int, stdout: str, report: str,
+                  dur: int) -> ExecResult:
+        if returncode == 0:
             # The standalone driver reports per-input decode status on stdout;
             # distinguish "the decoder produced an object" (ACCEPTED) from "the
             # decoder rejected the input" (REJECTED). libFuzzer builds emit no
@@ -304,9 +341,9 @@ class MacFuzzTarget(Target):
         # Guard Malloc builds (the default) report a detection as a fatal
         # signal, not a sanitizer report. Before sigcrash existed these were
         # filed as ABNORMAL ("not a crash") -- i.e. every Guard Malloc hit lost.
-        if proc.returncode < 0 or sigcrash.is_signal_report(report):
+        if returncode < 0 or sigcrash.is_signal_report(report):
             diag = sigcrash.parse(report, module=self.framework,
-                                  returncode=proc.returncode)
+                                  returncode=returncode)
             crash_line = next((ln.strip() for ln in report.splitlines()
                                if ln.startswith("IOSR-CRASH")), "")
             gmalloc = sigcrash.gmalloc_diagnosis(report)
@@ -318,7 +355,7 @@ class MacFuzzTarget(Target):
         # Non-zero exit without a recognizable report: abnormal, not a crash.
         detail = (report.strip().splitlines()[-1][:500]
                   if report.strip() else
-                  f"harness exited with code {proc.returncode}")
+                  f"harness exited with code {returncode}")
         return ExecResult(outcome=Outcome.ABNORMAL, detail=detail,
                           duration_ms=max(dur, 1))
 
