@@ -1,130 +1,129 @@
-# Go-Forward Strategy — from liveness findings to bounty-grade evidence
+# Go-Forward Strategy — reach and oracles, not more of the same
 
-Status: strategy of record after the 0825 session. Review date: 2026-08-26.
-Owner: primary researcher (LLM-assisted execution).
+Status: strategy of record, rewritten 2026-10-30 (supersedes the 2026-08-26
+version, which is in git history). Next review: 2026-11-06, after iOS 27.3
+beta 1 lands. Owner: primary researcher (LLM-assisted execution).
 
-## 1. Honest position assessment
+**Disclosure rule for this file:** this repository is public. Unreported
+findings, open leads and probe details live only in `research/findings/`
+(gitignored); this file states outcomes and directions, never specifics an
+outsider could act on before Apple has a report.
 
-Four findings shipped or drafted, all **liveness/policy** class, zero memory
-corruption:
+## 1. Position (2026-10-30)
 
-| Finding | Class | Device result |
-|---|---|---|
-| FINDING-04 AudioToolbox MPEG/ID3 hang | liveness | reproduces on iPhone |
-| FINDING-05 CoreGraphics text-advances hang | liveness | macOS-only |
-| FINDING-06 CoreText morx-shaping hang | liveness | macOS-only, 3 families |
-| FINDING-07 IOTimeSync unprivileged gPTP port create | policy/validation | macOS-only (beta dynamic pending) |
+| Outcome | Count |
+|---|---|
+| Memory-corruption findings | 0 |
+| Liveness (hang) reports to Apple | 3, all closed at $0: "defense-in-depth", "functional performance issue", acknowledgment credit without a CVE |
+| Policy-class kernel report | 1, drafted; not sent as of 2026-10-30 |
+| Kernel user-client static audits (beta 7 additions) | all hardened, no findings (#280) |
+| Guard Malloc executions on the current media corpora | ~95M, 0 crashes |
 
-Apple Security Bounty rewards **demonstrable exploitability**. Hangs are
-explicitly below the threshold; policy/validation findings typically rate
-acknowledgment at best. The 0825 pipeline is exceptionally good at *finding
-liveness bugs* — which is exactly the problem. **The pivot: stop optimizing
-for "where can we detect misbehavior" and optimize for "where can corruption
-be reached and demonstrated."**
+Apple pays for demonstrated memory corruption and boundary crossings, not
+hangs. The August strategy predicted the hang outcomes correctly. Liveness
+reports are not submitted any more unless a family shows corruption.
 
-Assets that change the odds:
+## 2. What changed: the media lane was judged with a blind oracle
 
-- The IOKit recon pipeline (symtab diff → MIG tables → externalMethod
-  dispatch parse → validation audit) produced FINDING-07 in one day of work.
-- Beta artifacts for macOS 27 b7 and iOS 27 b7 are staged; the **+50% beta
-  bonus** applies to anything found in that window.
-- The on-device confirmation flow (AudioProbe + bridge + crash harvest) is
-  mature and reusable across surfaces.
-- Five deep-decode mac harnesses exist and are caffeinate-hardened for
-  unattended windows.
+The August decision demoted media-parser fuzzing because "it finds liveness;
+liveness doesn't pay". From 2026-08-23 (`f633896`) to 2026-10-29 (`1b6416d`)
+the mac harnesses ran ASan over **harness code only**: a heap overflow inside
+ImageIO, CoreText, CoreGraphics or AudioToolbox returned normally and was never
+seen. Those campaigns could only ever find hangs, so the demotion rested on a
+detector that could not see the paying bug class.
 
-## 2. Phase 0 — FINDING-07 closure + first corruption dig (this week)
+Since 1b6416d the harnesses run under Guard Malloc. The first ~95M executions
+on the existing corpora found nothing, so those corpora are **saturated**:
+another seed or another million cases on them has close to zero expected value.
+Two variables still change the odds:
 
-1. **Submit FINDING-07** to product-security@apple.com for a tracking
-   identifier. Reward is unlikely and the draft says so honestly; the value
-   is a clean, well-documented kernel report on file (track record and
-   relationship), at near-zero marginal cost. Attach probe sources, per-call
-   logs, and the selector-map documentation.
-2. **Beta confirmation**: static review of b7 shows the identical ungated
-   selector set; capture dynamic confirmation when the beta environment is
-   available and update the draft before sending.
-3. **In parallel — mine the same user client for corruption**: selectors
-   18–31 accept scalar/structure input from any caller. Enumerate argument
-   shapes with `extmethod.py`, identify every structure/OOL-descriptor input,
-   and audit those paths in the b7 dylib for missing bounds/ownership checks.
-   The embedded-NUL interface-name path proves name handling has edges; the
-   port-id refcount path is the next obvious audit target.
+1. **Reach:** code we have never executed. The corpora contain no DNG/camera
+   RAW, no WebP/EXR/PSD/JPEG 2000/texture formats, two PNGs and two JPEG XL
+   files, no HE-AAC/USAC/Opus/FLAC/APAC/AC-3, and only a handful of system
+   PDFs. Until 2026-10-30 the CoreText harness never drew a glyph (#302).
+2. **Oracles:** bug classes the default oracle misses: 1–15-byte overflows
+   (strict size, where usable: section 6), underflows (protect-before), and
+   uninitialized memory copied into output (fill-space differential).
 
-Exit criteria: FINDING-07 sent with tracking id recorded; a written
-selector-by-selector validation map for 18–31; any corruption candidate
-escalated to its own FINDING.
+Apple's in-the-wild fixes say where to aim, and bugs cluster around them:
 
-## 3. Phase 1 — kernel user-client corruption hunt (weeks 1–2)
+| Lane | Anchor (public) |
+|---|---|
+| DNG / camera RAW (ImageIO) | CVE-2025-43300: TIFF tags vs embedded JPEG header mismatch |
+| Audio codecs and containers | CVE-2025-31200: CoreAudio APAC decoder |
+| PDF image filters (CoreGraphics) | CVE-2021-30860 (FORCEDENTRY): JBIG2 via PDF |
+| ImageIO formats the corpus lacks, PNG/APNG fields | CVE-2023-41064 (BLASTPASS): ImageIO WebP |
+| Fonts (CoreText / FontParser) | CVE-2023-41990: TrueType hinting instruction |
 
-Primary bounty line. Ordered by (reachability × novelty × audit gap):
+## 3. Primary line: media reach lanes (weeks 1–2)
 
-1. **`is_iokit_subsystem` num 2891** — unnamed, 7-arg, max_reply 208, new in
-   b7, reachable from any sandboxed process holding a connect handle. Locate
-   the impl pointer in the beta kernelcache, decompile (Ghidra pipeline is
-   proven — see `tools/staticscan/README.md`), audit the 7-argument
-   validation, build a targeted probe. An unknown MIG routine with no public
-   history is the single highest-novelty target on the board.
-2. **IOTimeSync selectors with structure/OOL inputs** (continuation of
-   Phase 0 step 3).
-3. **`AFKSharedMemoryUserClient`** (+28 syms; shared-memory mapping user
-   clients are the classic memory-corruption class; new HID-transport kext).
-4. **`Image4UserClient`** (+20; manifest parsing adjacent to trust decisions).
+Executed from a handoff kept outside the repo. Per lane: build a gated seed
+corpus with structured generators (field-mismatch variants patched in place,
+not random bytes), sweep every variant directly under each usable oracle, grow
+a framework-coverage corpus with Jackalope, then Guard Malloc campaigns on it.
 
-Method per target, in order: static validation audit first (free, safe),
-then bounded host-side `IOConnect` probing on our own machine (panic risk
-accepted and bounded — own hardware, authorized), fuzzing structure/OOL
-arguments only after the static map says where the checks should be.
+**Kill criteria, per lane:**
+- Gate: under 50% of a format's seeds decode → fix the generator within 30 min
+  or drop that format and record why.
+- Close the lane when the direct sweep found no candidate, 2 h of Jackalope
+  added no new offsets in its last 30 min, and 1M cases per usable oracle
+  found no candidate. Record the numbers; reopen only with new reach.
+- One-hour rule: a signal that has not produced a file crashing the standalone
+  Guard Malloc harness 3/3 within an hour of effort is recorded and dropped.
 
-Exit criteria: per-target one-page audit notes in `research/findings/`;
-probes checked into `tools/probe/`; any crash escalated through the standard
-pipeline (reproduce → minimize → analyze → device-confirm where applicable).
+**What counts:** only a file that crashes the standalone Guard Malloc harness
+3 times out of 3. OS crash reports, dead batches and Jackalope crashes are not
+findings (23 fake reports from a Jackalope teardown bug cost a whole scan,
+fixed in #302). A memory-corruption bug in a shared framework is reportable
+from macOS alone (macOS is in scope); confirm iOS reach afterwards for
+severity.
 
-## 4. Phase 2 — beta-window campaigns (+50%) after the iPhone flash
+## 4. Beta window: iOS 27.3 beta 1 (expected ~2026-11-02)
 
-Requires user go-ahead (iOS 27 b7 flash wipes the phone; OTA is staged in
-`/Users/danny/dev/betas/`):
+New code is the least-fuzzed code, and findings in the beta window carry the
++50% bonus. Before it lands:
 
-1. Flash iPhone 13 Pro → iOS 27 b7; re-pair; re-trust developer cert.
-2. Re-run on-device tiers: media confirms (FINDING-04/05/06 beta retests —
-   drafts already promise these), BT window (`ble_window.py`), and the
-   Phase-1 probes that have on-device reach.
-3. Re-baseline: `staticscan fingerprint` the b7 dyld cache, `diff` against
-   26.5.2 records (workflow: `research/plans/BETA-WINDOW-DIFF-WORKFLOW.md`),
-   aim dictionaries and campaigns at `directed_targets`.
-4. macOS 27 b7 on the Studio: **deferred decision** — it is the primary
-   research machine; image first or use a secondary Mac before upgrading.
+1. Re-validate the iPhone's research setup (pairing, developer mode, the
+   on-device confirmation harness): a macOS crash becomes an iOS report only
+   through it.
+2. Prepare the diff: shared frameworks plus FontParser, RawCamera and
+   AudioCodecs, 27.2 → 27.3b1; map new or changed functions to the lanes.
+3. When it lands: point the lane generators at changed formats first; run the
+   kernel side of `BETA-TRIAGE-CHECKLIST.md` for new user clients and MIG
+   routines.
 
-Exit criteria: beta retest section appended to every existing finding;
-beta-baseline fingerprint records committed to `artifacts/beta/`.
+## 5. Kernel line: reopened only by a beta diff
 
-## 5. Phase 3 — continuous background (not the bounty path)
+The beta 7 kernel additions were audited statically and were hardened. The
+SMB client rig is parked: its one observation was a liveness-class wedge.
+Kernel work resumes when a beta diff shows new user clients, new MIG routines
+or changed validation, using the proven pipeline (symbol diff → dispatch-table
+parse → static validation audit → bounded probe on own hardware).
 
-Overnight caffeinated campaigns on the five mac harnesses and the BT window.
-Value: corpus depth, coverage records, regression detection between OS
-builds. Explicitly **not** the primary bounty line — liveness findings from
-these are recorded honestly and not submitted unless a family shows
-corruption.
+## 6. Process rules
 
-## 6. Process debt (scheduled, small)
-
-- **CI enforcement** (#153): 1,700+ tests never run automatically — the
-  single cheapest reliability win; wire a GitHub Actions mock-only gate.
-- **Worktree-first discipline**: three concurrent-agent collisions this
-  session (branch switches wiping uncommitted work). All LLM work happens in
-  `.worktrees/<name>`; the main checkout is the other agent's.
-- `ble_window.py` reads-counter regex nit (char/desc reads counted 0 in
-  window mode; manual runs confirm they flow).
-- Kernel recon deliverables consolidation: `/tmp/opencode/` artifacts are
-  the only copy of several recon outputs — copy into
-  `betas/campaign-0825/kernel-iokit/` and commit.
+- **Detection canary before every campaign** (`tools/mac_campaign/run.py`
+  runs it; `canary_all.sh` after OS updates): a positive control (a framework
+  read into a guard page must be detected and classified) and a negative one (a
+  valid seed must not crash). A failing oracle is not used. On macOS 26.x
+  `MALLOC_STRICT_SIZE` crashes the imageio, audiotoolbox and coregraphics
+  harnesses on valid input; only coretext can use it.
+- **Worktree-first:** every agent works in `.worktrees/<name>`; the main
+  checkout belongs to whoever owns it. Kill processes by PID, never by
+  pattern; never run `tools/harness/build.sh` under a running campaign.
+- **Weekly scoreboard:** per lane, hours spent, new framework offsets reached,
+  candidates. A lane with flat offsets and no candidates is closed (section 3).
+- **Records:** findings, Apple thread IDs and proofs of concept live in
+  `research/findings/` and need an off-machine backup; handoffs are versioned.
 
 ## 7. Decision log
 
-| Decision | Rationale |
-|---|---|
-| Submit FINDING-07 despite low reward odds | track record + relationship; cost ≈ 0 |
-| Pivot primary effort to kernel user clients | only surface class we can reach that pays |
-| iPhone beta flash requires explicit user go-ahead | destructive (wipe); staged OTA ready |
-| macOS 27 b7 on Studio deferred | primary research machine; image-or-secondary first |
-| RF-injection tier stays parked | hardware prerequisite; Apple-CID system-parse surface documented for when it exists |
-| Media harness campaigns demoted to background | they find liveness; liveness doesn't pay |
+| Date | Decision | Rationale |
+|---|---|---|
+| 2026-08-26 | Stop submitting liveness findings | Apple rewards corruption; confirmed by three $0 dispositions (2026-10) |
+| 2026-08-26 | iPhone beta flash only with explicit go-ahead | destructive (wipe) |
+| 2026-10-29 | Guard Malloc is the default harness oracle | ASan on the harness never saw bugs inside the frameworks |
+| 2026-10-30 | Media reach lanes are the primary line; corpus replay is background at most | the August demotion was made with a blind oracle; current corpora are saturated |
+| 2026-10-30 | Kernel work reopens only on a beta diff | beta 7 additions audited and hardened; SMB rig showed liveness only |
+| 2026-10-30 | No campaign without a passing detection canary | a dead oracle went unnoticed for two months |
+| 2026-10-30 | No unreported findings or leads in tracked files | the repository is public; disclosure before Apple's advisory endangers eligibility |
