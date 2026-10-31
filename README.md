@@ -149,8 +149,10 @@ workflow.
 
 ## Development
 
-The design prompts (`docs/PROMPT-*.md`) and optimization goals (`goals/*.json`)
-describe the framework and how each phase was built.
+The design prompts (archived in `docs/archive/prompts/`) and optimization goals
+(`goals/*.json`, now frozen) describe the framework and how each phase was
+built. Current direction: [`research/plans/GO-FORWARD-STRATEGY.md`](research/plans/GO-FORWARD-STRATEGY.md);
+agent operating rules: [`AGENTS.md`](AGENTS.md).
 
 ## License
 

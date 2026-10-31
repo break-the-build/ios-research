@@ -1,7 +1,7 @@
 # Security & Reliability Audit
 
 Audit performed in phase 10 against the whole repository. Scope follows
-`docs/PROMPT-10-audit-hardening.md`. Issues found were **fixed**, not merely
+`docs/archive/prompts/PROMPT-10-audit-hardening.md`. Issues found were **fixed**, not merely
 documented.
 
 ## Method

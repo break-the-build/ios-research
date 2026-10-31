@@ -1,6 +1,6 @@
 """Phase 10 integration tests: full CLI verification and artifact chain.
 
-Exercises the commands listed in docs/PROMPT-RUN-ALL.md 'Final Verification'
+Exercises the commands listed in docs/archive/prompts/PROMPT-RUN-ALL.md 'Final Verification'
 through the real CLI with --json, and walks the complete artifact chain:
 
     experiment -> testcase -> crash -> minimized -> analysis -> report

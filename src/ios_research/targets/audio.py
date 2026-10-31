@@ -7,7 +7,7 @@ for audio container/codec headers. They exercise the same
 Safety: these targets only *parse bytes* and report normalized outcomes. They do
 not activate a microphone or camera, bypass permissions, or perform any device
 access. A real authorized research device can later be attached behind this same
-interface (see the module docstring in docs/PROMPT-03-audio-module.md).
+interface (see the module docstring in docs/archive/prompts/PROMPT-03-audio-module.md).
 
 Normalized mock audio container (after each format's magic bytes)::
 
