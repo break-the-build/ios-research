@@ -42,7 +42,7 @@ Two variables still change the odds:
    files, no HE-AAC/USAC/Opus/FLAC/APAC/AC-3, and only a handful of system
    PDFs. Until 2026-10-30 the CoreText harness never drew a glyph (#302).
 2. **Oracles:** bug classes the default oracle misses: 1–15-byte overflows
-   (strict size, where usable: section 6), underflows (protect-before), and
+   (strict size: unusable on macOS 26.x, section 6), underflows (protect-before), and
    uninitialized memory copied into output (fill-space differential).
 
 Apple's in-the-wild fixes say where to aim, and bugs cluster around them:
@@ -106,8 +106,8 @@ parse → static validation audit → bounded probe on own hardware).
   runs it; `canary_all.sh` after OS updates): a positive control (a framework
   read into a guard page must be detected and classified) and a negative one (a
   valid seed must not crash). A failing oracle is not used. On macOS 26.x
-  `MALLOC_STRICT_SIZE` crashes the imageio, audiotoolbox and coregraphics
-  harnesses on valid input; only coretext can use it.
+  `MALLOC_STRICT_SIZE` crashes all four harnesses on valid input (CoreText on
+  real fonts), so it is not used.
 - **Worktree-first:** every agent works in `.worktrees/<name>`; the main
   checkout belongs to whoever owns it. Kill processes by PID, never by
   pattern; never run `tools/harness/build.sh` under a running campaign.
@@ -127,3 +127,5 @@ parse → static validation audit → bounded probe on own hardware).
 | 2026-10-30 | Kernel work reopens only on a beta diff | beta 7 additions audited and hardened; SMB rig showed liveness only |
 | 2026-10-30 | No campaign without a passing detection canary | a dead oracle went unnoticed for two months |
 | 2026-10-30 | No unreported findings or leads in tracked files | the repository is public; disclosure before Apple's advisory endangers eligibility |
+| 2026-10-31 | `MALLOC_STRICT_SIZE` dropped for every framework | every strict-mode sweep hit of the first lane night (about 4,600) was a noise signature on valid input, CoreText included |
+| 2026-10-31 | Lanes start from new seeds and must show new module coverage first | about 6M Guard Malloc cases over narrow seed sets found nothing; real camera RAW reaches RawCamera where generated DNGs did not |

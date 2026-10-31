@@ -1,7 +1,7 @@
 # Experiment-Loop Optimization Results
 
 Autonomous optimization of ios-research using the `experiment-loop` engine
-(`/Users/danny/dev/experiment-loop`), per `docs/PROMPT-RUN-EXPERIMENT-LOOP.md`.
+(`/Users/danny/dev/experiment-loop`), per `docs/archive/prompts/PROMPT-RUN-EXPERIMENT-LOOP.md`.
 
 ## Session
 

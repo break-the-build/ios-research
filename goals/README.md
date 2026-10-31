@@ -1,5 +1,11 @@
 # Experiment-loop goal portfolio
 
+> **Status: frozen (2026-10-30).** No new goals and no optimizer campaigns on
+> these, unless a goal measures a real `mac:*` or on-device campaign. They
+> tune deterministic local models, and the bounty path now runs on real
+> harnesses (see `research/plans/GO-FORWARD-STRATEGY.md`). The files stay
+> because the experiment-loop environments and their tests load them.
+
 The JSON files in this directory are executable search definitions.  They are
 not, by themselves, evidence that a change improves a real iOS research
 campaign.  This document defines how their results may be used.

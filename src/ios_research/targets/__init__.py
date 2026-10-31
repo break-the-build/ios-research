@@ -7,7 +7,7 @@ and reports a normalized outcome. Targets implement a generic lifecycle:
 
 All targets shipped with the framework are **mock** targets suitable for CI and
 for research without physical iOS hardware. Real research-device targets can be
-registered later behind the same interface (see docs/PROMPT-03-audio-module.md).
+registered later behind the same interface (see docs/archive/prompts/PROMPT-03-audio-module.md).
 """
 
 from __future__ import annotations

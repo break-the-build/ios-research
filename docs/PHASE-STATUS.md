@@ -1,6 +1,6 @@
 # ios-research — Phase Status
 
-Tracks execution of the development phases defined in `docs/PROMPT-RUN-ALL.md`.
+Tracks execution of the development phases defined in `docs/archive/prompts/PROMPT-RUN-ALL.md`.
 
 Statuses: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` · `COMPLETE`
 
