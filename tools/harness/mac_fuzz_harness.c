@@ -280,6 +280,42 @@ static CGColorSpaceRef (*p_CGColorSpaceCreateDeviceRGB)(void) = NULL;
 static void (*p_CGColorSpaceRelease)(CGColorSpaceRef) = NULL;
 static void (*p_CGContextDrawImage)(CGContextRef, IOSR_CGRect, CGImageRef) = NULL;
 static void (*p_CGContextRelease)(CGContextRef) = NULL;
+static CGImageRef (*p_CGImageSourceCreateThumbnailAtIndex)(CGImageSourceRef, size_t,
+                                                           CFDictionaryRef) = NULL;
+static CFDictionaryRef g_thumb_opts = NULL;
+
+#define IOSR_IMGIO_THUMB_MAX 256   /* px: the size a message or file preview asks for */
+#define IOSR_CF_NUMBER_INT 9       /* kCFNumberIntType */
+
+/* Options for the thumbnail pass: the file's own embedded thumbnail when it
+ * has one (EXIF/JFIF, HEIF 'thmb', RAW previews), otherwise a subsampled
+ * decode of the image; EXIF orientation applied; at most 256 px. NULL when a
+ * symbol is missing, which turns the pass off. */
+static CFDictionaryRef thumbnail_options(void) {
+    CFDictionaryRef (*dict_create)(CFAllocatorRef, const void **, const void **, CFIndex,
+                                   const void *, const void *) =
+        dlsym(cf_handle, "CFDictionaryCreate");
+    CFTypeRef (*number_create)(CFAllocatorRef, CFIndex, const void *) =
+        dlsym(cf_handle, "CFNumberCreate");
+    /* Exported globals holding the CF objects: dlsym yields their address. */
+    CFTypeRef *if_absent = dlsym(fw_handle, "kCGImageSourceCreateThumbnailFromImageIfAbsent");
+    CFTypeRef *max_px = dlsym(fw_handle, "kCGImageSourceThumbnailMaxPixelSize");
+    CFTypeRef *transform = dlsym(fw_handle, "kCGImageSourceCreateThumbnailWithTransform");
+    CFTypeRef *yes = dlsym(cf_handle, "kCFBooleanTrue");
+    const void *key_cb = dlsym(cf_handle, "kCFTypeDictionaryKeyCallBacks");
+    const void *value_cb = dlsym(cf_handle, "kCFTypeDictionaryValueCallBacks");
+    if (!dict_create || !number_create || !if_absent || !max_px || !transform || !yes
+        || !key_cb || !value_cb)
+        return NULL;
+    int px = IOSR_IMGIO_THUMB_MAX;
+    CFTypeRef n = number_create(NULL, IOSR_CF_NUMBER_INT, &px);
+    if (!n) return NULL;
+    const void *keys[3] = {*if_absent, *max_px, *transform};
+    const void *values[3] = {*yes, n, *yes};
+    CFDictionaryRef d = dict_create(NULL, keys, values, 3, key_cb, value_cb);
+    p_CFRelease(n);
+    return d;
+}
 
 static int resolve_target(void) {
     if (!resolve_common()) return 0;
@@ -301,6 +337,12 @@ static int resolve_target(void) {
     p_CGColorSpaceRelease = dlsym(cg, "CGColorSpaceRelease");
     p_CGContextDrawImage = dlsym(cg, "CGContextDrawImage");
     p_CGContextRelease = dlsym(cg, "CGContextRelease");
+    const char *thumbs = getenv("IOSR_IMGIO_THUMBNAIL");
+    if (!(thumbs && *thumbs == '0')) {
+        p_CGImageSourceCreateThumbnailAtIndex =
+            dlsym(fw_handle, "CGImageSourceCreateThumbnailAtIndex");
+        g_thumb_opts = thumbnail_options();
+    }
     return p_CGImageSourceCreateWithData && p_CGImageSourceCreateImageAtIndex
         && p_CGImageSourceGetCount && p_CGImageGetWidth && p_CGImageGetHeight
         && p_CGBitmapContextCreate && p_CGColorSpaceCreateDeviceRGB
@@ -397,6 +439,36 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     return decoded;
 }
 
+/* Draw `img` into an offscreen bitmap (forcing its full pixel decode) and
+ * release it. Returns 1 if it was drawn. */
+static int render_image(CGImageRef img) {
+    int drawn = 0;
+    size_t w = p_CGImageGetWidth(img), h = p_CGImageGetHeight(img);
+    if (w > IOSR_IMGIO_MAX_DIM) w = IOSR_IMGIO_MAX_DIM;
+    if (h > IOSR_IMGIO_MAX_DIM) h = IOSR_IMGIO_MAX_DIM;
+    if (w && h) {
+        CGColorSpaceRef cs = p_CGColorSpaceCreateDeviceRGB();
+        size_t bytes = 0;
+        uint8_t *pixels = output_buffer(h, w * 4, &bytes);
+        if (cs && pixels) {
+            CGContextRef ctx = p_CGBitmapContextCreate(
+                pixels, w, h, 8, w * 4, cs, 2 /* premul first */);
+            if (ctx) {
+                IOSR_CGRect rect = {0, 0, (double)w, (double)h};
+                p_CGContextDrawImage(ctx, rect, img);   /* full pixel decode */
+                p_CGContextRelease(ctx);
+                g_depth_value += count_nonzero(pixels, w * h * 4);
+                digest_fold(pixels, bytes);
+                drawn = 1;
+            }
+        }
+        free(pixels);
+        if (cs) p_CGColorSpaceRelease(cs);
+    }
+    p_CFRelease(img);
+    return drawn;
+}
+
 static int decode_all_frames(CFDataRef input) {
     CGImageSourceRef src = p_CGImageSourceCreateWithData(input, NULL);
     if (!src) return 0;
@@ -405,30 +477,15 @@ static int decode_all_frames(CFDataRef input) {
     if (frames > 16) frames = 16;   /* bound multi-frame work */
     for (size_t i = 0; i < frames; i++) {
         CGImageRef img = p_CGImageSourceCreateImageAtIndex(src, i, NULL);
-        if (!img) continue;
-        size_t w = p_CGImageGetWidth(img), h = p_CGImageGetHeight(img);
-        if (w > IOSR_IMGIO_MAX_DIM) w = IOSR_IMGIO_MAX_DIM;
-        if (h > IOSR_IMGIO_MAX_DIM) h = IOSR_IMGIO_MAX_DIM;
-        if (w && h) {
-            CGColorSpaceRef cs = p_CGColorSpaceCreateDeviceRGB();
-            size_t bytes = 0;
-            uint8_t *pixels = output_buffer(h, w * 4, &bytes);
-            if (cs && pixels) {
-                CGContextRef ctx = p_CGBitmapContextCreate(
-                    pixels, w, h, 8, w * 4, cs, 2 /* premul first */);
-                if (ctx) {
-                    IOSR_CGRect rect = {0, 0, (double)w, (double)h};
-                    p_CGContextDrawImage(ctx, rect, img);   /* full pixel decode */
-                    p_CGContextRelease(ctx);
-                    g_depth_value += count_nonzero(pixels, w * h * 4);
-                    digest_fold(pixels, bytes);
-                    decoded = 1;
-                }
-            }
-            free(pixels);
-            if (cs) p_CGColorSpaceRelease(cs);
-        }
-        p_CFRelease(img);
+        if (img && render_image(img)) decoded = 1;
+    }
+    /* Thumbnail pass: the path previews take (Messages, Quick Look, Files). It
+     * parses embedded thumbnails and runs the codecs' subsampled decoders, and
+     * some formats decode ONLY here: a PDF yields no CreateImageAtIndex image
+     * but does yield a thumbnail. IOSR_IMGIO_THUMBNAIL=0 turns it off. */
+    if (p_CGImageSourceCreateThumbnailAtIndex && g_thumb_opts) {
+        CGImageRef thumb = p_CGImageSourceCreateThumbnailAtIndex(src, 0, g_thumb_opts);
+        if (thumb && render_image(thumb)) decoded = 1;
     }
     p_CFRelease(src);
     return decoded;
@@ -481,6 +538,14 @@ static CGContextRef (*p_CGBitmapContextCreate)(void *, size_t, size_t,
                                                uint32_t) = NULL;
 static void (*p_CGContextRelease)(CGContextRef) = NULL;
 static void (*p_CGContextDrawPDFPage)(CGContextRef, CGPDFPageRef) = NULL;
+static void (*p_CGContextScaleCTM)(CGContextRef, double, double) = NULL;
+/* Each page is drawn twice: at 1:1 and magnified IOSR_CG_SCALE times
+ * (IOSR_PDF_SCALE overrides; <= 1 turns the second draw off). Rasterizer
+ * arithmetic scales with device size, so overflow in glyph and path coverage
+ * sizing needs large device coordinates (see the CoreText large pass); the
+ * 64 px canvas clips the rest, which bounds the cost. */
+#define IOSR_CG_SCALE 8.0
+static double g_pdf_scale = 0;
 static CGColorSpaceRef (*p_CGColorSpaceCreateDeviceRGB)(void) = NULL;
 static void (*p_CGColorSpaceRelease)(CGColorSpaceRef) = NULL;
 
@@ -520,6 +585,10 @@ static int resolve_target(void) {
     p_CGContextDrawPDFPage = dlsym(fw_handle, "CGContextDrawPDFPage");
     p_CGColorSpaceCreateDeviceRGB = dlsym(fw_handle, "CGColorSpaceCreateDeviceRGB");
     p_CGColorSpaceRelease = dlsym(fw_handle, "CGColorSpaceRelease");
+    p_CGContextScaleCTM = dlsym(fw_handle, "CGContextScaleCTM");
+    const char *scale = getenv("IOSR_PDF_SCALE");
+    g_pdf_scale = scale ? strtod(scale, NULL) : IOSR_CG_SCALE;
+    if (!p_CGContextScaleCTM) g_pdf_scale = 0;
     /* Scanner leg is optional — degrade to render-only when absent. */
     p_CGPDFOperatorTableCreate = dlsym(fw_handle, "CGPDFOperatorTableCreate");
     p_CGPDFOperatorTableSetCallback = dlsym(fw_handle, "CGPDFOperatorTableSetCallback");
@@ -608,6 +677,19 @@ static int iosr_pdf_sweep_page(CGPDFPageRef page) {
     return g_pdf_op_hits > before;
 }
 
+/* Render `page` into a small offscreen RGBA bitmap (row bytes = width * 4),
+ * forcing full content-stream interpretation, under a uniform `scale`. */
+static int draw_page(CGPDFPageRef page, double scale) {
+    CGContextRef ctx = p_CGBitmapContextCreate(
+        NULL, 64, 64, 8, 64 * 4,
+        p_CGColorSpaceCreateDeviceRGB(), IOSR_CG_BITMAP_ALPHA);
+    if (!ctx) return 0;
+    if (scale != 1.0) p_CGContextScaleCTM(ctx, scale, scale);
+    p_CGContextDrawPDFPage(ctx, page);
+    p_CGContextRelease(ctx);
+    return 1;
+}
+
 static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
     (void)data; (void)size;
     if (!g_pdf_op_table) iosr_pdf_install_op_table();
@@ -621,15 +703,8 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
         for (size_t pno = 1; pno <= cap; pno++) {
             CGPDFPageRef page = p_CGPDFDocumentGetPage(doc, pno);
             if (!page) continue;
-            /* Small offscreen RGBA bitmap; row bytes = width * 4. */
-            CGContextRef ctx = p_CGBitmapContextCreate(
-                NULL, 64, 64, 8, 64 * 4,
-                p_CGColorSpaceCreateDeviceRGB(), IOSR_CG_BITMAP_ALPHA);
-            if (ctx) {
-                p_CGContextDrawPDFPage(ctx, page);  /* forces full decode */
-                p_CGContextRelease(ctx);
-                decoded = 1;
-            }
+            if (draw_page(page, 1.0)) decoded = 1;
+            if (g_pdf_scale > 1.0 && draw_page(page, g_pdf_scale)) decoded = 1;
             if (iosr_pdf_sweep_page(page)) decoded = 1;
         }
         p_CGPDFDocumentRelease(doc);
@@ -1184,6 +1259,8 @@ static int run_target(const uint8_t *data, size_t size, CFDataRef cfdata) {
         volatile uint8_t y = buf[0];                    /* use-after-free */
         (void)y;
         buf = NULL;
+    } else if (st_contains(data, size, "IOSR-SELFTEST-HANG")) {
+        for (;;) sleep(1);          /* hang (liveness tests); too long for mutation to hit */
     }
     if (buf) free(buf);
     return 1;
@@ -1279,6 +1356,12 @@ static CTFontDescriptorRef (*p_CTFontDescriptorCreateCopyWithVariation)(
 static CFStringRef p_kCTFontVariationAxisIdentifierKey = NULL;
 static CFStringRef p_kCTFontVariationAxisMinimumValueKey = NULL;
 static CFStringRef p_kCTFontVariationAxisMaximumValueKey = NULL;
+/* Font tables and ligature carets. */
+static CFDataRef (*p_CTFontCopyTable)(CTFontRef, uint32_t, uint32_t) = NULL;
+static const uint8_t *(*p_CFDataGetBytePtr)(CFDataRef) = NULL;
+static CFIndex (*p_CFDataGetLength)(CFDataRef) = NULL;
+static CFIndex (*p_CTFontGetLigatureCaretPositions)(CTFontRef, uint16_t, double *,
+                                                    CFIndex) = NULL;
 
 /* Shape an attributed line through the layout engine - drives feature-driven
  * glyph substitution (morx/GSUB) and cluster mapping, not merely outline
@@ -1348,6 +1431,10 @@ static int shape_line(CTFontRef font, CFStringRef text, CGContextRef canvas) {
 #define IOSR_CT_GRID (IOSR_CT_CANVAS / IOSR_CT_CELL)
 #define IOSR_CT_MAX_GLYPHS 64u     /* bound per-instance raster work */
 #define IOSR_CT_DRAW_SIZE 24.0     /* pt: large enough to pick real bitmap strikes */
+#define IOSR_CT_LARGE_SIZE 1024.0  /* pt: the large-size pass (draw_large) */
+#define IOSR_CT_MAX_STRIKES 2      /* embedded bitmap strikes drawn (draw_strikes) */
+#define IOSR_CT_SHEAR 0.25         /* x shear of the sheared strike draw */
+#define IOSR_CT_MAX_CARETS 16
 #define IOSR_CT_MAX_AXES 16
 #define IOSR_CT_MAX_TEXT 48
 #define IOSR_CT_PER_SCRIPT 8
@@ -1383,12 +1470,10 @@ static long canvas_close(IOSR_Canvas *c) {
  * across the rest -- whether or not cmap maps them, so every glyph format the
  * font carries is rasterized: glyf/CFF/CFF2 outlines, sbix and bdat bitmap
  * strikes, COLR/CPAL and SVG color glyphs. */
-static void draw_glyph_grid(CTFontRef font, CGContextRef ctx) {
+static size_t sample_glyphs(CTFontRef font, uint16_t glyphs[IOSR_CT_MAX_GLYPHS]) {
     CFIndex count = p_CTFontGetGlyphCount(font);
-    if (count <= 0) return;
+    if (count <= 0) return 0;
     if (count > 0xFFFF) count = 0xFFFF;               /* glyph IDs are 16-bit */
-    uint16_t glyphs[IOSR_CT_MAX_GLYPHS];
-    IOSR_CGPoint pos[IOSR_CT_MAX_GLYPHS];
     size_t n = 0, half = IOSR_CT_MAX_GLYPHS / 2;
     for (; n < half && (CFIndex)n < count; n++) glyphs[n] = (uint16_t)n;
     if (count > (CFIndex)IOSR_CT_MAX_GLYPHS) {
@@ -1397,6 +1482,14 @@ static void draw_glyph_grid(CTFontRef font, CGContextRef ctx) {
     } else {
         for (; (CFIndex)n < count; n++) glyphs[n] = (uint16_t)n;
     }
+    return n;
+}
+
+static void draw_glyph_grid(CTFontRef font, CGContextRef ctx) {
+    uint16_t glyphs[IOSR_CT_MAX_GLYPHS];
+    IOSR_CGPoint pos[IOSR_CT_MAX_GLYPHS];
+    size_t n = sample_glyphs(font, glyphs);
+    if (n == 0) return;
     for (size_t i = 0; i < n; i++) {
         pos[i].x = (double)((i % IOSR_CT_GRID) * IOSR_CT_CELL + 4);
         pos[i].y = (double)((i / IOSR_CT_GRID) * IOSR_CT_CELL + 6);
@@ -1499,9 +1592,95 @@ static long draw_aliased(CTFontRef font) {
     return canvas_close(&c);
 }
 
+/* The glyph grid again at a large size: rasterizer arithmetic scales with the
+ * glyph's device size, so fixed-point overflow in coverage-buffer sizing only
+ * shows up big. CVE-2026-86950 (exploited; composite-glyph scaling overflowing
+ * CoreGraphics' anti-aliasing rasterizer) needed a large text size: at the
+ * 24 pt default its public trigger font drew cleanly. Most of each glyph falls
+ * outside the canvas; the rasterizer still sizes and walks it.
+ * IOSR_CT_LARGE_SIZE overrides the size (points); 0 turns the pass off. */
+static long draw_large(CTFontDescriptorRef desc) {
+    double size = IOSR_CT_LARGE_SIZE;
+    const char *v = getenv("IOSR_CT_LARGE_SIZE");
+    if (v) size = strtod(v, NULL);
+    if (size <= 0) return 0;
+    CTFontRef big = p_CTFontCreateWithFontDescriptor(desc, size, NULL);
+    if (!big) return 0;
+    long ink = 0;
+    IOSR_Canvas c;
+    if (canvas_open(&c)) {
+        draw_glyph_grid(big, c.ctx);
+        ink = canvas_close(&c);
+    }
+    p_CFRelease(big);
+    return ink;
+}
+
+/* Pixel sizes of the font's embedded bitmap strikes, from the BitmapSize
+ * records of its EBLC / bloc / CBLC table (48 bytes each after an 8-byte
+ * header; ppemY is byte 45): at most `max`, in table order. */
+static int strike_sizes(CTFontRef font, int *out, int max) {
+    static const uint32_t tags[] = {0x45424C43u /* EBLC */, 0x626C6F63u /* bloc */,
+                                    0x43424C43u /* CBLC */};
+    int n = 0;
+    for (size_t t = 0; t < sizeof tags / sizeof tags[0] && n == 0; t++) {
+        CFDataRef d = p_CTFontCopyTable(font, tags[t], 0);
+        if (!d) continue;
+        const uint8_t *p = p_CFDataGetBytePtr(d);
+        CFIndex len = p_CFDataGetLength(d);
+        uint32_t count = (p && len >= 8)
+            ? (uint32_t)p[4] << 24 | (uint32_t)p[5] << 16 | (uint32_t)p[6] << 8 | p[7] : 0;
+        for (uint32_t i = 0; i < count && n < max; i++) {
+            CFIndex rec = 8 + (CFIndex)i * 48;
+            if (rec + 48 > len) break;
+            int ppem = p[rec + 45];
+            if (ppem > 0 && (n == 0 || out[n - 1] != ppem)) out[n++] = ppem;
+        }
+        p_CFRelease(d);
+    }
+    return n;
+}
+
+/* Embedded bitmap strikes (bdat / EBDT / CBDT) are used only at their own
+ * pixel sizes, which the 24 pt and large passes never hit, and only a
+ * non-identity font matrix sends a strike through the bitmap transform and
+ * skew code. Draw up to two strikes aliased, upright and sheared.
+ * IOSR_CT_STRIKES=0 turns the pass off. */
+static long draw_strikes(CTFontDescriptorRef desc, CTFontRef font) {
+    if (!p_CTFontCopyTable || !p_CFDataGetBytePtr || !p_CFDataGetLength) return 0;
+    const char *v = getenv("IOSR_CT_STRIKES");
+    if (v && *v == '0') return 0;
+    int sizes[IOSR_CT_MAX_STRIKES];
+    int n = strike_sizes(font, sizes, IOSR_CT_MAX_STRIKES);
+    IOSR_CGAffineTransform shear = {1, 0, IOSR_CT_SHEAR, 1, 0, 0};
+    long ink = 0;
+    for (int i = 0; i < n; i++) {
+        for (int sheared = 0; sheared < 2; sheared++) {
+            CTFontRef f = p_CTFontCreateWithFontDescriptor(desc, (double)sizes[i],
+                                                           sheared ? &shear : NULL);
+            if (!f) continue;
+            ink += draw_aliased(f);
+            p_CFRelease(f);
+        }
+    }
+    return ink;
+}
+
+/* Ligature caret positions (GDEF LigCaretList, AAT lcar) of the sampled
+ * glyphs: a table no drawing or layout pass reads. */
+static void probe_ligature_carets(CTFontRef font) {
+    if (!p_CTFontGetLigatureCaretPositions) return;
+    uint16_t glyphs[IOSR_CT_MAX_GLYPHS];
+    double carets[IOSR_CT_MAX_CARETS];
+    size_t n = sample_glyphs(font, glyphs);
+    for (size_t i = 0; i < n; i++)
+        p_CTFontGetLigatureCaretPositions(font, glyphs[i], carets, IOSR_CT_MAX_CARETS);
+}
+
 /* Rasterize the font: glyph grid plus a shaped line of its own characters at the
- * default instance, the grid again aliased (hinting), then the variation
- * extremes. Returns inked bytes. */
+ * default instance, the grid again aliased (hinting) and large, embedded bitmap
+ * strikes, then the variation extremes; and read its ligature carets. Returns
+ * inked bytes. */
 static long rasterize(CTFontDescriptorRef desc) {
     if (!p_CTFontGetGlyphCount || !p_CTFontDrawGlyphs || !p_CTLineDraw
         || !p_CGContextSetTextPosition || !p_CGBitmapContextCreate
@@ -1522,6 +1701,9 @@ static long rasterize(CTFontDescriptorRef desc) {
         ink += canvas_close(&c);
     }
     ink += draw_aliased(font);
+    ink += draw_large(desc);
+    ink += draw_strikes(desc, font);
+    probe_ligature_carets(font);
     ink += draw_variation_extremes(desc, font);
     p_CFRelease(font);
     return ink;
@@ -1570,6 +1752,10 @@ static int resolve_target(void) {
     p_CFNumberGetValue = dlsym(cf_handle, "CFNumberGetValue");
     p_CTFontDescriptorCreateCopyWithVariation =
         dlsym(fw_handle, "CTFontDescriptorCreateCopyWithVariation");
+    p_CTFontCopyTable = dlsym(fw_handle, "CTFontCopyTable");
+    p_CTFontGetLigatureCaretPositions = dlsym(fw_handle, "CTFontGetLigatureCaretPositions");
+    p_CFDataGetBytePtr = dlsym(cf_handle, "CFDataGetBytePtr");
+    p_CFDataGetLength = dlsym(cf_handle, "CFDataGetLength");
     /* Like kCTFontAttributeName below: exported globals holding CFStringRefs. */
     CFStringRef *axis_id = dlsym(fw_handle, "kCTFontVariationAxisIdentifierKey");
     CFStringRef *axis_min = dlsym(fw_handle, "kCTFontVariationAxisMinimumValueKey");
@@ -1750,7 +1936,10 @@ static int run_one_file(const char *path, int index) {
     #ifdef HARNESS_SANCOV
     sancov_reset();
     #endif
-    if (!iosr_fuzz_file(path)) {
+    iosr_input_begin(index);
+    int ran = iosr_fuzz_file(path);
+    iosr_input_end();
+    if (!ran) {
         printf("DONE %d rejected\n", index);
         fflush(stdout);
         return 0;
@@ -1773,6 +1962,8 @@ static int run_one_file(const char *path, int index) {
 int main(int argc, char **argv) {
     iosr_arm_guard_malloc(argv);          /* may re-exec under libgmalloc */
     iosr_install_crash_reporter();
+    iosr_watch_parent();
+    iosr_install_input_deadline();
     LLVMFuzzerInitialize(&argc, &argv);
     if (argc < 2) {
         fprintf(stderr, "usage: %s <input-file> [<input-file> ...]\n", argv[0]);

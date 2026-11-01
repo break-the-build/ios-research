@@ -92,6 +92,13 @@ because breaking it already cost hours: the strategy of record is
 - Never run `tools/harness/build.sh` while a `run.py` campaign is running: it
   rewrites `tools/harness/build/<fw>_fuzzer`, the binary the campaign keeps
   launching. `tools/harness/jackalope.sh` is safe (it builds a private copy).
+- Check for leftovers before you start and after you stop:
+  `ps -axo pid,ppid,etime,pcpu,comm -r | head -15`. A harness with parent PID
+  1, or a system XPC service busy for hours, is a leftover: report it with
+  its PID and age, and kill it only if you started it. Nine leftovers once
+  held 9 of 24 cores for two days while two nights of reports blamed
+  "contention" and said nothing was running. (Harnesses built since then exit
+  with their parent.)
 
 **Oracle**
 - Every campaign starts with the detection canary (`run.py` runs it; exit 4

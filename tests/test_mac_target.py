@@ -371,6 +371,65 @@ def test_execute_batch_missing_harness(tmp_path):
     assert all(r.outcome == Outcome.ABNORMAL for r in results)
 
 
+# --- per-input deadline (IOSR_INPUT_TIMEOUT) ---------------------------------
+
+def test_hang_marker_with_exit_124_is_timeout(tmp_path):
+    stub = tmp_path / "imageio_fuzzer"
+    _write_stub(stub, stdout="RUN 0\n", stderr="IOSR-HANG input=0 seconds=10\n", code=124)
+    res = MacFuzzTarget("imageio", harness=str(stub)).execute(b"x")
+    assert res.outcome == Outcome.TIMEOUT
+    assert res.detail == "IOSR-HANG input=0 seconds=10"
+
+
+def test_exit_124_without_hang_marker_is_abnormal(tmp_path):
+    stub = tmp_path / "imageio_fuzzer"
+    _write_stub(stub, stderr="something else\n", code=124)
+    assert MacFuzzTarget("imageio", harness=str(stub)).execute(b"x").outcome == Outcome.ABNORMAL
+
+
+def _hanging_stub(path, calls):
+    """A driver stub that hangs (per-input deadline) on any file containing HANG
+    and logs each invocation's argument count and IOSR_INPUT_TIMEOUT."""
+    path.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$# $IOSR_INPUT_TIMEOUT" >> {calls}\n'
+        'i=0\nfor f in "$@"; do echo "RUN $i"\n'
+        '  if grep -q HANG "$f"; then echo "IOSR-HANG input=$i seconds=1" >&2; exit 124; fi\n'
+        '  echo "DONE $i decoded"; i=$((i+1)); done\nexit 0\n')
+    path.chmod(0o755)
+
+
+def test_execute_batch_resumes_after_a_hung_input(tmp_path):
+    stub, calls = tmp_path / "imageio_fuzzer", tmp_path / "calls.txt"
+    _hanging_stub(stub, calls)
+    t = MacFuzzTarget("imageio", harness=str(stub), timeout_s=2.5)
+    results = t.execute_batch([b"a", b"HANG", b"b", b"c"])
+    assert [r.outcome for r in results] == [
+        Outcome.ACCEPTED, Outcome.TIMEOUT, Outcome.ACCEPTED, Outcome.ACCEPTED]
+    assert results[1].detail.startswith("IOSR-HANG input=1")
+    # One batch up to the hang, one for the rest; the deadline is timeout_s rounded up.
+    assert calls.read_text().splitlines() == ["4 3", "2 3"]
+
+
+def test_execute_batch_hang_at_the_end_needs_no_second_batch(tmp_path):
+    stub, calls = tmp_path / "imageio_fuzzer", tmp_path / "calls.txt"
+    _hanging_stub(stub, calls)
+    t = MacFuzzTarget("imageio", harness=str(stub))
+    results = t.execute_batch([b"a", b"b", b"HANG"])
+    assert [r.outcome for r in results] == [
+        Outcome.ACCEPTED, Outcome.ACCEPTED, Outcome.TIMEOUT]
+    assert calls.read_text().splitlines() == ["3 10"]
+
+
+def test_execute_batch_hang_index_mismatch_reruns_each_input(tmp_path):
+    # The marker names an input the DONE lines do not lead up to: attribution is
+    # unclear, so every input is re-run on its own.
+    stub = tmp_path / "imageio_fuzzer"
+    _write_stub(stub, stdout="RUN 0\n", stderr="IOSR-HANG input=5 seconds=1\n", code=124)
+    results = MacFuzzTarget("imageio", harness=str(stub)).execute_batch([b"a", b"b"])
+    assert [r.outcome for r in results] == [Outcome.TIMEOUT, Outcome.TIMEOUT]
+
+
 # --- format-aware seeds & structure mutation (#17) -------------------------
 
 @pytest.mark.parametrize("key", sorted(MAC_FRAMEWORKS))

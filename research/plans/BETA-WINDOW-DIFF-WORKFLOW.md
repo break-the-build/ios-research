@@ -80,6 +80,37 @@ Use the **IPSW** for the beta (developer.apple.com, research device's model):
 27.0 beta OTA. Baselines hold Apple binaries: keep them outside the
 repository.
 
+### Which functions changed: `func_diff.py`
+
+`lane_diff.py` counts changed functions; `tools/beta/func_diff.py` names them,
+on the same baselines. It masks the PC-relative fields of every function's
+instructions (branch and call targets, ADRP pages and the page offsets that
+follow), aligns the two builds' functions in address order (so stripped
+images such as RawCamera are matched too), and compares C strings. Each
+changed function is either **operand-only** (same instructions, different
+offsets or constants: usually a struct layout change) or a **code change**,
+ranked by added checks (compares and conditional branches), then traps, then
+growth. A bounds fix adds checks, and often an error string next to them.
+
+```bash
+python tools/beta/func_diff.py ~/dev/betas/baselines/<old> ~/dev/betas/baselines/<new> \
+    [--image CoreGraphics ...] --json func.json > func.md
+```
+
+macOS point releases work the same way, and the research Mac's own cache is
+the "old" side: copy
+`/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_arm64e*`
+into `<dir>/<build>__<model>/` (`ipsw` mis-resolves symlinks to it) and pass
+that cache to `lane_baseline.sh`. Apple ships no full IPSW for a security
+update to the previous macOS; take its dyld cache from the OTA instead:
+`ipsw download ota --platform macos --device <model> --version <v> --dyld
+--dyld-arch arm64e -y -o <dir>` (5.4 GB for 26.7.2). Measured, 26.6.2 →
+26.7.2 across the 16 lane images: 7 s; 435 code changes and 2,892
+operand-only ones.
+
+Keep the reports with the baselines, outside the repository: a ranked list
+of what Apple just fixed is a list of leads.
+
 ## Aiming campaigns at the result
 
 1. **New-token families → dictionary**: regenerate the evidence dictionary

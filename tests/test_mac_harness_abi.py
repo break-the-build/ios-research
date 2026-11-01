@@ -152,7 +152,7 @@ def test_coreaudio_types_are_not_packed():
 def test_imageio_decodes_into_an_inspectable_buffer():
     """The pixel-count depth metric needs our own bitmap, not a NULL-backed context."""
     body = SRC.split("#if defined(HARNESS_TARGET_IMAGEIO)", 1)[1].split("#elif", 1)[0]
-    assert "p_CGBitmapContextCreate(\n                    pixels," in body
+    assert re.search(r"p_CGBitmapContextCreate\(\s*pixels,", body)
     assert 'g_depth_name = "pixels"' in body
 
 

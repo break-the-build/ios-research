@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -357,6 +358,122 @@ def test_native_guard_malloc_catches_heap_bugs_without_instrumentation(tmp_path)
         # the exported entry point that contains it.
         assert res.diagnostics.stack_trace[0].endswith("LLVMFuzzerTestOneInput")
     assert t.execute(b"clean input").outcome == Outcome.ACCEPTED
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _wait_until(cond, seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while not cond():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+@pytest.mark.native
+@pytest.mark.skipif(not _can_build_native(), reason="requires macOS with libgmalloc")
+def test_native_hung_input_costs_one_deadline_not_the_batch(tmp_path):
+    t = MacFuzzTarget("selftest", harness=str(_build(tmp_path, "selftest")), timeout_s=1)
+    start = time.monotonic()
+    results = t.execute_batch([b"ok", b"IOSR-SELFTEST-HANG", b"ok", b"ok"])
+    assert [r.outcome for r in results] == [
+        Outcome.ACCEPTED, Outcome.TIMEOUT, Outcome.ACCEPTED, Outcome.ACCEPTED]
+    assert time.monotonic() - start < 10   # was timeout_s * 4, then 4 re-runs
+
+
+@pytest.mark.native
+@pytest.mark.skipif(not _can_build_native(), reason="requires macOS with libgmalloc")
+def test_native_harness_exits_when_its_parent_dies(tmp_path):
+    harness = _build(tmp_path, "selftest")
+    hang, pidfile = tmp_path / "hang.bin", tmp_path / "child.pid"
+    hang.write_bytes(b"IOSR-SELFTEST-HANG")
+    parent = subprocess.Popen(
+        ["sh", "-c", (f'"{harness}" "{hang}" >/dev/null 2>&1 & echo $! > "{pidfile}"; '
+                      "exec sleep 60")])
+    child = 0
+    try:
+        assert _wait_until(lambda: pidfile.exists() and pidfile.read_text().strip(), 10)
+        child = int(pidfile.read_text())
+        time.sleep(1)                    # past the Guard Malloc re-exec, into the hang
+        assert _alive(child)
+        parent.kill()
+        parent.wait()
+        assert _wait_until(lambda: not _alive(child), 10)
+    finally:
+        parent.kill()
+        if child and _alive(child):
+            os.kill(child, 9)
+
+
+def _rect_pdf() -> bytes:
+    """A one-page PDF with a filled rectangle, with a correct xref table."""
+    content = b"0 0 1 rg 10 10 100 100 re f"
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>",
+            b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content)]
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (i, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % off for off in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objs) + 1, xref)
+    return bytes(out)
+
+
+def _done_line(harness: Path, path: Path, **env: str) -> tuple[str, str]:
+    r = subprocess.run([str(harness), str(path)], capture_output=True, timeout=60,
+                       check=False, env={**os.environ, **env})
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")[-2000:]
+    lines = _decode_lines(r.stdout.decode())
+    assert len(lines) == 1
+    return lines[0]
+
+
+@pytest.mark.native
+@pytest.mark.skipif(not _can_build_native(), reason="requires macOS with libgmalloc")
+def test_native_imageio_thumbnail_pass_decodes_pdf(tmp_path):
+    """ImageIO hands a PDF to CoreGraphics only on the thumbnail path."""
+    harness = _build(tmp_path, "imageio")
+    pdf = tmp_path / "rect.pdf"
+    pdf.write_bytes(_rect_pdf())
+    assert _done_line(harness, pdf, IOSR_IMGIO_THUMBNAIL="0")[0] == "rejected"
+    status, metric = _done_line(harness, pdf)
+    assert status == "decoded" and int(metric.split("=")[1]) > 0
+
+
+@pytest.mark.native
+@pytest.mark.skipif(not _can_build_native(), reason="requires macOS with libgmalloc")
+def test_native_coretext_large_pass_rasterizes_more(tmp_path):
+    harness = _build(tmp_path, "coretext")
+    arial = Path("/System/Library/Fonts/Supplemental/Arial.ttf")
+    off = _done_line(harness, arial, IOSR_CT_LARGE_SIZE="0")
+    on = _done_line(harness, arial)
+    assert off[0] == on[0] == "decoded"
+    assert int(on[1].split("=")[1]) > int(off[1].split("=")[1])
+
+
+@pytest.mark.native
+@pytest.mark.skipif(not _can_build_native(), reason="requires macOS with libgmalloc")
+def test_native_coretext_strike_pass_draws_embedded_bitmaps(tmp_path):
+    """Monaco's bitmap strikes are used only at their own pixel sizes."""
+    harness = _build(tmp_path, "coretext")
+    monaco = Path("/System/Library/Fonts/Monaco.ttf")
+    if not monaco.exists():
+        pytest.skip("Monaco.ttf not installed")
+    off = _done_line(harness, monaco, IOSR_CT_STRIKES="0")
+    on = _done_line(harness, monaco)
+    assert int(on[1].split("=")[1]) > int(off[1].split("=")[1])
 
 
 NATIVE_DEPTH = [

@@ -297,6 +297,58 @@ result and property ID against the SDK in CI.
   output, 30 of 90 changed the aliased one. So the glyph grid is drawn a
   second time, aliased. CVE-2023-41990 (exploited in the wild) was in that
   interpreter.
+- **CoreText draws large.** The grid is drawn a third time at 1024 pt
+  (`IOSR_CT_LARGE_SIZE`; `0` turns it off). Rasterizer arithmetic scales with
+  device size: the public trigger font for CVE-2026-86950 (exploited; an
+  overflow in CoreGraphics' anti-aliasing rasterizer, fixed in 26.7.1) draws
+  cleanly at 24, 96, 256, 512 and 4096 pt and faults only at 1024 pt, where
+  it is caught under both oracles. The window is narrow, so the size is a
+  deliberate choice; past it CoreGraphics no longer rasterizes glyphs this way.
+- **CoreText draws embedded bitmap strikes** (`bdat`/`EBDT`/`CBDT`) at their
+  own pixel sizes, read from `EBLC`/`bloc`/`CBLC`, aliased, upright and with a
+  0.25 shear (`IOSR_CT_STRIKES=0` turns it off). Strikes are used only at
+  their own sizes, and only a non-identity font matrix runs the bitmap
+  transform and skew code. Measured on Monaco with lldb: the previous build
+  never entered `sbit_GetBitMapInfo`, `TransformScalerBitmap` or `SkewBitmap`;
+  this one does, 156, 72 and 72 times.
+- **CoreText reads ligature carets** (`CTFontGetLigatureCaretPositions` for
+  the sampled glyphs: GDEF `LigCaretList`, AAT `lcar`), a table no drawing or
+  layout pass reads.
+- After these passes, Arial (`/System/Library/Fonts/Supplemental/Arial.ttf`)
+  decodes to `pixels=59234` (11944 before the large pass): the sanity value
+  that shows a build has every pass.
+- **ImageIO also asks for a thumbnail** (`CGImageSourceCreateThumbnailAtIndex`,
+  at most 256 px, the file's own thumbnail if it has one, EXIF orientation
+  applied; `IOSR_IMGIO_THUMBNAIL=0` turns it off). That is the path previews
+  take. It parses embedded thumbnails (EXIF/JFIF, HEIF, RAW previews), runs the
+  codecs' subsampled decoders, and decodes formats `CreateImageAtIndex` won't:
+  a PDF is rejected without it and rendered with it, which is how the ImageIO
+  harness catches CVE-2026-86950 from the public trigger PDF.
+- **CoreGraphics draws each PDF page twice,** at 1:1 and magnified 8 times
+  (`IOSR_PDF_SCALE`; `1` or less turns it off) into the same 64 px canvas, for
+  the same reason as the large CoreText pass. No measurable cost on 40 system
+  PDFs.
+- Noise check for these passes: 400 system images, 358 fonts and 300 PDFs all
+  decode under both oracles, with no fault.
+
+### Liveness: hangs and orphans
+
+- **Per-input deadline.** With `IOSR_INPUT_TIMEOUT=<s>` the driver ends the
+  process on an input that runs longer, printing `IOSR-HANG input=<i>
+  seconds=<s>` and exiting 124. The Python target sets it to its timeout for
+  every batch: the inputs before the hang keep their results, the hung one is
+  a TIMEOUT, and the rest continue as a new batch. Before, one hang held a
+  worker for `timeout × batch size` (42 minutes at 256 × 10 s) and then
+  re-ran all 256 inputs one by one.
+- **Orphan exit.** A harness whose launcher dies (a killed campaign, a closed
+  shell) used to be re-parented to launchd and keep running. Stuck on a
+  hanging input, it and the framework XPC service decoding for it stayed at
+  100% CPU: nine such pairs once held 9 of 24 cores for two days and halved
+  two nights of campaign throughput, unnoticed. The driver now exits when its
+  parent does (`IOSR_ORPHAN_EXIT=0` turns that off).
+- Check before and after a run anyway:
+  `ps -axo pid,ppid,etime,pcpu,comm -r | head -15` should show no harness with
+  parent PID 1 and no system XPC service busy for hours.
 
 ### Lane generators (`tools/gen/`)
 
