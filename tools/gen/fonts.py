@@ -24,6 +24,7 @@ Authorized / own-machine research only (SECURITY.md).
 
 Usage:
     python tools/gen/fonts.py FONT ... --out DIR [--table 40] [--hint 300] [--seed 1]
+        [--tables EBLC,EBDT]
 """
 
 from __future__ import annotations
@@ -283,10 +284,14 @@ def mutate_hinting(tables: dict[str, bytes], rng: random.Random) -> tuple[str, d
 
 # ---------------------------------------------------------------- driver
 
-def variants(font: bytes, rng: random.Random, n_table: int, n_hint: int):
-    """Yield (name, bytes) variants of one font."""
+def variants(font: bytes, rng: random.Random, n_table: int, n_hint: int,
+             only: set[str] | None = None):
+    """Yield (name, bytes) variants of one font; ``only`` limits the table
+    variants to those tags."""
     version, order, tables = parse_sfnt(font)
     for tag in order:
+        if only is not None and tag.strip() not in only:
+            continue
         safe = "".join(c if c.isalnum() else "_" for c in tag.strip())   # OS/2 -> OS_2
         for k in range(n_table):
             yield f"tbl-{safe}-{k}", build_sfnt(
@@ -307,13 +312,17 @@ def main(argv=None) -> int:
     ap.add_argument("--table", type=int, default=40, help="variants per table (default 40)")
     ap.add_argument("--hint", type=int, default=300, help="hinting variants per font (default 300)")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--tables", default=None,
+                    help="comma-separated tags: table variants only for these "
+                         "(e.g. EBLC,EBDT,bloc,bdat,GDEF,lcar)")
     args = ap.parse_args(argv)
+    only = {t.strip() for t in args.tables.split(",")} if args.tables else None
     args.out.mkdir(parents=True, exist_ok=True)
     total = 0
     for path in args.fonts:
         rng = random.Random(f"{args.seed}:{path.name}")
         try:
-            items = list(variants(path.read_bytes(), rng, args.table, args.hint))
+            items = list(variants(path.read_bytes(), rng, args.table, args.hint, only))
         except (struct.error, IndexError, ValueError) as exc:
             print(f"skip {path}: not a parseable sfnt ({exc})", file=sys.stderr)
             continue

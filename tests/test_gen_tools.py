@@ -111,6 +111,17 @@ def test_table_variants_touch_one_table_and_sanitize_names(tmp_path):
     assert names[0] == "Tiny-tbl-OS_2-0.ttf" and len(names) == 6
 
 
+def test_tables_option_limits_table_variants(tmp_path):
+    src = tmp_path / "Tiny.ttf"
+    src.write_bytes(fonts.build_sfnt(b"\x00\x01\x00\x00", ["EBLC", "OS/2", "head"],
+                                     {"EBLC": bytes(56), "OS/2": bytes(20), "head": bytes(54)}))
+    assert fonts.main([str(src), "--out", str(tmp_path / "v"), "--table", "4", "--hint", "0",
+                       "--tables", "EBLC, OS/2"]) == 0
+    names = sorted(p.name for p in (tmp_path / "v").iterdir())
+    assert len(names) == 8
+    assert {n.split("-")[2] for n in names} == {"EBLC", "OS_2"}
+
+
 def test_variants_are_deterministic_per_seed(tmp_path):
     src = tmp_path / "Tiny.ttf"
     src.write_bytes(tiny_font())
@@ -266,6 +277,37 @@ def test_rawsweep_streams_and_keeps_only_leads(tmp_path):
     assert result["leads"] == [{"file": "be-ifd0-ImageWidth-0.dng", "verdict": "crash"}]
     assert (crashes / "crashed" / "be-ifd0-ImageWidth-0.dng").exists()
     assert not any(work.iterdir())
+
+
+def _gate_stub(tmp_path: Path) -> Path:
+    """Decodes everything except files named *crash* (SIGSEGV) and *hang*
+    (the driver's per-input deadline: IOSR-HANG, exit 124)."""
+    stub = tmp_path / "harness.sh"
+    stub.write_text('#!/bin/sh\ni=0\nfor f in "$@"; do\n'
+                    '  case "$(basename "$f")" in *crash*) kill -SEGV $$ ;;\n'
+                    '    *hang*) echo "IOSR-HANG input=$i seconds=$IOSR_INPUT_TIMEOUT" >&2; exit 124 ;;\n'
+                    '  esac\n'
+                    '  echo "DONE $i decoded pixels=5"; i=$((i+1))\ndone\n')
+    stub.chmod(0o755)
+    return stub
+
+
+def test_gate_counts_hangs_apart_from_crashes(tmp_path, capsys):
+    d = tmp_path / "in"
+    d.mkdir()
+    for name in ("a", "b-crash", "c-hang", "d"):
+        (d / f"{name}.bin").write_bytes(b"x")
+    stub = _gate_stub(tmp_path)
+    assert gate.main(["--target", "mac:imageio", str(d), "--crashes", str(tmp_path / "c"),
+                      "--hangs", str(tmp_path / "h")], harness=str(stub)) == 0
+    out = capsys.readouterr().out
+    assert "crashed: 1   hung: 1" in out
+    assert [p.name for p in (tmp_path / "c").iterdir()] == ["b-crash.bin"]
+    assert [p.name for p in (tmp_path / "h").iterdir()] == ["c-hang.bin"]
+    # Without a hang list (rawsweep's call), a hang still surfaces as a crash.
+    files = sorted(d.iterdir())
+    _decoded, crashed = gate.run(str(stub), files)
+    assert sorted(files[i].name for i in crashed) == ["b-crash.bin", "c-hang.bin"]
 
 
 def test_gate_kind_groups_variant_names():

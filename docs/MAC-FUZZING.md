@@ -357,6 +357,11 @@ Structured generators for the research lanes, with a shared decode gate:
 ```bash
 python tools/gen/fonts.py /System/Library/Fonts/Supplemental/Arial.ttf --out v/   # lane 5
 python tools/gen/dng.py mismatch my-proraw.dng --out v/                          # lane 1
+python tools/gen/fonts.py Monaco.ttf --out v/ --tables EBLC,EBDT,bloc,bdat --hint 0   # chosen tables only
+python tools/gen/pdf.py shading --out v/                                         # lane 3
+python tools/gen/pdf.py random --out v/ --count 2000 --seed 7
+python tools/gen/exifthumb.py build main.jpg thumb.jpg --out seed.jpg              # lane 4
+python tools/gen/exifthumb.py variants seed.jpg --out v/ --all-tags
 python tools/gen/gate.py --target mac:coretext v/ --ok ok/ --crashes crashes/
 python tools/gen/rawsweep.py raw/*.dng raw/*.nef --work w/ --crashes leads/ \
     --workers 12 --all-tags --makernote 40                                     # lane 1, streaming
@@ -383,8 +388,29 @@ python tools/gen/rawsweep.py raw/*.dng raw/*.nef --work w/ --crashes leads/ \
   30 MB RAW would otherwise fill the disk). Measured on that ProRAW: 596
   variants in 94 s and, with `--all-tags --makernote 40`, 1,246 in 184 s on
   12 workers, about 95% decoded.
+- `fonts.py --tables`: table variants only for the named tables, for aiming
+  at one table family (bitmap strikes: `EBLC,EBDT,bloc,bdat,CBLC,CBDT`;
+  carets: `GDEF,lcar`). Measured: 720 strike variants of six system fonts
+  with strikes, all decode.
+- `pdf.py`: whole objects that byte mutation can't produce. `shading`: all
+  seven shading types with color space / function output counts that match
+  or don't (types 1-3), and mesh streams (types 4-7) whose Decode array, bit
+  depths, row length and data length agree with the dictionary or don't;
+  painted with `sh` and as patterns (1,017 files). `geometry`: paths, clips,
+  strokes, dashes and text at integer and fixed-point boundaries under scaled
+  and sheared transforms (1,107 files). `random`: seeded mixes of both. All
+  geometry and random files decode.
+- `exifthumb.py`: `build` embeds a JPEG thumbnail in a JPEG's APP1 Exif
+  segment (IFD1 offset/length), which few real photos have and which the
+  ImageIO thumbnail pass then decodes in preference to the image. `variants`
+  edits one field in place: the (offset, length) pair (boundaries, past the
+  end, sums that wrap 32 bits), count and offset of out-of-line ASCII and
+  UNDEFINED entries, every IFD field (`--all-tags`, via `dng.py`), and every
+  marker segment's length.
 - `gate.py`: decode rate per variant kind; files that crash at the gate are
-  copied out as candidates.
+  copied out as candidates (`--crashes`), files that hang are counted and
+  copied apart (`--hangs`: liveness, never candidates). The harness gets a
+  15 s per-input deadline, so a hang costs 15 s, not 15 s × the batch.
 
 ## Framework coverage: Jackalope (two-stage)
 
