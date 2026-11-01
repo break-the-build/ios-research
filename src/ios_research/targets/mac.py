@@ -87,6 +87,12 @@ _DEFAULT_TIMEOUT_S = 10.0
 _HARNESS_ENV = "IOS_RESEARCH_MAC_HARNESS"
 _SANCOV_ENV = "IOS_RESEARCH_SANCOV_FILE"
 _CANARY_ENV = "IOSR_CANARY"
+# Per-input deadline in the standalone driver (harness_runtime.h): an input that
+# runs past IOSR_INPUT_TIMEOUT seconds ends the process with exit status 124
+# and an "IOSR-HANG input=<i>" line on stderr.
+_INPUT_TIMEOUT_ENV = "IOSR_INPUT_TIMEOUT"
+_EXIT_HANG = 124
+_HANG_MARK = "IOSR-HANG"
 
 
 def _decode_lines(stdout: str) -> list[tuple[str, str]]:
@@ -99,6 +105,14 @@ def _decode_lines(stdout: str) -> list[tuple[str, str]]:
     return out
 
 
+def _hang_line(returncode: int, report: str) -> str | None:
+    """The driver's ``IOSR-HANG`` line when it ended on its per-input deadline."""
+    if returncode != _EXIT_HANG:
+        return None
+    return next((ln.strip() for ln in report.splitlines()
+                 if ln.startswith(_HANG_MARK)), None)
+
+
 def _decode_statuses(stdout: str) -> list[str]:
     """Parse the standalone driver's ``DONE <i> <status>`` lines, in order."""
     return [status for status, _metric in _decode_lines(stdout)]
@@ -108,6 +122,16 @@ def _accepted_detail(metric: str) -> str:
     """The depth metric (pixels=/frames=) proves the deep stage ran."""
     base = "input decoded without a finding"
     return f"{base} ({metric})" if metric else base
+
+
+def _line_results(lines: list[tuple[str, str]], per_ms: int) -> list[ExecResult]:
+    """One ACCEPTED/REJECTED result per ``DONE`` line."""
+    return [ExecResult(outcome=Outcome.REJECTED,
+                       detail="entry point rejected the input", duration_ms=per_ms)
+            if status == "rejected" else
+            ExecResult(outcome=Outcome.ACCEPTED, detail=_accepted_detail(metric),
+                       duration_ms=per_ms)
+            for status, metric in lines]
 
 
 def _decode_status(stdout: str, index: int) -> str | None:
@@ -331,6 +355,11 @@ class MacFuzzTarget(Target):
                               detail=_accepted_detail(metric),
                               duration_ms=max(dur, 1))
 
+        hang = _hang_line(returncode, report)
+        if hang is not None:
+            return ExecResult(outcome=Outcome.TIMEOUT, detail=hang,
+                              duration_ms=max(dur, 1))
+
         if asan.is_crash_report(report):
             diag = asan.parse(report, module=self.framework)
             first = report.splitlines()[0].strip() if report else ""
@@ -411,6 +440,26 @@ class MacFuzzTarget(Target):
         return cmd
 
     def _run_batch(self, harness: Path, inputs: list[bytes]) -> list[ExecResult]:
+        """Run ``inputs`` in as few harness processes as possible.
+
+        A hung input no longer costs the whole batch: the driver's per-input
+        deadline ends the process on it, the inputs before it keep their batch
+        results, it becomes a TIMEOUT, and the rest run as a new batch. (Before,
+        one hang held a worker for timeout_s * len(inputs), then re-ran every
+        input on its own.)
+        """
+        results: list[ExecResult] = []
+        pending = list(inputs)
+        while len(pending) > 1:
+            done = self._run_batch_once(harness, pending)   # never empty
+            results.extend(done)
+            pending = pending[len(done):]
+        results.extend(self.execute(d) for d in pending)
+        return results
+
+    def _run_batch_once(self, harness: Path, inputs: list[bytes]) -> list[ExecResult]:
+        """Results for ``inputs``, or for the prefix up to and including a hang."""
+        import math
         import tempfile
         import time
 
@@ -428,6 +477,7 @@ class MacFuzzTarget(Target):
             env.setdefault("ASAN_OPTIONS",
                            "abort_on_error=0:exitcode=99:detect_leaks=0")
             env.setdefault("UBSAN_OPTIONS", "print_stacktrace=1:halt_on_error=1")
+            env.setdefault(_INPUT_TIMEOUT_ENV, str(max(1, math.ceil(self.timeout_s))))
             try:
                 proc = subprocess.run(
                     [str(harness), *paths], capture_output=True, env=env,
@@ -437,30 +487,26 @@ class MacFuzzTarget(Target):
 
             report = (proc.stderr or b"").decode("utf-8", "replace")
             stdout = (proc.stdout or b"").decode("utf-8", "replace")
+            lines = _decode_lines(stdout)
+            per_ms = max(int((time.monotonic() - start) * 1000)
+                         // max(len(lines), 1), 1)
 
-            # Any abnormal exit (sanitizer report, Guard Malloc fault, abort)
-            # ends the batch early; re-run individually so the crashing input
-            # (and any after it) get precise, attributable results.
+            hang = _hang_line(proc.returncode, report)
+            if hang is not None and f"input={len(lines)} " in f"{hang} ":
+                return _line_results(lines, per_ms) + [ExecResult(
+                    outcome=Outcome.TIMEOUT, detail=hang,
+                    duration_ms=int(self.timeout_s * 1000))]
+
+            # Any other abnormal exit (sanitizer report, Guard Malloc fault,
+            # abort) ends the batch early; re-run individually so the crashing
+            # input (and any after it) get precise, attributable results.
             if proc.returncode != 0:
                 return [self.execute(d) for d in inputs]
 
-            lines = _decode_lines(stdout)
             if len(lines) != len(inputs):
                 # No/partial per-input markers (e.g. libFuzzer build): be safe.
                 return [self.execute(d) for d in inputs]
-
-            per_ms = max(int((time.monotonic() - start) * 1000) // len(inputs), 1)
-            results: list[ExecResult] = []
-            for status, metric in lines:
-                if status == "rejected":
-                    results.append(ExecResult(outcome=Outcome.REJECTED,
-                                              detail="entry point rejected the input",
-                                              duration_ms=per_ms))
-                else:
-                    results.append(ExecResult(outcome=Outcome.ACCEPTED,
-                                              detail=_accepted_detail(metric),
-                                              duration_ms=per_ms))
-            return results
+            return _line_results(lines, per_ms)
         finally:
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)

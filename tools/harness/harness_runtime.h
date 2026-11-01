@@ -19,12 +19,16 @@
  *      IOSR-FRAME <n> 0x<pc> <module>+0x<offset> <symbol>
  *    ios_research.targets.sigcrash turns it into Diagnostics.
  *
+ * 3./4. Liveness: exit when the launcher dies, and an optional per-input
+ *    deadline (see "liveness" below).
+ *
  * Authorized / own-machine research only (SECURITY.md).
  */
 #ifndef IOSR_HARNESS_RUNTIME_H
 #define IOSR_HARNESS_RUNTIME_H
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <mach-o/dyld.h>
 #include <pthread.h>
 #include <signal.h>
@@ -32,6 +36,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/event.h>
 #include <sys/ucontext.h>
 #include <unistd.h>
 
@@ -199,6 +204,83 @@ static void iosr_install_crash_reporter(void) {
     const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGABRT, SIGFPE };
     for (size_t i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) sigaction(sigs[i], &sa, NULL);
 #endif
+}
+
+/* ---- liveness ------------------------------------------------------------ */
+
+/* 3. Orphan exit. A harness whose launcher dies (a killed campaign, a closed
+ *    shell) is re-parented to launchd and keeps running; stuck on a hanging
+ *    input, it and the framework XPC services serving it stay at 100% CPU
+ *    (measured: for days, unnoticed). A watcher thread exits the harness when
+ *    its parent exits. IOSR_ORPHAN_EXIT=0 turns it off.
+ *
+ * 4. Per-input deadline. With IOSR_INPUT_TIMEOUT=<seconds>, an input that runs
+ *    longer ends the process with "IOSR-HANG input=<i> seconds=<n>" on stderr
+ *    and exit status 124, so a batch runner can mark that one input a timeout
+ *    and resume after it instead of waiting out the whole batch's budget. */
+#define IOSR_EXIT_HANG 124
+#define IOSR_EXIT_ORPHANED 125
+#define IOSR_ORPHAN_EXIT_ENV "IOSR_ORPHAN_EXIT"
+#define IOSR_INPUT_TIMEOUT_ENV "IOSR_INPUT_TIMEOUT"
+
+static void *iosr_parent_watch(void *arg) {
+    pid_t parent = (pid_t)(intptr_t)arg;
+    int kq = kqueue();
+    if (kq >= 0) {
+        struct kevent change, event;
+        EV_SET(&change, (uintptr_t)parent, EVFILT_PROC, EV_ADD, NOTE_EXIT, 0, NULL);
+        int n = kevent(kq, &change, 1, &event, 1, NULL);
+        /* NOTE_EXIT fired, or the parent was already gone (ESRCH). */
+        if (n > 0 && (!(event.flags & EV_ERROR) || event.data == ESRCH))
+            _exit(IOSR_EXIT_ORPHANED);
+        close(kq);
+    }
+    while (getppid() == parent) sleep(1);    /* kqueue refused: poll instead */
+    _exit(IOSR_EXIT_ORPHANED);
+    return NULL;
+}
+
+static void iosr_watch_parent(void) {
+    const char *v = getenv(IOSR_ORPHAN_EXIT_ENV);
+    if (v && *v == '0') return;
+    pid_t parent = getppid();
+    if (parent <= 1) return;                 /* started by launchd: nothing to watch */
+    pthread_t t;
+    if (pthread_create(&t, NULL, iosr_parent_watch, (void *)(intptr_t)parent) == 0)
+        pthread_detach(t);
+}
+
+static volatile sig_atomic_t g_iosr_input_index = -1;
+static unsigned g_iosr_input_timeout = 0;
+
+static void iosr_hang_handler(int sig) {
+    (void)sig;
+    char line[96];
+    snprintf(line, sizeof(line), "IOSR-HANG input=%d seconds=%u\n",
+             (int)g_iosr_input_index, g_iosr_input_timeout);
+    iosr_emit(line);
+    _exit(IOSR_EXIT_HANG);
+}
+
+static void iosr_install_input_deadline(void) {
+    const char *v = getenv(IOSR_INPUT_TIMEOUT_ENV);
+    long secs = v ? strtol(v, NULL, 10) : 0;
+    if (secs <= 0) return;
+    g_iosr_input_timeout = (unsigned)secs;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = iosr_hang_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGALRM, &sa, NULL);
+}
+
+static void iosr_input_begin(int index) {
+    g_iosr_input_index = index;
+    if (g_iosr_input_timeout) alarm(g_iosr_input_timeout);
+}
+
+static void iosr_input_end(void) {
+    if (g_iosr_input_timeout) alarm(0);
 }
 
 #endif /* IOSR_HARNESS_RUNTIME_H */
