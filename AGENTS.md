@@ -99,6 +99,12 @@ because breaking it already cost hours: the strategy of record is
   held 9 of 24 cores for two days while two nights of reports blamed
   "contention" and said nothing was running. (Harnesses built since then exit
   with their parent.)
+- Budget CPU by cores, not by process count. The CoreText and CoreGraphics
+  harnesses use about two cores each. Keep the 1-minute load average
+  (`uptime`) at or below the core count (`sysctl -n hw.ncpu`), and start
+  nothing new while it is above. One night at a load of about 75 on 24 cores
+  produced roughly 8,000 hangs and 235 gate "crashes", none of them real: an
+  input that runs out of time on an overloaded machine looks like a finding.
 
 **Oracle**
 - Every campaign starts with the detection canary (`run.py` runs it; exit 4

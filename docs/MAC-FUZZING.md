@@ -384,10 +384,15 @@ python tools/gen/rawsweep.py raw/*.dng raw/*.nef --work w/ --crashes leads/ \
   CC0 iPhone 12 Pro ProRAW from raw.pixls.us loads RawCamera, and corrupting
   its raw tiles changes the decoded output.
 - `rawsweep.py`: the same variants, streamed: a few at a time are written,
-  run on several workers and deleted unless they crash or hang (variants of a
-  30 MB RAW would otherwise fill the disk). Measured on that ProRAW: 596
-  variants in 94 s and, with `--all-tags --makernote 40`, 1,246 in 184 s on
-  12 workers, about 95% decoded.
+  run on several workers and deleted unless they crash (variants of a 30 MB
+  RAW would otherwise fill the disk). Measured on that ProRAW: 596 variants
+  in 94 s and, with `--all-tags --makernote 40`, 1,246 in 184 s on 12
+  workers, about 95% decoded. Hangs are named in the report and copied only
+  up to `--keep-hangs N` (default 0). One night it copied about 5,900 hung
+  full-size RAW variants (79 GB) and filled the disk. The load average was
+  about 75 on 24 cores, a single real RAW took 3–5 s alone, and most of the
+  "hangs" were variants that ran past the 15 s limit. Run RAW sweeps on a
+  quiet machine, or raise `--timeout`.
 - `fonts.py --tables`: table variants only for the named tables, for aiming
   at one table family (bitmap strikes: `EBLC,EBDT,bloc,bdat,CBLC,CBDT`;
   carets: `GDEF,lcar`). Measured: 720 strike variants of six system fonts
@@ -410,7 +415,12 @@ python tools/gen/rawsweep.py raw/*.dng raw/*.nef --work w/ --crashes leads/ \
 - `gate.py`: decode rate per variant kind; files that crash at the gate are
   copied out as candidates (`--crashes`), files that hang are counted and
   copied apart (`--hangs`: liveness, never candidates). The harness gets a
-  15 s per-input deadline, so a hang costs 15 s, not 15 s × the batch.
+  per-input deadline (`--timeout`, 15 s by default). A hang ends its batch on
+  that input, and the batch resumes after it, without re-running the other
+  inputs one by one. An input whose harness outruns the wall-clock budget
+  (deadline plus 30 s for process start) is also a hang, not a crash. Before
+  this, a loaded machine produced 235 "crashes" at the gate in one night, and
+  none of them reproduced.
 
 ## Framework coverage: Jackalope (two-stage)
 

@@ -310,6 +310,61 @@ def test_gate_counts_hangs_apart_from_crashes(tmp_path, capsys):
     assert sorted(files[i].name for i in crashed) == ["b-crash.bin", "c-hang.bin"]
 
 
+def test_gate_resumes_after_a_hang_instead_of_rerunning_the_batch(tmp_path):
+    calls = tmp_path / "calls.txt"
+    stub = tmp_path / "harness.sh"
+    stub.write_text(f'#!/bin/sh\necho "$#" >> {calls}\ni=0\nfor f in "$@"; do\n'
+                    '  case "$(basename "$f")" in *hang*) '
+                    'echo "IOSR-HANG input=$i seconds=1" >&2; exit 124 ;; esac\n'
+                    '  echo "DONE $i decoded pixels=5"; i=$((i+1))\ndone\n')
+    stub.chmod(0o755)
+    files = []
+    for name in ("a", "b-hang", "c", "d"):
+        (tmp_path / f"{name}.bin").write_bytes(b"x")
+        files.append(tmp_path / f"{name}.bin")
+    hung: list[int] = []
+    decoded, crashed = gate.run(str(stub), files, hung)
+    assert hung == [1] and crashed == []
+    assert decoded == {0: True, 1: False, 2: True, 3: True}
+    assert calls.read_text().split() == ["4", "2"]        # no per-file re-runs
+
+
+def test_gate_counts_a_wall_clock_timeout_as_a_hang(tmp_path, monkeypatch):
+    # A harness that never reaches its own deadline (here: it ignores it) is
+    # killed by the wall-clock budget: that is a hang too, not a crash.
+    monkeypatch.setattr(gate, "STARTUP_GRACE_S", 0)
+    stub = tmp_path / "harness.sh"
+    stub.write_text("#!/bin/sh\nexec sleep 10\n")
+    stub.chmod(0o755)
+    slow = tmp_path / "slow.bin"
+    slow.write_bytes(b"x")
+    hung: list[int] = []
+    assert gate.run(str(stub), [slow], hung, timeout_s=1) == ({0: False}, [])
+    assert hung == [0]
+    assert gate.run(str(stub), [slow], timeout_s=1)[1] == [0]   # rawsweep's old call
+
+
+def test_rawsweep_counts_hangs_and_copies_only_keep_hangs(tmp_path):
+    import rawsweep
+
+    raw = tmp_path / "be.dng"
+    raw.write_bytes(_be_tiff())
+    stub = tmp_path / "harness.sh"
+    stub.write_text('#!/bin/sh\ni=0\nfor f in "$@"; do\n'
+                    '  case "$f" in *ImageWidth-0.dng) kill -SEGV $$ ;;\n'
+                    '    *ImageWidth-1.dng) echo "IOSR-HANG input=$i seconds=1" >&2; exit 124 ;;\n'
+                    '  esac\n'
+                    '  echo "DONE $i decoded pixels=5"; i=$((i+1))\ndone\n')
+    stub.chmod(0o755)
+    for keep, crashes in ((0, tmp_path / "c0"), (1, tmp_path / "c1")):
+        result = rawsweep.sweep(str(stub), [raw], tmp_path / f"w{keep}", crashes,
+                                workers=2, keep_hangs=keep)
+        assert result["leads"] == [{"file": "be-ifd0-ImageWidth-0.dng", "verdict": "crash"}]
+        assert result["hangs"] == ["be-ifd0-ImageWidth-1.dng"] and result["errors"] == []
+        assert (crashes / "crashed" / "be-ifd0-ImageWidth-0.dng").exists()
+        assert (crashes / "hung" / "be-ifd0-ImageWidth-1.dng").exists() == bool(keep)
+
+
 def test_gate_kind_groups_variant_names():
     assert gate.kind(Path("Arial-hint-glyph12-7.ttf")) == "hint-glyph"
     assert gate.kind(Path("Arial-tbl-OS_2-3.ttf")) == "tbl-OS_2"
