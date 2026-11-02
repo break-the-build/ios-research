@@ -8,7 +8,7 @@ new · kexts AFKHIDTBDevice / DeviceInterface-IOUSBHostFamily / security.Image4 
 
 ## Session record (2026-08-25)
 
-- [x] NVMe/Image4/gPTP/#2891/AFK static audits: **all hardened, no findings** (#280)
+- [x] NVMe/Image4/#2891/AFK static audits: **all hardened, no findings** (#280)
 - [x] Audio mock-target PoCs vs real frameworks: **negative** (harness divergence;
       never report externally) (#281)
 - [x] Tooling added: `tools/smb-rig` (#282/#283); Ghidra mac_arm_64 decompiler
@@ -25,10 +25,6 @@ new · kexts AFKHIDTBDevice / DeviceInterface-IOUSBHostFamily / security.Image4 
 - [ ] **Image4UserClient::evaluate**: still a stub? If it gained a real body →
       top-priority audit (parser reachable via IOConnect; table slot pre-wired).
       b7 ref: 16-byte `kIOReturnUnsupported` @0xfffffe000b4a8404
-- [ ] **IOgPTPPlugin guard constants** vs recorded values (TRIAGE A1.9):
-      entitlements `com.apple.private.timesync.direct-userclient` (Manager+NetworkPort
-      creation), `.reversesync` {sel41,42}, `.getsyncinfo` {52}, `.timeofdayptpinstance`
-      {sel6}; add/removeUnicast min structureInput sizes 1/5/7/17
 - [ ] **AFKSharedMemoryResource**: does its IOResources-personality start() now
       succeed? (ungated shared-memory UC becomes any-process-reachable if so —
       latent design risk, TRIAGE A1.12)
