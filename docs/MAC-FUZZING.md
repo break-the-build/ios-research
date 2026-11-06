@@ -324,6 +324,17 @@ result and property ID against the SDK in CI.
   codecs' subsampled decoders, and decodes formats `CreateImageAtIndex` won't:
   a PDF is rejected without it and rendered with it, which is how the ImageIO
   harness catches CVE-2026-86950 from the public trigger PDF.
+- **ImageIO decodes the end of long frame sequences.** It renders the first
+  `IOSR_IMGIO_MAX_FRAMES` frames (default 16, at most 4096) and, when the
+  source has more, its middle and last frames too. A HEIF image sequence
+  (brand `msf1`, `pict` track) codes each frame after the first as a P/B
+  picture predicted from earlier ones, so the last frame is the one that runs
+  the decoder over the whole reference chain. The old hard stop at 16 frames
+  never reached it, and the thumbnail pass only sees frame 0 (the poster
+  frame), so a sequence whose final frame differs from its first was only ever
+  decoded at the start. Measured on a 20-frame 64x64 sequence of 19 black
+  frames and one white one: `pixels=` counts the white frame now and didn't
+  before (`tests/test_mac_harness_reach.py`).
 - **CoreGraphics draws each PDF page twice,** at 1:1 and magnified 8 times
   (`IOSR_PDF_SCALE`; `1` or less turns it off) into the same 64 px canvas, for
   the same reason as the large CoreText pass. No measurable cost on 40 system
@@ -362,6 +373,8 @@ python tools/gen/pdf.py shading --out v/                                        
 python tools/gen/pdf.py random --out v/ --count 2000 --seed 7
 python tools/gen/exifthumb.py build main.jpg thumb.jpg --out seed.jpg              # lane 4
 python tools/gen/exifthumb.py variants seed.jpg --out v/ --all-tags
+python tools/gen/heics.py build --out seq/                                       # HEIF sequences
+python tools/gen/heics.py variants seq/*.heic --out v/
 python tools/gen/gate.py --target mac:coretext v/ --ok ok/ --crashes crashes/
 python tools/gen/rawsweep.py raw/*.dng raw/*.nef --work w/ --crashes leads/ \
     --workers 12 --all-tags --makernote 40                                     # lane 1, streaming
@@ -412,6 +425,29 @@ python tools/gen/rawsweep.py raw/*.dng raw/*.nef --work w/ --crashes leads/ \
   end, sums that wrap 32 bits), count and offset of out-of-line ASCII and
   UNDEFINED entries, every IFD field (`--all-tags`, via `dng.py`), and every
   marker segment's length.
+- `heics.py`: HEIF image sequences, the `msf1` path that still-image seeds
+  (iPhone photos: `meta`/`iloc`) never reach. `build` encodes small sequences
+  with ffmpeg and libheif's `heif-enc` (x265; `brew install ffmpeg libheif`),
+  one profile per coding configuration: I+P and B-frame GOPs, lossless
+  (`cu_transquant_bypass`), monochrome 4:0:0, 10-bit, several sync samples,
+  x265 tool knobs (transform skip, AMP, small CTUs, wide motion search), and
+  a sequence whose last frame differs from its poster frame (`profiles` lists
+  them). Inter-coded profiles run past the 16-frame leading budget, so their
+  last frame goes through the harness's last-frame path. `variants` edits one
+  field in place: the sync-sample, sample-size, sample-to-chunk, chunk-offset
+  and time-to-sample tables; the track handler and the `hvc1`/`hev1` sample
+  entry type; the `hvcC` NAL length size and array count; the track
+  dimensions; the major brand; and the first NAL length of the first, middle
+  and last samples. `heif-enc -V` (a `vide` track instead of `pict`) is not a
+  profile: ImageIO on macOS 27.2 types it `public.heics` and reports 0 frames.
+  Measured on macOS 27.2: eight profiles decode with every frame. The B-frame
+  profile (`bframes-rgb`) decodes in ffmpeg as 24 distinct frames, but ImageIO
+  returns every frame blank (`pixels=0`), so it and its variants count as not
+  decoded; it is kept as the only seed that reaches the reorder path. The 948
+  variants gate at 601 decoded (63%), no crash, no hang. An `hev1` sample entry
+  never decodes (0 of 9: ImageIO needs `hvc1`), nor does a 1-, 2- or 3-byte
+  NAL length size (0 of 27); chunk-offset and sample-description edits are
+  rejected too, while sync-sample, timing and most sample-size edits decode.
 - `gate.py`: decode rate per variant kind; files that crash at the gate are
   copied out as candidates (`--crashes`), files that hang are counted and
   copied apart (`--hangs`: liveness, never candidates). The harness gets a

@@ -469,15 +469,45 @@ static int render_image(CGImageRef img) {
     return drawn;
 }
 
+#define IOSR_IMGIO_MAX_FRAMES 16u      /* leading frames decoded per input */
+#define IOSR_IMGIO_MAX_FRAMES_CAP 4096u
+
+/* How many leading frames to decode: IOSR_IMGIO_MAX_FRAMES (1..4096), else 16. */
+static size_t leading_frame_budget(void) {
+    const char *opt = getenv("IOSR_IMGIO_MAX_FRAMES");
+    if (!opt || !*opt) return IOSR_IMGIO_MAX_FRAMES;
+    char *end = NULL;
+    unsigned long n = strtoul(opt, &end, 10);
+    if (*end || n == 0) return IOSR_IMGIO_MAX_FRAMES;
+    return n > IOSR_IMGIO_MAX_FRAMES_CAP ? IOSR_IMGIO_MAX_FRAMES_CAP : (size_t)n;
+}
+
+static int decode_frame(CGImageSourceRef src, size_t index) {
+    CGImageRef img = p_CGImageSourceCreateImageAtIndex(src, index, NULL);
+    return img && render_image(img);
+}
+
+/* Frames decoded: the leading budget, then -- when the source has more -- its
+ * middle and LAST frames. An HEIF image sequence (msf1) codes every frame after
+ * the first as a P/B picture predicted from earlier ones, so its last frame is
+ * the one that runs the decoder over the whole reference chain (inter
+ * prediction, motion compensation, the decoded-picture buffer). The old hard
+ * stop at 16 never reached it, and a sequence whose final frame differs from
+ * frame 0 -- the poster frame that the thumbnail pass and most previews use --
+ * was only ever seen through frame 0. Total work stays bounded: budget + 2. */
 static int decode_all_frames(CFDataRef input) {
     CGImageSourceRef src = p_CGImageSourceCreateWithData(input, NULL);
     if (!src) return 0;
     int decoded = 0;
     size_t frames = p_CGImageSourceGetCount(src);
-    if (frames > 16) frames = 16;   /* bound multi-frame work */
-    for (size_t i = 0; i < frames; i++) {
-        CGImageRef img = p_CGImageSourceCreateImageAtIndex(src, i, NULL);
-        if (img && render_image(img)) decoded = 1;
+    size_t budget = leading_frame_budget();
+    size_t leading = frames < budget ? frames : budget;
+    for (size_t i = 0; i < leading; i++)
+        if (decode_frame(src, i)) decoded = 1;
+    if (frames > budget) {
+        size_t middle = frames / 2, last = frames - 1;
+        if (middle >= budget && middle < last && decode_frame(src, middle)) decoded = 1;
+        if (decode_frame(src, last)) decoded = 1;
     }
     /* Thumbnail pass: the path previews take (Messages, Quick Look, Files). It
      * parses embedded thumbnails and runs the codecs' subsampled decoders, and
