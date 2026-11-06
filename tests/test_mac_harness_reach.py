@@ -4,6 +4,9 @@
   CRC, so blind mutation of PNG headers never got past the door.
 * CoreText rasterizes (glyph grid, a shaped line of the font's own characters,
   variation extremes) instead of stopping at outlines and layout.
+* ImageIO decodes the last frame of a long image sequence: a HEIF sequence
+  (msf1) predicts each picture from earlier ones, and the old hard stop at 16
+  frames never reached the end of the reference chain.
 * jackalope.sh stops only the targets Jackalope spawned, before they can run
   without it. Orphaned TinyInst targets died with SIGBUS at their own PC and
   wrote fake framework crash reports; the old `pkill -f <harness>` also killed
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import struct
 import subprocess
@@ -182,3 +186,39 @@ def test_native_jackalope_stops_only_its_own_targets(tmp_path):
     finally:
         bystander.send_signal(signal.SIGKILL)
         bystander.wait(timeout=10)
+
+
+def test_imageio_has_no_fixed_frame_stop():
+    """A hard `frames > 16` cap hid every frame after the 16th, including the
+    last frame of an image sequence (see the native test below)."""
+    src = (HARNESS_DIR / "mac_fuzz_harness.c").read_text()
+    assert "frames > 16" not in src
+    assert "IOSR_IMGIO_MAX_FRAMES" in src
+
+
+def _have_heif_tools() -> bool:
+    return bool(shutil.which("ffmpeg") and shutil.which("heif-enc"))
+
+
+@pytest.mark.native
+@pytest.mark.skipif(not (_can_build_native() and _have_heif_tools()),
+                    reason="requires macOS with libgmalloc, ffmpeg and heif-enc")
+def test_native_imageio_decodes_the_last_frame_of_an_image_sequence(tmp_path):
+    sys.path.insert(0, str(REPO / "tools" / "gen"))
+    import heics
+
+    # 19 black frames, then one white frame, lossless, I + P pictures.
+    seq = heics.encode("poster-differs-gray", heics.PROFILES["poster-differs-gray"], tmp_path)
+    harness = _build("imageio")
+
+    def pixels(**env: str) -> int:
+        line = _done(harness, seq, IOSR_IMGIO_THUMBNAIL="0", **env)
+        assert line.split()[2] == "decoded", line
+        return int(line.split("=")[1])
+
+    # RGBA bytes that are non-zero: a black frame has only its alpha, a white
+    # frame all four channels.
+    black, white = 64 * 64, 4 * 64 * 64
+    assert pixels() == 16 * black + white                   # frames 0..15, then the last
+    assert pixels(IOSR_IMGIO_MAX_FRAMES="20") == 19 * black + white
+    assert pixels(IOSR_IMGIO_MAX_FRAMES="1") == 2 * black + white   # first, middle, last

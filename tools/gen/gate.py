@@ -9,7 +9,8 @@ targets without one. Files that crash the harness are copied to
 run past ``--timeout`` seconds are hangs, counted and copied to ``--hangs``
 apart from crashes; on a loaded machine most are just slow. Kinds come from
 the generators' variant names (``Arial-hint-glyph12-7.ttf`` -> ``hint-glyph``,
-``x-ifd1-jpegNf-4.dng`` -> ``ifd1-jpegNf``), so a generator mode that rarely
+``x-ifd1-jpegNf-4.dng`` -> ``ifd1-jpegNf``, ``s-seq-stsz-last-2.heic`` ->
+``seq-stsz-last``), so a generator mode that rarely
 decodes stands out.
 
 Authorized / own-machine research only (SECURITY.md).
@@ -42,7 +43,8 @@ HANG_EXIT = 124                 # tools/harness/harness_runtime.h, per-input dea
 # Guard Malloc re-exec) can take seconds on a loaded machine, and before the
 # first input starts no per-input deadline is armed.
 STARTUP_GRACE_S = 30
-_KIND_RE = re.compile(r"(tbl-[A-Za-z0-9_]+|hint-[a-z]+|ifd\d+-(?:pair|[A-Za-z]+))")
+_KIND_RE = re.compile(r"(tbl-[A-Za-z0-9_]+|hint-[a-z]+|ifd\d+-(?:pair|[A-Za-z]+)"
+                      r"|seq-[a-z0-9]+-[a-z]+)")
 
 
 def kind(path: pathlib.Path) -> str:
